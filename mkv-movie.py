@@ -3,6 +3,9 @@ import subprocess
 import shutil
 import re
 from datetime import datetime
+import win32file
+import win32con
+import pywintypes
 
 # --- Configuration ---
 # Ensure these are in your System PATH

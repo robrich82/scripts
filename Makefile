@@ -1,7 +1,7 @@
 .PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow
 
 PYINSTALLER = pyinstaller
-PYINSTALLER_FLAGS = --onefile
+PYINSTALLER_FLAGS = --onefile --hidden-import="win32timezone"
 
 all: mkv-audit mkv-movie mkv-musicvideo mkv-tvshow
 
