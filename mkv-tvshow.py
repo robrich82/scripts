@@ -109,19 +109,24 @@ def get_show_id_interactively(show_folder):
     return "SKIP"
 
 def apply_mkv(file_path, metadata, date_str, poster_url):
+    # Ensure mkvpropedit is available
+    if not MKV_TOOL:
+        print("  [!] mkvpropedit not found in PATH")
+        return False
+
     # Base command for mkvpropedit
     cmd = [MKV_TOOL, file_path, '--edit', 'info', '--set', f"title={metadata.get('title', '')}"]
-    
+
     # 1. Update Internal MKV Header Date
     # mkvpropedit expects: YYYY-MM-DDTHH:MM:SSZ
     if date_str:
         cmd.extend(['--set', f'date={date_str}'])
-    
+
     tag_elements = []
     if date_str:
         tag_elements.append(f"<Simple><Name>DATE</Name><String>{date_str.split('T')[0]}</String></Simple>")
         tag_elements.append(f"<Simple><Name>YEAR</Name><String>{date_str.split('-')[0]}</String></Simple>")
-    
+
     if metadata.get('summary'):
         tag_elements.append(f"<Simple><Name>SUMMARY</Name><String>{metadata.get('summary', '')}</String></Simple>")
     if metadata.get('tmdb_id'):
@@ -133,50 +138,93 @@ def apply_mkv(file_path, metadata, date_str, poster_url):
         cmd.extend(['--tags', 'all:temp_tags.xml'])
 
     # Attachment handling (Posters)
-    cmd.extend(['--delete-attachment', 'mime-type:image/jpeg', '--delete-attachment', 'mime-type:image/png'])
     img_temp = "temp_poster.jpg"
+    # Probe existing attachments with mkvmerge to avoid "No attachment matched" warnings
+    mkvmerge = shutil.which("mkvmerge")
+    delete_args = []
+    if mkvmerge:
+        try:
+            probe = subprocess.run([mkvmerge, '-i', file_path], capture_output=True, text=True, encoding='utf-8')
+            probe_out = (probe.stdout or '') + '\n' + (probe.stderr or '')
+            if 'image/jpeg' in probe_out or "type 'image/jpeg'" in probe_out:
+                delete_args.extend(['--delete-attachment', 'mime-type:image/jpeg'])
+            if 'image/png' in probe_out or "type 'image/png'" in probe_out:
+                delete_args.extend(['--delete-attachment', 'mime-type:image/png'])
+        except Exception:
+            # If probing fails, fall back to the safer default of not issuing delete args
+            delete_args = []
+    else:
+        # If mkvmerge isn't available, avoid delete args to prevent warnings
+        delete_args = []
+
+    if delete_args:
+        cmd.extend(delete_args)
+
     if poster_url:
         try:
             r = requests.get(poster_url)
             if r.status_code == 200:
                 with open(img_temp, 'wb') as f: f.write(r.content)
                 cmd.extend(['--attachment-name', 'cover.jpg', '--attachment-mime-type', 'image/jpeg', '--add-attachment', img_temp])
-        except: pass
+        except Exception:
+            pass
 
     # Execute MKVPropEdit
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+    except Exception as e:
+        # Likely a problem invoking mkvpropedit
+        print(f"  [!] subprocess error: {e}")
+        if os.path.exists(img_temp): os.remove(img_temp)
+        if os.path.exists("temp_tags.xml"): os.remove("temp_tags.xml")
+        return False
+
+    # Clean up temp files
     if os.path.exists(img_temp): os.remove(img_temp)
     if os.path.exists("temp_tags.xml"): os.remove("temp_tags.xml")
-    
-    success = "The changes are written to the file. Done." in (result.stdout + result.stderr)
-    
+
+    # Consider the command successful if mkvpropedit exited with code 0
+    # or if its output explicitly states the changes were written.
+    combined = (result.stdout or "") + "\n" + (result.stderr or "")
+    success_msg = "The changes are written to the file. Done."
+    success = (result.returncode == 0) or (success_msg in combined)
+
+    if not success:
+        out = (result.stdout or "").strip()
+        err = (result.stderr or "").strip()
+        print(f"  [!] mkvpropedit failed (rc={result.returncode})\n{out}\n{err}")
+    else:
+        # If mkvpropedit printed success but returned non-zero, note it for debugging
+        if result.returncode != 0:
+            print(f"  [i] mkvpropedit returned rc={result.returncode} but reported success.\n{combined}")
+
     # 2. Update File System Timestamps (Modified & Created)
     if success and date_str:
         try:
             dt = datetime.strptime(date_str.split('T')[0], '%Y-%m-%d')
             ts = dt.timestamp()
             win_time = pywintypes.Time(dt)
-            
+
             # Set Modified and Accessed
             os.utime(file_path, (ts, ts))
-            
+
             # Set Created Date via pywin32
             handle = win32file.CreateFile(
-                file_path, 
-                win32con.GENERIC_WRITE, 
+                file_path,
+                win32con.GENERIC_WRITE,
                 win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE | win32con.FILE_SHARE_DELETE,
-                None, 
-                win32con.OPEN_EXISTING, 
-                win32con.FILE_ATTRIBUTE_NORMAL, 
+                None,
+                win32con.OPEN_EXISTING,
+                win32con.FILE_ATTRIBUTE_NORMAL,
                 None
             )
             # SetFileTime(handle, createTime, accessTime, writeTime)
             win32file.SetFileTime(handle, win_time, None, None)
             handle.close()
-            
+
         except Exception as e:
             print(f"  [!] Timestamp Error: {e}")
-            
+
     return success
 
 print(f"Scanning {MEDIA_DIR}...")
