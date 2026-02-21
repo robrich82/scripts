@@ -48,11 +48,7 @@ def get_metadata_via_mediainfo(file_path):
         # Priority: DATE tag > YEAR tag > Header
         best_date = tag_date or tag_year or header_date
         
-        print(f"\n[DEBUG] File: {os.path.basename(file_path)}")
-        print(f"  - MediaInfo DATE: {tag_date}")
-        print(f"  - MediaInfo YEAR: {tag_year}")
-        print(f"  - Encoded Date:   {header_date}")
-        print(f"  --> Selected:    {best_date}")
+        # Debug output removed - function returns chosen dates
 
         return best_date, header_date
     except Exception as e:
@@ -94,30 +90,49 @@ def main():
             file_path = os.path.join(root, file)
             
             best_date, header_date = get_metadata_via_mediainfo(file_path)
-            
-            if best_date:
-                try:
-                    # Parse into datetime object
-                    if len(best_date) == 4:
-                        dt = datetime(int(best_date), 1, 1)
-                    else:
-                        # Handles YYYY-MM-DD
-                        dt = datetime.strptime(best_date[:10], "%Y-%m-%d")
-                    
-                    ts = dt.timestamp()
-                    
-                    # 1. Update MKV Header if mismatched
-                    if best_date != header_date:
-                        print(f"  [!] Fixing internal header...")
-                        sync_mkv_header(file_path, best_date)
-                    
-                    # 2. Update Filesystem
+            basename = os.path.basename(file_path)
+
+            if not best_date:
+                print(f"[SKIP]   {basename} (no date found in metadata)")
+                continue
+
+            try:
+                # Parse into datetime object
+                if len(best_date) == 4:
+                    dt = datetime(int(best_date), 1, 1)
+                else:
+                    # Handles YYYY-MM-DD
+                    dt = datetime.strptime(best_date[:10], "%Y-%m-%d")
+
+                ts = dt.timestamp()
+
+                header_needs_update = (best_date != header_date)
+
+                # Check current filesystem times and only update if necessary
+                current_mtime = os.path.getmtime(file_path)
+                mtime_needs_update = abs(current_mtime - ts) > 1
+
+                ctime_needs_update = False
+                if HAS_WIN32:
+                    current_ctime = os.path.getctime(file_path)
+                    ctime_needs_update = abs(current_ctime - ts) > 1
+
+                if header_needs_update:
+                    sync_mkv_header(file_path, best_date)
+
+                if mtime_needs_update:
                     os.utime(file_path, (ts, ts))
+
+                if ctime_needs_update:
                     set_creation_time(file_path, ts)
-                    print(f"  [✓] Success: Dates synced to {best_date}")
-                    
-                except Exception as e:
-                    print(f"  [X] Date error: {e}")
+
+                if header_needs_update or mtime_needs_update or ctime_needs_update:
+                    print(f"[UPDATED] {basename} -> {best_date}")
+                else:
+                    print(f"[OK]      {basename} (no changes needed)")
+
+            except Exception as e:
+                print(f"[ERR]     {basename}: {e}")
 
 if __name__ == "__main__":
     main()
