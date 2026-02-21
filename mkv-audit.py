@@ -39,9 +39,11 @@ SUB_PRIORITY = {
     'S_TEXT/ASS': 10,        # Advanced Substation Alpha
     'S_TEXT/SSA': 10,        # Substation Alpha
     'S_HDMV/PGS': 8,         # Blu-ray quality images
+    'S_TEXT/WEBVTT': 6,      # Web Video Text Track (modern text format)
     'S_TEXT/UTF8': 5,        # Standard SRT (SubRip)
     'S_TEXT/ASCII': 5,       # Plain text
-    'S_VOBSUB': 3,           # DVD quality images
+    'S_DVBSUB': 3,           # DVB Subtitles (broadcast quality images)
+    'S_VOBSUB': 3,           # DVD Subtitles (image-based)
 }
 
 stats = {
@@ -61,10 +63,15 @@ def normalize_language(code):
     """Aggressively maps regional codes (en-US, ja_JP) to 3-letter ISO codes."""
     if not code: return 'und'
     c = code.lower().replace('_', '-')
-    if c.startswith('en'): return 'eng'
-    if c.startswith('ja') or c.startswith('jp'): return 'jpn'
-    if c.startswith('ko') or c.startswith('kr'): return 'kor'
+    if c.startswith('en') or c == 'eng': return 'eng'
+    if c.startswith('ja') or c.startswith('jp') or c in ['jap', 'japn']: return 'jpn'
+    if c.startswith('ko') or c.startswith('kr') or c == 'kor': return 'kor'
     return c
+
+def get_ietf_language(iso_code):
+    """Convert ISO 639-2 code to IETF/BCP-47 code."""
+    mapping = {'eng': 'en', 'jpn': 'ja', 'kor': 'ko', 'und': 'und'}
+    return mapping.get(iso_code, iso_code)
 
 def get_mkv_metadata(file_path):
     try:
@@ -93,15 +100,17 @@ def process_file(file_path):
         curr_lang = props.get('language', 'und').lower()
         norm = normalize_language(curr_lang)
         
-        # Check if the existing language OR the ietf language is incorrect
+        # Also check the IETF language code and normalize it
         curr_ietf = props.get('language_ietf', '').lower()
+        norm_ietf = normalize_language(curr_ietf) if curr_ietf else norm
         
-        if curr_lang != norm or curr_ietf != norm:
-            # Set both the legacy language and the modern IETF tag
+        # Set both to canonical values if either is incorrect
+        if curr_lang != norm or curr_ietf != get_ietf_language(norm):
+            # Set both the legacy language (ISO 639-2) and the modern IETF tag
             edits.extend([
                 '--edit', f"track:{t['id']+1}", 
                 '--set', f"language={norm}",
-                '--set', f"language-ietf={norm}"
+                '--set', f"language-ietf={get_ietf_language(norm)}"
             ])
             props['language'] = norm 
             local_fixes["lang"] += 1
@@ -120,7 +129,7 @@ def process_file(file_path):
     # --- 3. FLAG & NAMING LOGIC ---
     for lang in TARGET_LANGS:
         # Audio Tie-Breaker (Channels > Codec Quality)
-        lang_audios = [t for t in audio_tracks if t['properties'].get('language') == lang]
+        lang_audios = [t for t in audio_tracks if normalize_language(t['properties'].get('language', 'und')) == lang]
         if lang_audios:
             for t in lang_audios:
                 cid = t['properties'].get('codec_id', '')
@@ -141,7 +150,7 @@ def process_file(file_path):
                     local_fixes["flags"] += 1
 
         # Subtitle Logic (Main vs Forced + Format Quality)
-        sub_tracks = [t for t in all_tracks if t['type'] == 'subtitles' and t['properties'].get('language') == lang]
+        sub_tracks = [t for t in all_tracks if t['type'] == 'subtitles' and normalize_language(t['properties'].get('language', 'und')) == lang]
         if sub_tracks:
             for t in sub_tracks:
                 cid = t['properties'].get('codec_id', '')
@@ -175,9 +184,59 @@ def process_file(file_path):
                         if s['properties'].get('default_track'):
                             edits.extend(['--edit', f"track:{s['id']+1}", '--set', 'flag-default=0'])
                             local_fixes["flags"] += 1
+            elif forced_cands:
+                # No main candidates, but we have Signs/Songs tracks
+                # Use the default one as main, or the first one if none are marked default
+                default_in_forced = [t for t in forced_cands if t['properties'].get('default_track')]
+                if default_in_forced:
+                    winner_main = default_in_forced[0]
+                else:
+                    winner_main = forced_cands[0]
+                
+                # Set this one as default=1, forced=0 (it's the main track now)
+                current_default = winner_main['properties'].get('default_track', 0)
+                current_forced = winner_main['properties'].get('forced_track', 0)
+                
+                if current_default != 1 or current_forced != 0:
+                    edits.extend(['--edit', f"track:{winner_main['id']+1}", '--set', 'flag-default=1', '--set', 'flag-forced=0'])
+                    local_fixes["flags"] += 1
+                
+                # Other Signs/Songs should be default=0, forced=0
+                for s in forced_cands:
+                    if s['id'] != winner_main['id']:
+                        current_default = s['properties'].get('default_track', 0)
+                        current_forced = s['properties'].get('forced_track', 0)
+                        if current_default != 0 or current_forced != 0:
+                            edits.extend(['--edit', f"track:{s['id']+1}", '--set', 'flag-default=0', '--set', 'flag-forced=0'])
+                            local_fixes["flags"] += 1
             elif len(sub_tracks) > 1:
-                file_failed = True
-                fail_reasons.append(f"No clear {lang} main track")
+                # No explicit main or forced candidates — fall back to codec priority
+                # Prefer higher-quality subtitle formats (ASS/SSA over PGS/SRT)
+                winner_main = max(
+                    sub_tracks,
+                    key=lambda x: SUB_PRIORITY.get(x['properties'].get('codec_id', ''), 0)
+                )
+
+                highest_score = SUB_PRIORITY.get(winner_main['properties'].get('codec_id', ''), 0)
+                # If we cannot determine a winner by codec priority, mark as failed
+                if highest_score == 0:
+                    file_failed = True
+                    fail_reasons.append(f"No clear {lang} main track")
+                else:
+                    # Set winner as default main (default=1, forced=0)
+                    current_default = winner_main['properties'].get('default_track', 0)
+                    current_forced = winner_main['properties'].get('forced_track', 0)
+
+                    if current_default != 1 or current_forced != 0:
+                        edits.extend(['--edit', f"track:{winner_main['id']+1}", '--set', 'flag-default=1', '--set', 'flag-forced=0'])
+                        local_fixes["flags"] += 1
+
+                    # Clear default flag on all other subtitle tracks
+                    for s in sub_tracks:
+                        if s['id'] != winner_main['id']:
+                            if s['properties'].get('default_track'):
+                                edits.extend(['--edit', f"track:{s['id']+1}", '--set', 'flag-default=0'])
+                                local_fixes["flags"] += 1
 
             if len(forced_cands) == 1:
                 f_t = forced_cands[0]
@@ -192,6 +251,27 @@ def process_file(file_path):
                 if not f_t['properties'].get('track_name'):
                     edits.extend(['--edit', f"track:{f_t['id']+1}", '--set', 'name=Signs/Songs'])
                     local_fixes["names"] += 1
+            elif len(forced_cands) > 1 and main_cands:
+                # Multiple Signs/Songs tracks AND we have main tracks - make the default one the forced track, others get cleared
+                default_forced = [t for t in forced_cands if t['properties'].get('default_track')]
+                if default_forced:
+                    f_t = default_forced[0]
+                    # Keep this one as default=1, forced=1
+                    current_default = f_t['properties'].get('default_track', 0)
+                    current_forced = f_t['properties'].get('forced_track', 0)
+                    
+                    if current_default != 1 or current_forced != 1:
+                        edits.extend(['--edit', f"track:{f_t['id']+1}", '--set', 'flag-default=1', '--set', 'flag-forced=1'])
+                        local_fixes["flags"] += 1
+                    
+                    # Other Signs/Songs tracks should be default=0, forced=0
+                    for other in forced_cands:
+                        if other['id'] != f_t['id']:
+                            current_default = other['properties'].get('default_track', 0)
+                            current_forced = other['properties'].get('forced_track', 0)
+                            if current_default != 0 or current_forced != 0:
+                                edits.extend(['--edit', f"track:{other['id']+1}", '--set', 'flag-default=0', '--set', 'flag-forced=0'])
+                                local_fixes["flags"] += 1
 
     # --- 4. EXECUTION ---
     if file_failed:
