@@ -18,7 +18,7 @@ if not API_KEY:
 BASE_URL = 'https://api.themoviedb.org/3'
 MEDIA_DIR = os.getcwd()
 CACHE_FILE = 'show_cache.json'
-CUTOFF_DATE = datetime(1970, 1, 1, 0, 0, 0) 
+CUTOFF_DATE = datetime(2026, 2, 22, 0, 0, 0) 
 
 # Option to skip confirmation for cached shows
 PROCESS_ALL = input("Process all cached shows without prompting? [y/n]: ").strip().lower() == 'y'

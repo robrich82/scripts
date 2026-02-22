@@ -67,11 +67,12 @@ def normalize_language(code):
     if c.startswith('ja') or c.startswith('jp') or c in ['jap', 'japn']: return 'jpn'
     if c.startswith('ko') or c.startswith('kr') or c == 'kor': return 'kor'
     if c.startswith('fr') or c == 'fra': return 'fra'
+    if c.startswith('ru') or c == 'rus': return 'rus'
     return c
 
 def get_ietf_language(iso_code):
     """Convert ISO 639-2 code to IETF/BCP-47 code."""
-    mapping = {'eng': 'en', 'jpn': 'ja', 'kor': 'ko', 'fra': 'fr', 'und': 'und'}
+    mapping = {'eng': 'en', 'jpn': 'ja', 'kor': 'ko', 'fra': 'fr', 'rus': 'ru', 'und': 'und'}
     return mapping.get(iso_code, iso_code)
 
 def get_mkv_metadata(file_path):
