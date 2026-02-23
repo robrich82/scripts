@@ -2,6 +2,7 @@ import os
 import re
 import time
 import json
+import argparse
 import requests
 import subprocess
 import shutil
@@ -18,10 +19,20 @@ if not API_KEY:
 BASE_URL = 'https://api.themoviedb.org/3'
 MEDIA_DIR = os.getcwd()
 CACHE_FILE = 'show_cache.json'
-CUTOFF_DATE = datetime(2026, 2, 22, 0, 0, 0) 
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--cutoff-date', help='Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.')
+parser.add_argument('--all', dest='process_all', action='store_true', help='Process all cached shows without prompting.')
+args = parser.parse_args()
+
+if args.cutoff_date:
+    CUTOFF_DATE = datetime.strptime(args.cutoff_date, '%Y-%m-%d')
+else:
+    today = datetime.now()
+    CUTOFF_DATE = datetime(today.year, today.month, today.day)
 
 # Option to skip confirmation for cached shows
-PROCESS_ALL = input("Process all cached shows without prompting? [y/n]: ").strip().lower() == 'y'
+PROCESS_ALL = args.process_all or input("Process all cached shows without prompting? [y/n]: ").strip().lower() == 'y'
 
 # --- Advanced Manual Mapping ---
 MANUAL_DATA = {
