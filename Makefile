@@ -1,4 +1,4 @@
-.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow
+.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow test
 
 PYINSTALLER = pyinstaller
 PYINSTALLER_FLAGS = --onefile --hidden-import="win32timezone"
@@ -15,7 +15,10 @@ mkv-musicvideo:
 	$(PYINSTALLER) $(PYINSTALLER_FLAGS) mkv-musicvideo.py
 
 mkv-tvshow:
-	$(PYINSTALLER) $(PYINSTALLER_FLAGS) mkv-tvshow.py
+	cd mkv-tvshow && go build -o ../dist/mkv-tvshow.exe .
+
+test:
+	cd mkv-tvshow && go test ./...
 
 clean:
 	rmdir /s /q dist build 2>nul || true
