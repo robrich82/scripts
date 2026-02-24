@@ -6,18 +6,21 @@ PYINSTALLER_FLAGS = --onefile --hidden-import="win32timezone"
 all: mkv-audit mkv-movie mkv-musicvideo mkv-tvshow
 
 mkv-audit:
-	$(PYINSTALLER) $(PYINSTALLER_FLAGS) mkv-audit.py
+	cd mkv-audit && go build -o ../dist/mkv-audit.exe .
 
 mkv-movie:
-	$(PYINSTALLER) $(PYINSTALLER_FLAGS) mkv-movie.py
+	cd mkv-movie && go build -o ../dist/mkv-movie.exe .
 
 mkv-musicvideo:
-	$(PYINSTALLER) $(PYINSTALLER_FLAGS) mkv-musicvideo.py
+	cd mkv-musicvideo && go build -o ../dist/mkv-musicvideo.exe .
 
 mkv-tvshow:
 	cd mkv-tvshow && go build -o ../dist/mkv-tvshow.exe .
 
 test:
+	cd mkv-audit && go test ./...
+	cd mkv-movie && go test ./...
+	cd mkv-musicvideo && go test ./...
 	cd mkv-tvshow && go test ./...
 
 clean:
