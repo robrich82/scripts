@@ -41,8 +41,8 @@ func normalizeLanguage(code string) string {
 		return "jpn"
 	case strings.HasPrefix(c, "ko") || strings.HasPrefix(c, "kr") || c == "kor":
 		return "kor"
-	case strings.HasPrefix(c, "fr") || c == "fra":
-		return "fra"
+	case strings.HasPrefix(c, "fr"):
+		return "fre"
 	case strings.HasPrefix(c, "ru") || c == "rus":
 		return "rus"
 	default:
@@ -103,19 +103,26 @@ func AnalyzeFile(info MKVInfo) AnalysisResult {
 		norm := normalizeLanguage(props.Language)
 		normIETF := getIETFLanguage(norm)
 
+		_, hasIETFMapping := ietfMap[norm]
 		needsLang := props.Language != norm
-		needsIETF := props.LanguageIETF != normIETF
+		// Only update language-ietf for languages we have an explicit mapping
+		// for. Languages outside ietfMap (e.g. "ara", "ger", "chi") already
+		// carry a correct IETF tag set by the muxer; touching them with our
+		// ISO-639-2 fallback would write a wrong value and cause a loop.
+		needsIETF := hasIETFMapping && props.LanguageIETF != normIETF
 		if needsLang || needsIETF {
 			var pairs []string
 			if needsLang {
 				pairs = append(pairs, "language", norm)
 			}
-			if needsIETF {
+			if (needsLang && hasIETFMapping) || needsIETF {
 				pairs = append(pairs, "language-ietf", normIETF)
 			}
 			res.Edits = append(res.Edits, trackEdit(tracks[i].ID, pairs...)...)
 			props.Language = norm
-			props.LanguageIETF = normIETF
+			if hasIETFMapping {
+				props.LanguageIETF = normIETF
+			}
 			if needsLang {
 				res.LocalFixes.Lang++
 			}

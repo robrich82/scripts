@@ -45,7 +45,7 @@ var ietfMap = map[string]string{
 	"eng": "en",
 	"jpn": "ja",
 	"kor": "ko",
-	"fra": "fr",
+	"fre": "fr",
 	"rus": "ru",
 	"und": "und",
 }
