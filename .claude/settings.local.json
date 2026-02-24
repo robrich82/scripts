@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(ls:*)",
+      "Bash(go get:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(make:*)",
+      "Bash(git rm:*)",
+      "Bash(xargs:*)",
+      "Bash(python3 -c \":*)",
+      "Bash(git reset:*)",
+      "Bash(mkvmerge:*)",
+      "Bash(find:*)"
     ]
   }
 }
