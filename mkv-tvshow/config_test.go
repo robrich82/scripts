@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestCleanMetadataTitle_StripExtension(t *testing.T) {
 	got := cleanMetadataTitle("Show Name - S01E01.mkv")
@@ -71,33 +76,57 @@ func TestCleanSearchQuery_CombinedTransforms(t *testing.T) {
 	}
 }
 
-func TestManualData_PantyStocking_SeasonOverride(t *testing.T) {
-	entry, ok := manualData["Panty & Stocking with Garterbelt"]
-	if !ok {
-		t.Fatal("expected entry for Panty & Stocking")
+func TestLoadManualData_MissingFile_ReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	data, err := LoadManualData(filepath.Join(dir, "manual_data.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	ovr, ok := entry.Overrides["S02"]
-	if !ok {
-		t.Fatal("expected S02 override")
-	}
-	if ovr.ID != "246862" {
-		t.Errorf("got ID %q, want %q", ovr.ID, "246862")
-	}
-	if ovr.MapSeason != 1 {
-		t.Errorf("got MapSeason %d, want 1", ovr.MapSeason)
+	if len(data) != 0 {
+		t.Errorf("expected empty map, got %v", data)
 	}
 }
 
-func TestManualData_FullMetalPanic_EpisodeMapping(t *testing.T) {
-	entry, ok := manualData["Full Metal Panic!"]
-	if !ok {
-		t.Fatal("expected entry for Full Metal Panic!")
+func TestLoadManualData_ParsesOverridesAndMappings(t *testing.T) {
+	input := map[string]ManualEntry{
+		"Test Show": {
+			Overrides: map[string]SeasonOverride{
+				"S02": {ID: "999", MapSeason: 1},
+			},
+			Mapping: map[string]EpisodePair{
+				"S01E01": {1, 2},
+			},
+		},
 	}
-	pair, ok := entry.Mapping["S02E01"]
-	if !ok {
-		t.Fatal("expected mapping for S02E01")
+	raw, _ := json.Marshal(input)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manual_data.json")
+	os.WriteFile(path, raw, 0644)
+
+	data, err := LoadManualData(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if pair[0] != 0 || pair[1] != 1 {
-		t.Errorf("got %v, want [0 1]", pair)
+	entry, ok := data["Test Show"]
+	if !ok {
+		t.Fatal("expected entry for 'Test Show'")
+	}
+	ovr, ok := entry.Overrides["S02"]
+	if !ok || ovr.ID != "999" || ovr.MapSeason != 1 {
+		t.Errorf("bad override: %+v", ovr)
+	}
+	pair, ok := entry.Mapping["S01E01"]
+	if !ok || pair[0] != 1 || pair[1] != 2 {
+		t.Errorf("bad mapping: %v", pair)
+	}
+}
+
+func TestLoadManualData_InvalidJSON_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manual_data.json")
+	os.WriteFile(path, []byte("not json"), 0644)
+	_, err := LoadManualData(path)
+	if err == nil {
+		t.Error("expected error for invalid JSON")
 	}
 }

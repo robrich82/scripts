@@ -58,7 +58,7 @@ func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tm
 		cfg.MediaDir = dir
 	}
 	timer := &captureFileTimer{}
-	return NewProcessor(cfg, cache, tmdb, mkv, prompter, timer), timer
+	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer), timer
 }
 
 func emptyCache(t *testing.T) *ShowCache {
@@ -184,7 +184,11 @@ func TestResolveEpisode_NoManualData(t *testing.T) {
 }
 
 func TestResolveEpisode_FullMetalPanic_Mapping(t *testing.T) {
-	p := &Processor{}
+	p := &Processor{manualData: map[string]ManualEntry{
+		"Full Metal Panic!": {
+			Mapping: map[string]EpisodePair{"S02E01": {0, 1}},
+		},
+	}}
 	_, s, e := p.resolveEpisode("Full Metal Panic!", "originalID", 2, 1)
 	if s != 0 || e != 1 {
 		t.Errorf("S02E01 should map to (0,1), got (%d,%d)", s, e)
@@ -192,7 +196,13 @@ func TestResolveEpisode_FullMetalPanic_Mapping(t *testing.T) {
 }
 
 func TestResolveEpisode_PantyStocking_SeasonOverride(t *testing.T) {
-	p := &Processor{}
+	p := &Processor{manualData: map[string]ManualEntry{
+		"Panty & Stocking with Garterbelt": {
+			Overrides: map[string]SeasonOverride{
+				"S02": {ID: "246862", MapSeason: 1},
+			},
+		},
+	}}
 	id, s, _ := p.resolveEpisode("Panty & Stocking with Garterbelt", "original", 2, 1)
 	if id != "246862" {
 		t.Errorf("got id %q, want \"246862\"", id)

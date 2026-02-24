@@ -30,12 +30,13 @@ type Stats struct {
 
 // Processor orchestrates the scan loop, TMDB lookups, and MKV metadata updates.
 type Processor struct {
-	cfg      Config
-	cache    *ShowCache
-	tmdb     TMDBClient
-	mkv      MKVRunner
-	prompter Prompter
-	timer    FileTimer
+	cfg        Config
+	cache      *ShowCache
+	manualData map[string]ManualEntry
+	tmdb       TMDBClient
+	mkv        MKVRunner
+	prompter   Prompter
+	timer      FileTimer
 
 	sessionSkipped   map[string]bool
 	sessionConfirmed map[string]string
@@ -45,6 +46,7 @@ type Processor struct {
 func NewProcessor(
 	cfg Config,
 	cache *ShowCache,
+	manualData map[string]ManualEntry,
 	tmdb TMDBClient,
 	mkv MKVRunner,
 	prompter Prompter,
@@ -53,6 +55,7 @@ func NewProcessor(
 	return &Processor{
 		cfg:              cfg,
 		cache:            cache,
+		manualData:       manualData,
 		tmdb:             tmdb,
 		mkv:              mkv,
 		prompter:         prompter,
@@ -248,7 +251,7 @@ func (p *Processor) resolveShowID(showFolder string) string {
 func (p *Processor) resolveEpisode(showFolder, showID string, sNum, eNum int) (id string, tmdbSeason, tmdbEpisode int) {
 	id, tmdbSeason, tmdbEpisode = showID, sNum, eNum
 
-	entry, ok := manualData[showFolder]
+	entry, ok := p.manualData[showFolder]
 	if !ok {
 		return
 	}
