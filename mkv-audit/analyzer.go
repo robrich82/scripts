@@ -103,13 +103,22 @@ func AnalyzeFile(info MKVInfo) AnalysisResult {
 		norm := normalizeLanguage(props.Language)
 		normIETF := getIETFLanguage(norm)
 
-		if props.Language != norm {
-			res.Edits = append(res.Edits, trackEdit(tracks[i].ID,
-				"language", norm,
-				"language-ietf", normIETF,
-			)...)
+		needsLang := props.Language != norm
+		needsIETF := props.LanguageIETF != normIETF
+		if needsLang || needsIETF {
+			var pairs []string
+			if needsLang {
+				pairs = append(pairs, "language", norm)
+			}
+			if needsIETF {
+				pairs = append(pairs, "language-ietf", normIETF)
+			}
+			res.Edits = append(res.Edits, trackEdit(tracks[i].ID, pairs...)...)
 			props.Language = norm
-			res.LocalFixes.Lang++
+			props.LanguageIETF = normIETF
+			if needsLang {
+				res.LocalFixes.Lang++
+			}
 		}
 	}
 

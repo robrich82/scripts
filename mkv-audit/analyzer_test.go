@@ -72,10 +72,9 @@ func TestAnalyzeFile_AlreadyNormalised_NoLangFix(t *testing.T) {
 	}
 }
 
-func TestAnalyzeFile_NormalisedLang_MissingIETF_NoLangFix(t *testing.T) {
-	// Regression: if language is already normalised but language_ietf is empty
-	// (mkvmerge doesn't report it for older files), we must NOT generate a
-	// language edit — otherwise the tool loops forever re-fixing the same file.
+func TestAnalyzeFile_NormalisedLang_MissingIETF_SetsIETFOnly(t *testing.T) {
+	// When language is already normalised but language_ietf is missing, we
+	// should set language-ietf without counting it as a Lang fix.
 	info := MKVInfo{Tracks: []Track{
 		{ID: 0, Type: "audio", Properties: TrackProperties{
 			Language: "eng", LanguageIETF: "", DefaultTrack: true,
@@ -84,7 +83,10 @@ func TestAnalyzeFile_NormalisedLang_MissingIETF_NoLangFix(t *testing.T) {
 	}}
 	res := AnalyzeFile(info)
 	if res.LocalFixes.Lang != 0 {
-		t.Errorf("expected 0 lang fixes, got %d (IETF-only mismatch must not trigger re-fix)", res.LocalFixes.Lang)
+		t.Errorf("expected 0 lang fixes, got %d", res.LocalFixes.Lang)
+	}
+	if !hasEdit(res.Edits, "language-ietf=en") {
+		t.Errorf("expected a language-ietf edit, got %v", res.Edits)
 	}
 }
 
