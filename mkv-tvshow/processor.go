@@ -363,7 +363,7 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, posterUR
 	// Update filesystem timestamps to the episode air date.
 	if success && dateStr != "" {
 		datePart := strings.SplitN(dateStr, "T", 2)[0]
-		if dt, err := time.Parse("2006-01-02", datePart); err == nil {
+		if dt, err := time.ParseInLocation("2006-01-02", datePart, time.Local); err == nil {
 			if err := p.timer.SetTimes(filePath, dt); err != nil {
 				fmt.Printf("  [!] Timestamp error: %v\n", err)
 			}

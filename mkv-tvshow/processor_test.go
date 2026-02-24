@@ -334,7 +334,7 @@ func TestApplyMKV_Success_SetsTimestamps(t *testing.T) {
 	p := &Processor{mkv: runner, timer: timer}
 	p.applyMKV("show.mkv", "T", "", "", "2020-06-15T00:00:00Z", "")
 
-	want := time.Date(2020, 6, 15, 0, 0, 0, 0, time.UTC)
+	want := time.Date(2020, 6, 15, 0, 0, 0, 0, time.Local)
 	if len(timer.setTimesCalls) == 0 {
 		t.Fatal("expected SetTimes to be called")
 	}
