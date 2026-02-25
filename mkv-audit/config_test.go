@@ -32,11 +32,11 @@ func TestNormalizeLanguage(t *testing.T) {
 }
 
 func TestGetIETFLanguage(t *testing.T) {
-	if got := getIETFLanguage("eng"); got != "en" {
-		t.Errorf("got %q, want \"en\"", got)
+	if got := getIETFLanguage("eng"); got != "en-US" {
+		t.Errorf("got %q, want \"en-US\"", got)
 	}
-	if got := getIETFLanguage("jpn"); got != "ja" {
-		t.Errorf("got %q, want \"ja\"", got)
+	if got := getIETFLanguage("jpn"); got != "ja-JP" {
+		t.Errorf("got %q, want \"ja-JP\"", got)
 	}
 	if got := getIETFLanguage("zzz"); got != "zzz" {
 		t.Errorf("got %q, want passthrough \"zzz\"", got)

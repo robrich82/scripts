@@ -49,9 +49,9 @@ func TestRunAll_NoEditsNeeded_OK(t *testing.T) {
 	makeMKVFile(t, dir, "movie.mkv")
 
 	info := &MKVInfo{Tracks: []Track{
-		{ID: 0, Type: "video", Properties: TrackProperties{Language: "eng", LanguageIETF: "en"}},
+		{ID: 0, Type: "video", Properties: TrackProperties{Language: "eng", LanguageIETF: "en-US"}},
 		{ID: 1, Type: "audio", Properties: TrackProperties{
-			Language: "eng", LanguageIETF: "en",
+			Language: "eng", LanguageIETF: "en-US",
 			CodecID: "A_FLAC", AudioChannels: 6, DefaultTrack: true,
 		}},
 	}}
@@ -121,7 +121,7 @@ func TestRunAll_MKAIncluded(t *testing.T) {
 
 	info := &MKVInfo{Tracks: []Track{
 		{ID: 0, Type: "audio", Properties: TrackProperties{
-			Language: "eng", LanguageIETF: "en",
+			Language: "eng", LanguageIETF: "en-US",
 			CodecID: "A_FLAC", DefaultTrack: true,
 		}},
 	}}

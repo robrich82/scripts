@@ -81,6 +81,8 @@ func RunAll(root string, ident MKVIdentifier, editor MKVEditor, prompter Prompte
 	var stats Stats
 	unknownCodecs := map[string]bool{}
 
+	dirCfg := loadDirConfig(root)
+
 	// Check for a previous failure cache.
 	var filesToScan []string
 	oldFails := loadFailedCache()
@@ -116,7 +118,7 @@ func RunAll(root string, ident MKVIdentifier, editor MKVEditor, prompter Prompte
 			continue
 		}
 
-		res := AnalyzeFile(*info)
+		res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: resolveIETFMap(path, root, dirCfg)})
 
 		for _, c := range res.UnknownCodecs {
 			unknownCodecs[c] = true

@@ -50,13 +50,50 @@ func normalizeLanguage(code string) string {
 	}
 }
 
-// getIETFLanguage converts an ISO 639-2 code to its IETF/BCP-47 tag.
-// Unknown codes are passed through unchanged.
+// getIETFLanguage converts an ISO 639-2 code to its IETF/BCP-47 tag using
+// the global ietfMap. Unknown codes are passed through unchanged.
 func getIETFLanguage(iso string) string {
 	if tag, ok := ietfMap[iso]; ok {
 		return tag
 	}
 	return iso
+}
+
+// AnalyzeOptions carries per-file settings for AnalyzeFile.
+type AnalyzeOptions struct {
+	// IETFMap overrides the global ietfMap for this file. nil = use global.
+	IETFMap map[string]string
+}
+
+// effectiveIETFTag resolves the IETF tag for an ISO 639-2 code using either
+// opts.IETFMap (if set) or the global ietfMap.
+func effectiveIETFTag(norm string, opts AnalyzeOptions) string {
+	m := ietfMap
+	if opts.IETFMap != nil {
+		m = opts.IETFMap
+	}
+	if tag, ok := m[norm]; ok {
+		return tag
+	}
+	return norm
+}
+
+// applyRegionKeyword checks a track name for regional descriptors (e.g.
+// "British", "Australian") and returns a region-specific IETF override when
+// the keyword's language prefix matches the base tag's language prefix.
+// If no keyword matches, baseIETF is returned unchanged.
+func applyRegionKeyword(baseIETF, trackName string) string {
+	lower := strings.ToLower(trackName)
+	baseLang := strings.SplitN(baseIETF, "-", 2)[0]
+	for keyword, override := range trackRegionKeywords {
+		if strings.Contains(lower, keyword) {
+			overrideLang := strings.SplitN(override, "-", 2)[0]
+			if baseLang == overrideLang {
+				return override
+			}
+		}
+	}
+	return baseIETF
 }
 
 // containsAny returns true if name (lowercased) contains any of the keywords.
@@ -88,8 +125,9 @@ func trackEdit(id int, kvPairs ...string) []string {
 
 // AnalyzeFile inspects the track layout of an MKV file and returns the
 // mkvpropedit edits needed to normalise it. The function is pure (no I/O)
-// so it is fully unit-testable.
-func AnalyzeFile(info MKVInfo) AnalysisResult {
+// so it is fully unit-testable. opts.IETFMap overrides the global ietfMap
+// for per-directory region settings; pass AnalyzeOptions{} for defaults.
+func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 	var res AnalysisResult
 
 	allTracks := info.Tracks
@@ -101,9 +139,15 @@ func AnalyzeFile(info MKVInfo) AnalysisResult {
 	for i := range tracks {
 		props := &tracks[i].Properties
 		norm := normalizeLanguage(props.Language)
-		normIETF := getIETFLanguage(norm)
+		normIETF := effectiveIETFTag(norm, opts)
+		// Apply per-track region detection from the track name (e.g. "British" → en-GB).
+		normIETF = applyRegionKeyword(normIETF, props.TrackName)
 
-		_, hasIETFMapping := ietfMap[norm]
+		effMap := ietfMap
+		if opts.IETFMap != nil {
+			effMap = opts.IETFMap
+		}
+		_, hasIETFMapping := effMap[norm]
 		needsLang := props.Language != norm
 		// Only update language-ietf for languages we have an explicit mapping
 		// for. Languages outside ietfMap (e.g. "ara", "ger", "chi") already

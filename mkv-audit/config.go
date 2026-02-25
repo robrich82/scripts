@@ -40,12 +40,24 @@ var subPriority = map[string]int{
 	"S_VOBSUB":     3,
 }
 
-// ietfMap converts ISO 639-2 codes to IETF/BCP-47 tags.
+// ietfMap converts ISO 639-2 codes to IETF/BCP-47 tags including region.
 var ietfMap = map[string]string{
-	"eng": "en",
-	"jpn": "ja",
-	"kor": "ko",
-	"fre": "fr",
-	"rus": "ru",
+	"eng": "en-US",
+	"jpn": "ja-JP",
+	"kor": "ko-KR",
+	"fre": "fr-FR",
+	"rus": "ru-RU",
 	"und": "und",
+}
+
+// trackRegionKeywords maps track-name keywords to IETF region overrides.
+// When a track's name contains one of these words and the language prefix
+// matches, the IETF tag is overridden to the region-specific value.
+var trackRegionKeywords = map[string]string{
+	"british":    "en-GB",
+	"american":   "en-US",
+	"australian": "en-AU",
+	"canadian":   "en-CA",
+	"irish":      "en-IE",
+	"scottish":   "en-GB",
 }
