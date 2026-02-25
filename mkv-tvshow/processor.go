@@ -142,7 +142,7 @@ func (p *Processor) Run() Stats {
 			currID, tmdbSeason, tmdbEpisode := p.resolveEpisode(showFolder, showID, sNum, eNum)
 
 			// Fetch season data (cached per directory run).
-			var relDate, posterURL, summary string
+			var relDate, stampDate, posterURL, summary string
 			posterURL = mainPoster
 			cKey := fmt.Sprintf("%s_S%d", currID, tmdbSeason)
 			if _, ok := seasonCache[cKey]; !ok {
@@ -160,6 +160,7 @@ func (p *Processor) Run() Stats {
 						summary = ep.Overview
 						if ep.AirDate != "" {
 							relDate = ep.AirDate + "T00:00:00Z"
+							stampDate = relDate // real date: safe to stamp filesystem
 						}
 						break
 					}
@@ -183,7 +184,7 @@ func (p *Processor) Run() Stats {
 			}
 
 			title := cleanMetadataTitle(file)
-			if p.applyMKV(filePath, title, summary, currID, relDate, posterURL) {
+			if p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL) {
 				fmt.Printf("[✓] Processed: %s\n", file)
 				stats.Success++
 			} else {
@@ -322,8 +323,9 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 
 // applyMKV writes TMDB metadata into an MKV file using mkvpropedit, downloads
 // the poster as a cover attachment, and sets filesystem timestamps to the
-// episode air date.
-func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, posterURL string) bool {
+// episode air date. dateStr is written to MKV metadata; stampDate (which may
+// differ or be empty) is used for filesystem timestamps.
+func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDate, posterURL string) bool {
 	if !p.mkv.Available() {
 		fmt.Println("  [!] mkvpropedit not found in PATH")
 		return false
@@ -382,8 +384,8 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, posterUR
 	}
 
 	// Update filesystem timestamps to the episode air date.
-	if success && dateStr != "" {
-		datePart := strings.SplitN(dateStr, "T", 2)[0]
+	if success && stampDate != "" {
+		datePart := strings.SplitN(stampDate, "T", 2)[0]
 		if dt, err := time.ParseInLocation("2006-01-02", datePart, time.Local); err == nil {
 			if err := p.timer.SetTimes(filePath, dt); err != nil {
 				fmt.Printf("  [!] Timestamp error: %v\n", err)
