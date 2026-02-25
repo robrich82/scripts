@@ -216,26 +216,30 @@ func TestAnalyzeFile_UnknownCodecRecorded(t *testing.T) {
 	}
 }
 
-func TestAnalyzeFile_FailedWhenNoSubPriority(t *testing.T) {
-	// "Commentary" names exclude both tracks from mainCands (forbidden keyword)
-	// and forcedCands (no forced keyword), so we fall into codec-priority fallback.
-	// Both have unknown codecs (priority 0), which triggers a failure.
+func TestAnalyzeFile_AllForbiddenSubs_FallsBackToAlreadyDefault(t *testing.T) {
+	// When every non-forced subtitle matches a forbidden keyword (e.g. "commentary"),
+	// the fallback treats them as ordinary candidates. The one already marked
+	// default stays default — no edits and no failure.
 	info := MKVInfo{Tracks: []Track{
 		audioTrack(0, "eng", "A_AC3", 2, true),
 		subTrack(1, "eng", "S_UNKNOWN_A", "Commentary A", true, false),
 		subTrack(2, "eng", "S_UNKNOWN_B", "Commentary B", false, false),
 	}}
 	res := AnalyzeFile(info, AnalyzeOptions{})
-	if !res.Failed {
-		t.Error("expected failure for ambiguous sub tracks with no known codec")
+	if res.Failed {
+		t.Errorf("unexpected failure: %v", res.FailReasons)
+	}
+	if res.LocalFixes.Flags != 0 {
+		t.Errorf("expected no flag edits (already correct); edits: %v", res.Edits)
 	}
 }
 
 // --- Region keyword detection ---
 
 func TestAnalyzeFile_RegionKeyword_British_SetsEnGB(t *testing.T) {
-	// A subtitle track named "British" (already a forbidden keyword so won't be
-	// set as default) should still get language-ietf=en-GB.
+	// A subtitle track named "British" has a forbidden keyword, but because it
+	// is the only English subtitle the fallback makes it the default. It must
+	// also receive language-ietf=en-GB.
 	info := MKVInfo{Tracks: []Track{
 		audioTrack(0, "eng", "A_AC3", 2, true),
 		subTrack(1, "eng", "S_TEXT/ASS", "British", false, false),
@@ -243,6 +247,40 @@ func TestAnalyzeFile_RegionKeyword_British_SetsEnGB(t *testing.T) {
 	res := AnalyzeFile(info, AnalyzeOptions{})
 	if !hasEdit(res.Edits, "language-ietf=en-GB") {
 		t.Errorf("expected language-ietf=en-GB for British subtitle; edits: %v", res.Edits)
+	}
+	if !hasEdit(res.Edits, "flag-default=1") {
+		t.Errorf("British track should become default when it is the only subtitle; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_ForbiddenOnlySub_BecomesDefault(t *testing.T) {
+	// When the only subtitle for a language carries a forbidden keyword, the
+	// fallback should make it the default rather than leaving flags unchanged.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 2, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "Australian English", false, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if !hasEdit(res.Edits, "flag-default=1") {
+		t.Errorf("sole forbidden-keyword subtitle should become default; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_EnUS_BeatsEnGB_Subtitle(t *testing.T) {
+	// When an en-GB subtitle (forbidden keyword "british") is the current
+	// default but a clean en-US subtitle also exists, the en-US track should
+	// win and the en-GB track should lose its default flag.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 2, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "English", false, false),        // en-US, not default
+		subTrack(2, "eng", "S_TEXT/ASS", "British English", true, false), // en-GB, currently default
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if !hasEdit(res.Edits, "flag-default=1") {
+		t.Errorf("en-US track should become default; edits: %v", res.Edits)
+	}
+	if !hasEdit(res.Edits, "flag-default=0") {
+		t.Errorf("en-GB track should lose its default flag; edits: %v", res.Edits)
 	}
 }
 

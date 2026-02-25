@@ -273,6 +273,16 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 				mainCands = append(mainCands, i)
 			}
 		}
+		// Fallback: if every non-forced subtitle matched a forbidden keyword
+		// (e.g. the only English sub is labelled "British"), treat all
+		// non-forced tracks as candidates — same as the audio fallback above.
+		if len(mainCands) == 0 {
+			for _, i := range subTracks {
+				if !containsAny(tracks[i].Properties.TrackName, forcedKeywords) {
+					mainCands = append(mainCands, i)
+				}
+			}
+		}
 
 		if len(mainCands) > 0 {
 			// Select best main subtitle by codec priority.
