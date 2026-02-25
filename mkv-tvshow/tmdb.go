@@ -24,12 +24,14 @@ type Episode struct {
 // SeasonResult holds poster and episode list for a TMDB season.
 type SeasonResult struct {
 	PosterPath string    `json:"poster_path"`
+	AirDate    string    `json:"air_date"`
 	Episodes   []Episode `json:"episodes"`
 }
 
 // ShowDetails holds top-level show metadata from TMDB.
 type ShowDetails struct {
-	PosterPath string `json:"poster_path"`
+	PosterPath   string `json:"poster_path"`
+	FirstAirDate string `json:"first_air_date"`
 }
 
 // TMDBClient is the interface for all TMDB API calls made by this tool.

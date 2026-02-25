@@ -93,10 +93,14 @@ func (p *Processor) Run() Stats {
 			continue
 		}
 
-		// Fetch the show's main poster path as fallback for seasons without one.
+		// Fetch the show's main poster path and first air date as fallbacks.
 		mainPoster := ""
-		if details, err := p.tmdb.GetShow(showID); err == nil && details.PosterPath != "" {
-			mainPoster = tmdbImageBase + details.PosterPath
+		showFirstAirDate := ""
+		if details, err := p.tmdb.GetShow(showID); err == nil {
+			if details.PosterPath != "" {
+				mainPoster = tmdbImageBase + details.PosterPath
+			}
+			showFirstAirDate = details.FirstAirDate
 		}
 
 		// seasonCache is reset for each directory in the walk (matching Python behaviour).
@@ -150,6 +154,7 @@ func (p *Processor) Run() Stats {
 				if sr.PosterPath != "" {
 					posterURL = tmdbImageBase + sr.PosterPath
 				}
+				var prevDate string
 				for _, ep := range sr.Episodes {
 					if ep.EpisodeNumber == tmdbEpisode {
 						summary = ep.Overview
@@ -158,7 +163,23 @@ func (p *Processor) Run() Stats {
 						}
 						break
 					}
+					if ep.AirDate != "" {
+						prevDate = ep.AirDate
+					}
 				}
+				if relDate == "" {
+					if prevDate != "" {
+						relDate = prevDate + "T00:00:00Z"
+						fmt.Printf("  [i] No air date for episode; using previous episode date as placeholder: %s\n", prevDate)
+					} else if sr.AirDate != "" {
+						relDate = sr.AirDate + "T00:00:00Z"
+						fmt.Printf("  [i] No air date for episode; using season air date as placeholder: %s\n", sr.AirDate)
+					}
+				}
+			}
+			if relDate == "" && showFirstAirDate != "" {
+				relDate = showFirstAirDate + "T00:00:00Z"
+				fmt.Printf("  [i] No air date for episode; using show first air date as placeholder: %s\n", showFirstAirDate)
 			}
 
 			title := cleanMetadataTitle(file)

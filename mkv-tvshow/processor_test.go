@@ -482,6 +482,106 @@ func TestProcessorRun_SuccessPath(t *testing.T) {
 	}
 }
 
+func TestProcessorRun_NoEpisodeDate_FallsBackToPreviousEpisode(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "Fallback Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "Fallback Show - S01E02.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"Fallback Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails: ShowDetails{FirstAirDate: "2022-01-01"},
+		seasonResult: SeasonResult{
+			AirDate: "2022-02-01",
+			Episodes: []Episode{
+				{EpisodeNumber: 1, AirDate: "2022-03-01"},
+				{EpisodeNumber: 2, AirDate: ""},
+			},
+		},
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer)
+
+	stats := p.Run()
+	if stats.Success != 1 {
+		t.Fatalf("expected success, got %+v", stats)
+	}
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected timestamp to be set")
+	}
+	want := time.Date(2022, 3, 1, 0, 0, 0, 0, time.Local)
+	if !timer.setTimesCalls[0].t.Equal(want) {
+		t.Errorf("got %v, want %v (previous episode date)", timer.setTimesCalls[0].t, want)
+	}
+}
+
+func TestProcessorRun_NoEpisodeDate_NoPrevious_FallsBackToSeasonDate(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "Season Date Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "Season Date Show - S01E01.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"Season Date Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails: ShowDetails{FirstAirDate: "2022-01-01"},
+		seasonResult: SeasonResult{
+			AirDate: "2022-02-15",
+			Episodes: []Episode{
+				{EpisodeNumber: 1, AirDate: ""},
+			},
+		},
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer)
+
+	stats := p.Run()
+	if stats.Success != 1 {
+		t.Fatalf("expected success, got %+v", stats)
+	}
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected timestamp to be set")
+	}
+	want := time.Date(2022, 2, 15, 0, 0, 0, 0, time.Local)
+	if !timer.setTimesCalls[0].t.Equal(want) {
+		t.Errorf("got %v, want %v (season air date)", timer.setTimesCalls[0].t, want)
+	}
+}
+
+func TestProcessorRun_NoEpisodeDate_NoSeasonDate_FallsBackToShowDate(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "Show Date Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "Show Date Show - S01E01.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"Show Date Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails: ShowDetails{FirstAirDate: "2021-06-10"},
+		seasonResult: SeasonResult{
+			AirDate: "",
+			Episodes: []Episode{
+				{EpisodeNumber: 1, AirDate: ""},
+			},
+		},
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer)
+
+	stats := p.Run()
+	if stats.Success != 1 {
+		t.Fatalf("expected success, got %+v", stats)
+	}
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected timestamp to be set")
+	}
+	want := time.Date(2021, 6, 10, 0, 0, 0, 0, time.Local)
+	if !timer.setTimesCalls[0].t.Equal(want) {
+		t.Errorf("got %v, want %v (show first air date)", timer.setTimesCalls[0].t, want)
+	}
+}
+
 // containsAll returns true if all of the given values appear in haystack
 // (as individual elements, in any order).
 func containsAll(haystack []string, needles ...string) bool {
