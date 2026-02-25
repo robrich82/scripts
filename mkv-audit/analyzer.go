@@ -107,6 +107,18 @@ func containsAny(name string, keywords []string) bool {
 	return false
 }
 
+// engSubtitleRegionScore returns a preference score for English subtitle
+// track selection when multiple regional variants are available. It detects
+// the effective IETF region via trackRegionKeywords and looks up the score in
+// engSubRegionPriority. Unmapped regions (en-US, en-CA, untagged) return 1.
+func engSubtitleRegionScore(trackName string) int {
+	ietf := applyRegionKeyword("en", trackName)
+	if score, ok := engSubRegionPriority[ietf]; ok {
+		return score
+	}
+	return 1
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -285,10 +297,19 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 
 		if len(mainCands) > 0 {
-			// Select best main subtitle by codec priority.
+			// Select best main subtitle. For English, prefer by regional
+			// score first (NZ > GB > AU > US/generic), then codec priority.
 			winnerIdx := mainCands[0]
 			for _, i := range mainCands[1:] {
-				if subPriority[tracks[i].Properties.CodecID] > subPriority[tracks[winnerIdx].Properties.CodecID] {
+				wp := tracks[winnerIdx].Properties
+				ip := tracks[i].Properties
+				wScore, iScore := 1, 1
+				if lang == "eng" {
+					wScore = engSubtitleRegionScore(wp.TrackName)
+					iScore = engSubtitleRegionScore(ip.TrackName)
+				}
+				if iScore > wScore ||
+					(iScore == wScore && subPriority[ip.CodecID] > subPriority[wp.CodecID]) {
 					winnerIdx = i
 				}
 			}

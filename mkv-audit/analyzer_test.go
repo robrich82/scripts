@@ -237,9 +237,8 @@ func TestAnalyzeFile_AllForbiddenSubs_FallsBackToAlreadyDefault(t *testing.T) {
 // --- Region keyword detection ---
 
 func TestAnalyzeFile_RegionKeyword_British_SetsEnGB(t *testing.T) {
-	// A subtitle track named "British" has a forbidden keyword, but because it
-	// is the only English subtitle the fallback makes it the default. It must
-	// also receive language-ietf=en-GB.
+	// "British" is a regional variant, not a forbidden keyword. As the only
+	// English subtitle it wins and also receives language-ietf=en-GB.
 	info := MKVInfo{Tracks: []Track{
 		audioTrack(0, "eng", "A_AC3", 2, true),
 		subTrack(1, "eng", "S_TEXT/ASS", "British", false, false),
@@ -253,34 +252,62 @@ func TestAnalyzeFile_RegionKeyword_British_SetsEnGB(t *testing.T) {
 	}
 }
 
-func TestAnalyzeFile_ForbiddenOnlySub_BecomesDefault(t *testing.T) {
-	// When the only subtitle for a language carries a forbidden keyword, the
-	// fallback should make it the default rather than leaving flags unchanged.
+func TestAnalyzeFile_RegionalOnlySub_BecomesDefault(t *testing.T) {
+	// A regional subtitle (e.g. "Australian English") is a valid main track
+	// and should be set as default when it is the only option.
 	info := MKVInfo{Tracks: []Track{
 		audioTrack(0, "eng", "A_AC3", 2, true),
 		subTrack(1, "eng", "S_TEXT/ASS", "Australian English", false, false),
 	}}
 	res := AnalyzeFile(info, AnalyzeOptions{})
 	if !hasEdit(res.Edits, "flag-default=1") {
-		t.Errorf("sole forbidden-keyword subtitle should become default; edits: %v", res.Edits)
+		t.Errorf("sole regional subtitle should become default; edits: %v", res.Edits)
 	}
 }
 
-func TestAnalyzeFile_EnUS_BeatsEnGB_Subtitle(t *testing.T) {
-	// When an en-GB subtitle (forbidden keyword "british") is the current
-	// default but a clean en-US subtitle also exists, the en-US track should
-	// win and the en-GB track should lose its default flag.
+func TestAnalyzeFile_EnGB_BeatsEnUS_Subtitle(t *testing.T) {
+	// en-GB (score 3) is preferred over generic English (score 1).
+	// The "British English" track should displace the currently-default
+	// plain "English" track.
 	info := MKVInfo{Tracks: []Track{
 		audioTrack(0, "eng", "A_AC3", 2, true),
-		subTrack(1, "eng", "S_TEXT/ASS", "English", false, false),        // en-US, not default
-		subTrack(2, "eng", "S_TEXT/ASS", "British English", true, false), // en-GB, currently default
+		subTrack(1, "eng", "S_TEXT/ASS", "English", true, false),          // generic, currently default
+		subTrack(2, "eng", "S_TEXT/ASS", "British English", false, false), // en-GB
 	}}
 	res := AnalyzeFile(info, AnalyzeOptions{})
 	if !hasEdit(res.Edits, "flag-default=1") {
-		t.Errorf("en-US track should become default; edits: %v", res.Edits)
+		t.Errorf("en-GB track should become default; edits: %v", res.Edits)
 	}
 	if !hasEdit(res.Edits, "flag-default=0") {
-		t.Errorf("en-GB track should lose its default flag; edits: %v", res.Edits)
+		t.Errorf("generic English track should lose its default flag; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_EnSubRegionPriority(t *testing.T) {
+	// Preference order: NZ (score 4) > GB (score 3) > AU (score 2) > generic (score 1).
+	// Track 4 is en-NZ and should win. All tracks have identical codecs.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 2, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "English", false, false),            // generic, score 1
+		subTrack(2, "eng", "S_TEXT/ASS", "British English", false, false),    // en-GB, score 3
+		subTrack(3, "eng", "S_TEXT/ASS", "Australian English", false, false), // en-AU, score 2
+		subTrack(4, "eng", "S_TEXT/ASS", "New Zealand English", false, false), // en-NZ, score 4
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	// Track 4 has mkvpropedit arg "track:5" (1-based). Verify it gets flag-default=1.
+	found := false
+	for i, e := range res.Edits {
+		if e == "track:5" {
+			for _, f := range res.Edits[i:] {
+				if f == "flag-default=1" {
+					found = true
+					break
+				}
+			}
+		}
+	}
+	if !found {
+		t.Errorf("en-NZ track (track:5) should win with flag-default=1; edits: %v", res.Edits)
 	}
 }
 
