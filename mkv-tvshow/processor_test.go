@@ -58,7 +58,12 @@ func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tm
 		cfg.MediaDir = dir
 	}
 	timer := &captureFileTimer{}
-	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer), timer
+	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t)), timer
+}
+
+func emptyRetryList(t *testing.T) *RetryList {
+	t.Helper()
+	return &RetryList{path: filepath.Join(t.TempDir(), "pending_dates.json"), data: make(map[string]bool)}
 }
 
 func emptyCache(t *testing.T) *ShowCache {
@@ -501,7 +506,7 @@ func TestProcessorRun_NoEpisodeDate_FallsBackToPreviousEpisode(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t))
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -530,7 +535,7 @@ func TestProcessorRun_NoEpisodeDate_NoPrevious_FallsBackToSeasonDate(t *testing.
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t))
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -559,7 +564,7 @@ func TestProcessorRun_NoEpisodeDate_NoSeasonDate_FallsBackToShowDate(t *testing.
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t))
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -567,6 +572,85 @@ func TestProcessorRun_NoEpisodeDate_NoSeasonDate_FallsBackToShowDate(t *testing.
 	}
 	if len(timer.setTimesCalls) != 0 {
 		t.Errorf("expected no filesystem timestamp for fallback date, got %d call(s)", len(timer.setTimesCalls))
+	}
+}
+
+// --- RetryList integration ---
+
+func TestProcessorRun_FallbackDate_AddsToRetryList(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "Retry Show")
+	os.MkdirAll(showDir, 0755)
+	mkvPath := filepath.Join(showDir, "Retry Show - S01E01.mkv")
+	os.WriteFile(mkvPath, []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"Retry Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails:  ShowDetails{FirstAirDate: "2022-01-01"},
+		seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 1, AirDate: ""}}},
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	retryList := emptyRetryList(t)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList)
+
+	p.Run()
+
+	if !retryList.Has(mkvPath) {
+		t.Errorf("expected %q to be in retry list after fallback date", mkvPath)
+	}
+}
+
+func TestProcessorRun_RealDate_RemovesFromRetryList(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "Real Date Show")
+	os.MkdirAll(showDir, 0755)
+	mkvPath := filepath.Join(showDir, "Real Date Show - S01E01.mkv")
+	os.WriteFile(mkvPath, []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"Real Date Show": "999"})
+	tmdb := &fakeTMDB{
+		seasonResult: SeasonResult{
+			Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2023-05-01"}},
+		},
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	retryList := emptyRetryList(t)
+	retryList.Add(mkvPath) // pre-populate as if a previous run used a fallback
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList)
+
+	p.Run()
+
+	if retryList.Has(mkvPath) {
+		t.Errorf("expected %q to be removed from retry list after real date found", mkvPath)
+	}
+}
+
+func TestProcessorRun_RetryList_BypassesCutoff(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "Old Show")
+	os.MkdirAll(showDir, 0755)
+	mkvPath := filepath.Join(showDir, "Old Show - S01E01.mkv")
+	os.WriteFile(mkvPath, []byte{}, 0644)
+
+	// Set the file's mod time to well before the cutoff.
+	oldTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	os.Chtimes(mkvPath, oldTime, oldTime)
+
+	cache := cacheWith(t, map[string]string{"Old Show": "999"})
+	tmdb := &fakeTMDB{
+		seasonResult: SeasonResult{
+			Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2020-01-01"}},
+		},
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	retryList := emptyRetryList(t)
+	retryList.Add(mkvPath) // file is in retry list despite being old
+	p := NewProcessor(Config{MediaDir: dir, CutoffDate: time.Now(), ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Errorf("expected file in retry list to be processed despite old mod time, got %+v", stats)
 	}
 }
 

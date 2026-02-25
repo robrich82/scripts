@@ -59,6 +59,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	retryList, err := LoadRetryList("pending_dates.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading pending_dates.json: %v\n", err)
+		os.Exit(1)
+	}
+
 	cfg := Config{
 		MediaDir:   mediaDir,
 		CutoffDate: cutoff,
@@ -71,7 +77,7 @@ func main() {
 
 	fmt.Printf("Scanning %s...\n", mediaDir)
 
-	processor := NewProcessor(cfg, cache, manualData, tmdb, mkv, prompter, timer)
+	processor := NewProcessor(cfg, cache, manualData, tmdb, mkv, prompter, timer, retryList)
 	stats := processor.Run()
 
 	fmt.Printf("\nDone. Success: %d  Failed: %d  Skipped (old): %d\n",

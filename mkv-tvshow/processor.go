@@ -37,6 +37,7 @@ type Processor struct {
 	mkv        MKVRunner
 	prompter   Prompter
 	timer      FileTimer
+	retryList  *RetryList
 
 	sessionSkipped   map[string]bool
 	sessionConfirmed map[string]string
@@ -51,6 +52,7 @@ func NewProcessor(
 	mkv MKVRunner,
 	prompter Prompter,
 	timer FileTimer,
+	retryList *RetryList,
 ) *Processor {
 	return &Processor{
 		cfg:              cfg,
@@ -60,6 +62,7 @@ func NewProcessor(
 		mkv:              mkv,
 		prompter:         prompter,
 		timer:            timer,
+		retryList:        retryList,
 		sessionSkipped:   make(map[string]bool),
 		sessionConfirmed: make(map[string]string),
 	}
@@ -123,10 +126,11 @@ func (p *Processor) Run() Stats {
 			}
 
 			info, err := d.Info()
-			if err != nil || info.ModTime().Before(p.cfg.CutoffDate) {
-				if err == nil {
-					stats.SkippedOld++
-				}
+			if err != nil {
+				return nil
+			}
+			if info.ModTime().Before(p.cfg.CutoffDate) && !p.retryList.Has(path) {
+				stats.SkippedOld++
 				return nil
 			}
 
@@ -185,6 +189,11 @@ func (p *Processor) Run() Stats {
 
 			title := cleanMetadataTitle(file)
 			if p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL) {
+				if stampDate != "" {
+					p.retryList.Remove(filePath)
+				} else {
+					p.retryList.Add(filePath)
+				}
 				fmt.Printf("[✓] Processed: %s\n", file)
 				stats.Success++
 			} else {
@@ -195,6 +204,10 @@ func (p *Processor) Run() Stats {
 			time.Sleep(50 * time.Millisecond)
 			return nil
 		})
+	}
+
+	if err := p.retryList.Save(); err != nil {
+		fmt.Printf("[!] Failed to save retry list: %v\n", err)
 	}
 
 	return stats
