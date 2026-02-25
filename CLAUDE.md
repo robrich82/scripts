@@ -4,4 +4,9 @@
 After making any code changes, always create a git commit. Use a concise, descriptive commit message that reflects the change.
 
 ## Build
-After we finish all our changes, we should always build any executables that would be affected by our changes
+After completing a feature or bug fix, build the affected tool(s):
+- `make mkv-audit` — after changes to mkv-audit/
+- `make mkv-movie` — after changes to mkv-movie/
+- `make mkv-musicvideo` — after changes to mkv-musicvideo/
+- `make mkv-tvshow` — after changes to mkv-tvshow/
+- `make all` — to rebuild everything
