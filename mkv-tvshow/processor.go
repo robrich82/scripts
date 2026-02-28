@@ -525,15 +525,27 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 	if r, alreadyPrompted := p.sessionPromptedRating[tmdbID]; alreadyPrompted {
 		return r
 	}
-	ans, _ := p.prompter.Ask(fmt.Sprintf(
-		"No NZ rating found for %q.\nEnter rating (G/PG/M/RP13/R13/RP15/R15/RP16/R16/RP18/R18)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
+	// Loop until a valid rating is entered or the user leaves blank to skip.
+	promptMsg := fmt.Sprintf(
+		"No NZ rating found for %q.\nEnter rating (G/PG/M/13/R13/RP13/15/R15/RP15/16/R16/RP16/R/18/R18/RP18)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
 		showName,
-	))
-	r, _ := ParseNZRating(strings.TrimSpace(ans))
-	p.sessionPromptedRating[tmdbID] = r
-	if r != RatingNone {
-		p.ratingCache.SetShowRating(tmdbID, r)
+	)
+	var r NZRating
+	for {
+		ans, _ := p.prompter.Ask(promptMsg)
+		ans = strings.TrimSpace(ans)
+		if ans == "" {
+			break // user skipped
+		}
+		parsed, ok := ParseNZRating(ans)
+		if ok {
+			r = parsed
+			p.ratingCache.SetShowRating(tmdbID, r)
+			break
+		}
+		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (G/PG/M/13/R13/RP13/15/R15/RP15/16/R16/RP16/R/18/R18/RP18) or blank to skip: ", ans)
 	}
+	p.sessionPromptedRating[tmdbID] = r
 	return r
 }
 
@@ -549,6 +561,11 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	}
 	if rating == RatingNone {
 		return true // nothing to write
+	}
+
+	// Skip if this file already has these tags written (avoids re-writing every run).
+	if p.ratingCache != nil && !p.cfg.OverwriteRatings && p.ratingCache.IsApplied(filePath, rating) {
+		return true
 	}
 
 	// Snapshot the current mtime before mkvpropedit touches it.
@@ -589,6 +606,11 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 		if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
 			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
 		}
+	}
+
+	// Record that the tags have been written so subsequent runs can skip this file.
+	if p.ratingCache != nil {
+		p.ratingCache.MarkApplied(filePath, rating)
 	}
 	return true
 }

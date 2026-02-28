@@ -442,6 +442,56 @@ func TestApplyRatingOnlyMKV_Failure_NoTimestampRestore(t *testing.T) {
 	}
 }
 
+// --- resolveEpisodeRating ---
+
+func TestResolveEpisodeRating_InvalidInput_RePrompts(t *testing.T) {
+	rc := emptyRatingCache(t)
+	// Prompter returns an invalid rating first, then a valid one.
+	prompter := &scriptedPrompter{answers: []string{"PG-13", "R16"}}
+	p := &Processor{
+		ratingCache:           rc,
+		ratingSources:         []RatingSource{},
+		prompter:              prompter,
+		sessionPromptedRating: make(map[string]NZRating),
+	}
+
+	got := p.resolveEpisodeRating("12345", "Test Show", 1, 1)
+	if got != RatingR16 {
+		t.Errorf("got %q, want R16", got)
+	}
+	if prompter.idx != 2 {
+		t.Errorf("prompter called %d times, want 2", prompter.idx)
+	}
+	// Rating must be cached in the show cache.
+	if cached, ok := rc.GetShowRating("12345"); !ok || cached != RatingR16 {
+		t.Errorf("show cache has %q ok=%v, want R16", cached, ok)
+	}
+}
+
+func TestApplyRatingOnlyMKV_AlreadyApplied_SkipsWrite(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "ep.mkv")
+	if err := os.WriteFile(filePath, []byte("fake"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc := emptyRatingCache(t)
+	// Pre-mark this file as already having R16 tags applied.
+	rc.MarkApplied(filePath, RatingR16)
+
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	timer := &captureFileTimer{}
+	p := &Processor{mkv: runner, timer: timer, ratingCache: rc}
+
+	ok := p.applyRatingOnlyMKV(filePath, RatingR16)
+	if !ok {
+		t.Error("expected true (already applied counts as success)")
+	}
+	if len(runner.calls) != 0 {
+		t.Error("Apply must not be called when tags are already applied")
+	}
+}
+
 // --- Run (end-to-end) ---
 
 func TestProcessorRun_SkipsOldFiles(t *testing.T) {

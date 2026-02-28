@@ -12,6 +12,9 @@ type RatingCacheData struct {
 	Shows map[string]string `json:"shows"`
 	// Episodes maps "tmdbID/S01E03" → episode-level NZRating (from CO or manual prompt).
 	Episodes map[string]string `json:"episodes"`
+	// Applied maps absolute file path → rating string already written as Matroska tags.
+	// Used by --ratings-only mode to avoid re-writing tags on every run.
+	Applied map[string]string `json:"applied,omitempty"`
 }
 
 // RatingCache persists NZ ratings across runs so slow scrapes and user-entered
@@ -29,6 +32,7 @@ func LoadRatingCache(path string) (*RatingCache, error) {
 		data: RatingCacheData{
 			Shows:    make(map[string]string),
 			Episodes: make(map[string]string),
+			Applied:  make(map[string]string),
 		},
 	}
 	data, err := os.ReadFile(path)
@@ -47,7 +51,20 @@ func LoadRatingCache(path string) (*RatingCache, error) {
 	if c.data.Episodes == nil {
 		c.data.Episodes = make(map[string]string)
 	}
+	if c.data.Applied == nil {
+		c.data.Applied = make(map[string]string)
+	}
 	return c, nil
+}
+
+// IsApplied returns true if filePath already has rating r written as Matroska tags.
+func (c *RatingCache) IsApplied(filePath string, r NZRating) bool {
+	return NZRating(c.data.Applied[filePath]) == r && r != RatingNone
+}
+
+// MarkApplied records that filePath has had its rating tags successfully written.
+func (c *RatingCache) MarkApplied(filePath string, r NZRating) {
+	c.data.Applied[filePath] = string(r)
 }
 
 // Save writes the cache to disk as JSON.
