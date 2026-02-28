@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -20,6 +21,13 @@ type PlexMovieClient interface {
 	// Guid contains "tmdb://{tmdbID}". Returns the ratingKey on success, or
 	// ErrPlexMovieNotFound if no match exists.
 	FindMovieByTMDBID(tmdbID string) (string, error)
+	// FindMovieByTitle searches all "movie" library sections for an item whose
+	// title (normalized) matches title and whose year matches year.
+	// Returns ErrPlexMovieNotFound if no match exists.
+	FindMovieByTitle(title, year string) (string, error)
+	// GetContentRating returns the current NZ content rating stored in Plex for
+	// the item identified by ratingKey, or RatingNone if unset or unrecognised.
+	GetContentRating(ratingKey string) (NZRating, error)
 	// SetContentRating updates the contentRating field on a Plex movie item and
 	// locks it to prevent automatic overwriting.
 	SetContentRating(ratingKey string, rating NZRating) error
@@ -159,6 +167,119 @@ func plexMovieGuidMatchesTMDBID(s, tmdbID string) bool {
 	}
 	rest := s[idx+len(target):]
 	return rest == "" || rest[0] < '0' || rest[0] > '9'
+}
+
+// FindMovieByTitle implements PlexMovieClient.
+func (c *httpPlexMovieClient) FindMovieByTitle(title, year string) (string, error) {
+	resp, err := c.plexGet("/library/sections")
+	if err != nil {
+		return "", fmt.Errorf("plex: list sections: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var sectionsResp struct {
+		MediaContainer struct {
+			Directory []struct {
+				Key  string `json:"key"`
+				Type string `json:"type"`
+			} `json:"Directory"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
+		return "", fmt.Errorf("plex: decode sections: %w", err)
+	}
+
+	normTitle := normalizePlexTitle(title)
+	wantYear := 0
+	if year != "" {
+		wantYear, _ = strconv.Atoi(year)
+	}
+	for _, section := range sectionsResp.MediaContainer.Directory {
+		if section.Type != "movie" {
+			continue
+		}
+		key, err := c.findMovieInSectionByTitle(section.Key, normTitle, wantYear)
+		if err != nil {
+			return "", err
+		}
+		if key != "" {
+			return key, nil
+		}
+	}
+	return "", ErrPlexMovieNotFound
+}
+
+func (c *httpPlexMovieClient) findMovieInSectionByTitle(sectionKey, normTitle string, wantYear int) (string, error) {
+	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=1")
+	if err != nil {
+		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
+	}
+	defer resp.Body.Close()
+
+	var allResp struct {
+		MediaContainer struct {
+			Metadata []struct {
+				RatingKey string `json:"ratingKey"`
+				Title     string `json:"title"`
+				Year      int    `json:"year"`
+			} `json:"Metadata"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
+		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
+	}
+
+	for _, item := range allResp.MediaContainer.Metadata {
+		if normalizePlexTitle(item.Title) != normTitle {
+			continue
+		}
+		if wantYear != 0 && item.Year != wantYear {
+			continue
+		}
+		return item.RatingKey, nil
+	}
+	return "", nil
+}
+
+// normalizePlexTitle returns a lowercase alphanumeric-only string for fuzzy title matching.
+func normalizePlexTitle(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, c := range s {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
+// GetContentRating implements PlexMovieClient.
+// It returns the NZ content rating currently stored in Plex for ratingKey,
+// stripping the "nz/" prefix before parsing. Returns RatingNone when unset
+// or not a recognised NZ rating.
+func (c *httpPlexMovieClient) GetContentRating(ratingKey string) (NZRating, error) {
+	resp, err := c.plexGet("/library/metadata/" + ratingKey)
+	if err != nil {
+		return RatingNone, fmt.Errorf("plex: get metadata %s: %w", ratingKey, err)
+	}
+	defer resp.Body.Close()
+
+	var metaResp struct {
+		MediaContainer struct {
+			Metadata []struct {
+				ContentRating string `json:"contentRating"`
+			} `json:"Metadata"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&metaResp); err != nil {
+		return RatingNone, fmt.Errorf("plex: decode metadata %s: %w", ratingKey, err)
+	}
+	if len(metaResp.MediaContainer.Metadata) == 0 {
+		return RatingNone, nil
+	}
+	raw := strings.TrimPrefix(metaResp.MediaContainer.Metadata[0].ContentRating, "nz/")
+	rating, _ := ParseNZRating(raw)
+	return rating, nil
 }
 
 // SetContentRating implements PlexMovieClient.

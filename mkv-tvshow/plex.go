@@ -48,6 +48,10 @@ type PlexClient interface {
 	// GetEpisodes returns the ratingKey and episode/season numbers for every
 	// episode of the season identified by seasonRatingKey.
 	GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem, error)
+	// GetContentRating returns the NZ content rating currently stored in Plex
+	// for the item identified by ratingKey, stripping the "nz/" prefix before
+	// parsing. Returns RatingNone when unset or not a recognised NZ rating.
+	GetContentRating(ratingKey string) (NZRating, error)
 	// SetContentRating updates the contentRating field on a Plex item and
 	// locks it to prevent automatic overwriting.
 	SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error
@@ -278,6 +282,32 @@ func (c *httpPlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem,
 		}
 	}
 	return episodes, nil
+}
+
+// GetContentRating implements PlexClient.
+func (c *httpPlexClient) GetContentRating(ratingKey string) (NZRating, error) {
+	resp, err := c.plexGet("/library/metadata/" + ratingKey)
+	if err != nil {
+		return RatingNone, fmt.Errorf("plex: get metadata %s: %w", ratingKey, err)
+	}
+	defer resp.Body.Close()
+
+	var metaResp struct {
+		MediaContainer struct {
+			Metadata []struct {
+				ContentRating string `json:"contentRating"`
+			} `json:"Metadata"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&metaResp); err != nil {
+		return RatingNone, fmt.Errorf("plex: decode metadata %s: %w", ratingKey, err)
+	}
+	if len(metaResp.MediaContainer.Metadata) == 0 {
+		return RatingNone, nil
+	}
+	raw := strings.TrimPrefix(metaResp.MediaContainer.Metadata[0].ContentRating, "nz/")
+	rating, _ := ParseNZRating(raw)
+	return rating, nil
 }
 
 // SetContentRating implements PlexClient. It sends a PUT to the metadata

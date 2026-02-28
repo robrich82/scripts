@@ -24,6 +24,8 @@ type fakePlexClient struct {
 	episodesErr     error
 	setRatingCalls  []setRatingCall
 	setRatingErr    error
+	contentRating   NZRating
+	contentRatingErr error
 }
 
 func (f *fakePlexClient) FindShowByTMDBID(_ string) (string, error) {
@@ -42,6 +44,10 @@ func (f *fakePlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem,
 		return f.episodesByKey[seasonRatingKey], nil
 	}
 	return nil, nil
+}
+
+func (f *fakePlexClient) GetContentRating(_ string) (NZRating, error) {
+	return f.contentRating, f.contentRatingErr
 }
 
 func (f *fakePlexClient) SetContentRating(ratingKey string, t PlexItemType, rating NZRating) error {
@@ -296,6 +302,63 @@ func TestHTTPPlexClient_FindShowByTMDBID_LegacyLowercaseGuid(t *testing.T) {
 	}
 	if key != "55" {
 		t.Errorf("got ratingKey %q; want 55", key)
+	}
+}
+
+// --- GetContentRating tests ---
+
+func plexTVMetadataJSON(contentRating string) string {
+	return `{"MediaContainer":{"Metadata":[{"contentRating":"` + contentRating + `"}]}}`
+}
+
+func TestHTTPPlexClient_GetContentRating_Found(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(plexTVMetadataJSON("nz/M")))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	rating, err := c.GetContentRating("42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rating != RatingM {
+		t.Errorf("got %q; want M", rating)
+	}
+}
+
+func TestHTTPPlexClient_GetContentRating_UnknownRating(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(plexTVMetadataJSON("TV-14")))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	rating, err := c.GetContentRating("42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rating != RatingNone {
+		t.Errorf("got %q; want RatingNone for unrecognised rating", rating)
+	}
+}
+
+func TestHTTPPlexClient_GetContentRating_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	rating, err := c.GetContentRating("99")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rating != RatingNone {
+		t.Errorf("got %q; want RatingNone when metadata is empty", rating)
 	}
 }
 

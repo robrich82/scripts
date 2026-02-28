@@ -149,3 +149,120 @@ func TestHTTPPlexMovieClient_SetContentRating_SendsCorrectParams(t *testing.T) {
 		t.Errorf("type = %q; want 1 (movie)", gotQuery.Get("type"))
 	}
 }
+
+func plexMetadataJSON(contentRating string) string {
+	return `{"MediaContainer":{"Metadata":[{"contentRating":"` + contentRating + `"}]}}`
+}
+
+func TestHTTPPlexMovieClient_GetContentRating_Found(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(plexMetadataJSON("nz/R16")))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	rating, err := c.GetContentRating("42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rating != RatingR16 {
+		t.Errorf("got %q; want R16", rating)
+	}
+}
+
+func TestHTTPPlexMovieClient_GetContentRating_UnknownRating(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(plexMetadataJSON("TV-MA")))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	rating, err := c.GetContentRating("42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rating != RatingNone {
+		t.Errorf("got %q; want RatingNone for unrecognised rating", rating)
+	}
+}
+
+func TestHTTPPlexMovieClient_GetContentRating_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// No Metadata entries at all.
+		w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	rating, err := c.GetContentRating("99")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rating != RatingNone {
+		t.Errorf("got %q; want RatingNone when metadata is empty", rating)
+	}
+}
+
+func TestHTTPPlexMovieClient_FindMovieByTitle_Found(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexMovieSectionsJSON("2", "movie")))
+		} else {
+			w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"55","title":"The Matrix","year":1999}]}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	key, err := c.FindMovieByTitle("The Matrix", "1999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "55" {
+		t.Errorf("got ratingKey %q; want 55", key)
+	}
+}
+
+func TestHTTPPlexMovieClient_FindMovieByTitle_NormalisedMatch(t *testing.T) {
+	// Title in Plex has punctuation; search title differs in case and punctuation.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexMovieSectionsJSON("3", "movie")))
+		} else {
+			w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"66","title":"It's a Wonderful Life","year":1946}]}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	key, err := c.FindMovieByTitle("its a wonderful life", "1946")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "66" {
+		t.Errorf("got ratingKey %q; want 66", key)
+	}
+}
+
+func TestHTTPPlexMovieClient_FindMovieByTitle_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexMovieSectionsJSON("2", "movie")))
+		} else {
+			w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"77","title":"Other Film","year":2000}]}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	_, err := c.FindMovieByTitle("The Matrix", "1999")
+	if err != ErrPlexMovieNotFound {
+		t.Errorf("expected ErrPlexMovieNotFound, got %v", err)
+	}
+}

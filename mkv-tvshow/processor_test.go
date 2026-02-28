@@ -468,6 +468,48 @@ func TestResolveEpisodeRating_InvalidInput_RePrompts(t *testing.T) {
 	}
 }
 
+func TestResolveEpisodeRating_BlankAcceptsPlexDefault(t *testing.T) {
+	rc := emptyRatingCache(t)
+	// Prompter immediately hits Enter (blank).
+	prompter := &scriptedPrompter{answers: []string{""}}
+	plex := &fakePlexClient{showRatingKey: "42", contentRating: RatingM}
+	p := &Processor{
+		ratingCache:           rc,
+		ratingSources:         []RatingSource{},
+		prompter:              prompter,
+		plex:                  plex,
+		sessionPromptedRating: make(map[string]NZRating),
+	}
+
+	got := p.resolveEpisodeRating("12345", "Test Show", 1, 1)
+	if got != RatingM {
+		t.Errorf("got %q, want M (Plex default)", got)
+	}
+	// Rating must be cached for future episodes.
+	if cached, ok := rc.GetShowRating("12345"); !ok || cached != RatingM {
+		t.Errorf("show cache has %q ok=%v, want M", cached, ok)
+	}
+}
+
+func TestResolveEpisodeRating_BlankWithNoPlexDefault_Skips(t *testing.T) {
+	rc := emptyRatingCache(t)
+	prompter := &scriptedPrompter{answers: []string{""}}
+	// Plex has no rating for this show.
+	plex := &fakePlexClient{showRatingKey: "42", contentRating: RatingNone}
+	p := &Processor{
+		ratingCache:           rc,
+		ratingSources:         []RatingSource{},
+		prompter:              prompter,
+		plex:                  plex,
+		sessionPromptedRating: make(map[string]NZRating),
+	}
+
+	got := p.resolveEpisodeRating("12345", "Test Show", 1, 1)
+	if got != RatingNone {
+		t.Errorf("got %q, want RatingNone when Plex has no rating and user skips", got)
+	}
+}
+
 func TestApplyRatingOnlyMKV_AlreadyApplied_SkipsWrite(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "ep.mkv")

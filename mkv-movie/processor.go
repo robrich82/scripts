@@ -136,17 +136,44 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 		return rating
 	}
 
-	// Loop until a valid rating is entered or the user leaves blank to skip.
-	promptMsg := fmt.Sprintf(
-		"No NZ rating found for %q.\nEnter rating (G/PG/M/RP13/R13/RP15/R15/RP16/R16/RP18/R18)\nTip: check Netflix, or classificationoffice.govt.nz\nLeave blank to skip: ",
-		title,
-	)
+	// Check Plex for an existing rating to use as the default on blank input.
+	var plexDefault NZRating
+	if r.plex != nil {
+		// Extract year from "title:YEAR" key.
+		year := ""
+		if idx := strings.LastIndex(key, ":"); idx >= 0 {
+			year = key[idx+1:]
+		}
+		if rk, err := r.plex.FindMovieByTitle(title, year); err == nil {
+			plexDefault, _ = r.plex.GetContentRating(rk)
+		}
+		// Silently ignore errors (Plex unavailable or movie not found).
+	}
+
+	// Build the initial prompt message.
+	const validRatings = "G/PG/M/13/RP13/R13/15/RP15/R15/16/RP16/R16/R/18/RP18/R18"
+	var promptMsg string
+	if plexDefault != RatingNone {
+		promptMsg = fmt.Sprintf(
+			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
+			title, plexDefault, validRatings,
+		)
+	} else {
+		promptMsg = fmt.Sprintf(
+			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, or classificationoffice.govt.nz\nLeave blank to skip: ",
+			title, validRatings,
+		)
+	}
 	var rating NZRating
 	for {
 		ans, _ := r.prompter(promptMsg)
 		ans = strings.TrimSpace(ans)
 		if ans == "" {
-			break // user skipped
+			if plexDefault != RatingNone {
+				rating = plexDefault
+				r.cache.Set(key, rating)
+			}
+			break // user skipped (or accepted Plex default)
 		}
 		parsed, ok := ParseNZRating(ans)
 		if ok {
@@ -154,7 +181,7 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 			r.cache.Set(key, rating)
 			break
 		}
-		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (G/PG/M/RP13/R13/RP15/R15/RP16/R16/RP18/R18) or blank to skip: ", ans)
+		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to skip: ", ans, validRatings)
 	}
 	r.sessionPrompted[key] = rating
 	return rating

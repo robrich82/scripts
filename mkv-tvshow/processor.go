@@ -525,17 +525,40 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 	if r, alreadyPrompted := p.sessionPromptedRating[tmdbID]; alreadyPrompted {
 		return r
 	}
-	// Loop until a valid rating is entered or the user leaves blank to skip.
-	promptMsg := fmt.Sprintf(
-		"No NZ rating found for %q.\nEnter rating (G/PG/M/13/R13/RP13/15/R15/RP15/16/R16/RP16/R/18/R18/RP18)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
-		showName,
-	)
+
+	// Check Plex for an existing rating to use as the default on blank input.
+	var plexDefault NZRating
+	if p.plex != nil {
+		if showKey, err := p.plex.FindShowByTMDBID(tmdbID); err == nil {
+			plexDefault, _ = p.plex.GetContentRating(showKey)
+		}
+		// Silently ignore errors (Plex unavailable or show not found).
+	}
+
+	// Build the initial prompt message.
+	const validRatings = "G/PG/M/13/RP13/R13/15/RP15/R15/16/RP16/R16/R/18/RP18/R18"
+	var promptMsg string
+	if plexDefault != RatingNone {
+		promptMsg = fmt.Sprintf(
+			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
+			showName, plexDefault, validRatings,
+		)
+	} else {
+		promptMsg = fmt.Sprintf(
+			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
+			showName, validRatings,
+		)
+	}
 	var r NZRating
 	for {
 		ans, _ := p.prompter.Ask(promptMsg)
 		ans = strings.TrimSpace(ans)
 		if ans == "" {
-			break // user skipped
+			if plexDefault != RatingNone {
+				r = plexDefault
+				p.ratingCache.SetShowRating(tmdbID, r)
+			}
+			break // user skipped (or accepted Plex default)
 		}
 		parsed, ok := ParseNZRating(ans)
 		if ok {
@@ -543,7 +566,7 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 			p.ratingCache.SetShowRating(tmdbID, r)
 			break
 		}
-		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (G/PG/M/13/R13/RP13/15/R15/RP15/16/R16/RP16/R/18/R18/RP18) or blank to skip: ", ans)
+		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to skip: ", ans, validRatings)
 	}
 	p.sessionPromptedRating[tmdbID] = r
 	return r

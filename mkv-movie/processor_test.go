@@ -258,6 +258,62 @@ func TestProcessFile_WithRating_AlreadyApplied_ShowsOK(t *testing.T) {
 	}
 }
 
+// fakePlexMovieClient is a test double for PlexMovieClient.
+type fakePlexMovieClient struct {
+	titleRatingKey   string
+	findTitleErr     error
+	contentRating    NZRating
+	contentRatingErr error
+}
+
+func (f *fakePlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
+	return "", ErrPlexMovieNotFound
+}
+
+func (f *fakePlexMovieClient) FindMovieByTitle(_, _ string) (string, error) {
+	return f.titleRatingKey, f.findTitleErr
+}
+
+func (f *fakePlexMovieClient) GetContentRating(_ string) (NZRating, error) {
+	return f.contentRating, f.contentRatingErr
+}
+
+func (f *fakePlexMovieClient) SetContentRating(_ string, _ NZRating) error { return nil }
+
+func TestResolveMovieRating_BlankAcceptsPlexDefault(t *testing.T) {
+	dir := t.TempDir()
+	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
+
+	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingR16}
+	// Prompter immediately hits Enter (blank).
+	prompter := func(string) (string, error) { return "", nil }
+	rr := newMovieRatingResolver(nil, cache, false, plex, prompter)
+
+	rating := rr.ResolveMovieRating("Some Film:2022", "Some Film")
+	if rating != RatingR16 {
+		t.Errorf("got %q, want R16 (Plex default)", rating)
+	}
+	// Rating must be cached.
+	cached, ok := cache.Get("Some Film:2022")
+	if !ok || cached != RatingR16 {
+		t.Errorf("cache has %q ok=%v, want R16", cached, ok)
+	}
+}
+
+func TestResolveMovieRating_BlankWithNoPlexDefault_Skips(t *testing.T) {
+	dir := t.TempDir()
+	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
+
+	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingNone}
+	prompter := func(string) (string, error) { return "", nil }
+	rr := newMovieRatingResolver(nil, cache, false, plex, prompter)
+
+	rating := rr.ResolveMovieRating("Some Film:2022", "Some Film")
+	if rating != RatingNone {
+		t.Errorf("got %q, want RatingNone when Plex has no rating and user skips", rating)
+	}
+}
+
 func TestResolveMovieRating_InvalidInput_RePrompts(t *testing.T) {
 	dir := t.TempDir()
 	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
