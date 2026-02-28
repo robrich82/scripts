@@ -510,7 +510,18 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 		}
 	}
 
-	// 5. User prompt — at most once per show per run.
+	// 5. Cache fallback — use any previously-saved rating rather than re-prompting.
+	//    This applies even with --overwrite-ratings: external sources are tried
+	//    first (steps 3-4 skipped above), but a manually-entered cached value is
+	//    always preferred over interrupting the user again.
+	if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok && r != RatingNone {
+		return r
+	}
+	if r, ok := p.ratingCache.GetShowRating(tmdbID); ok && r != RatingNone {
+		return r
+	}
+
+	// 6. User prompt — at most once per show per run.
 	if r, alreadyPrompted := p.sessionPromptedRating[tmdbID]; alreadyPrompted {
 		return r
 	}

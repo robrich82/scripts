@@ -229,8 +229,8 @@ func TestHTTPPlexClient_SetContentRating_SendsCorrectParams(t *testing.T) {
 	if gotMethod != http.MethodPut {
 		t.Errorf("method = %q; want PUT", gotMethod)
 	}
-	if gotQuery.Get("contentRating.value") != "R16" {
-		t.Errorf("contentRating.value = %q; want R16", gotQuery.Get("contentRating.value"))
+	if gotQuery.Get("contentRating.value") != "nz/R16" {
+		t.Errorf("contentRating.value = %q; want nz/R16", gotQuery.Get("contentRating.value"))
 	}
 	if gotQuery.Get("contentRating.locked") != "1" {
 		t.Errorf("contentRating.locked = %q; want 1", gotQuery.Get("contentRating.locked"))

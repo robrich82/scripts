@@ -283,8 +283,12 @@ func (c *httpPlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem,
 // SetContentRating implements PlexClient. It sends a PUT to the metadata
 // endpoint setting contentRating and locking the field.
 func (c *httpPlexClient) SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error {
+	// Plex identifies content rating systems by a country prefix (e.g. "nz/M",
+	// "nz/R16"). Without the prefix the value is stored as a raw string and
+	// won't be recognised as an NZ classification rating.
+	plexRating := "nz/" + string(rating)
 	path := fmt.Sprintf("/library/metadata/%s?type=%d&id=%s&contentRating.value=%s&contentRating.locked=1&X-Plex-Token=%s",
-		ratingKey, itemType, ratingKey, url.QueryEscape(string(rating)), url.QueryEscape(c.token))
+		ratingKey, itemType, ratingKey, url.QueryEscape(plexRating), url.QueryEscape(c.token))
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {
