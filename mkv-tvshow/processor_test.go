@@ -386,6 +386,62 @@ func TestApplyMKV_Failure_NoTimestamps(t *testing.T) {
 	}
 }
 
+// --- applyRatingOnlyMKV ---
+
+func TestApplyRatingOnlyMKV_RestoresTimestamps(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "ep.mkv")
+	if err := os.WriteFile(filePath, []byte("fake"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Set a specific mtime so we can verify it gets restored.
+	want := time.Date(2021, 3, 15, 0, 0, 0, 0, time.Local)
+	if err := os.Chtimes(filePath, want, want); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	timer := &captureFileTimer{}
+	p := &Processor{mkv: runner, timer: timer}
+	ok := p.applyRatingOnlyMKV(filePath, RatingR16)
+	if !ok {
+		t.Fatal("expected success")
+	}
+
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected SetTimes to be called to restore timestamps")
+	}
+	got := timer.setTimesCalls[0].t
+	if !got.Equal(want) {
+		t.Errorf("restored mtime = %v; want %v", got, want)
+	}
+}
+
+func TestApplyRatingOnlyMKV_RatingNone_NoMkvpropedit(t *testing.T) {
+	runner := &fakeMKVRunner{avail: true}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+	ok := p.applyRatingOnlyMKV("file.mkv", RatingNone)
+	if !ok {
+		t.Error("expected true (nothing to do)")
+	}
+	if len(runner.calls) != 0 {
+		t.Error("Apply should not be called when rating is RatingNone")
+	}
+}
+
+func TestApplyRatingOnlyMKV_Failure_NoTimestampRestore(t *testing.T) {
+	runner := &fakeMKVRunner{avail: true, applyRC: 1, applyResult: "Error"}
+	timer := &captureFileTimer{}
+	p := &Processor{mkv: runner, timer: timer}
+	ok := p.applyRatingOnlyMKV("file.mkv", RatingPG)
+	if ok {
+		t.Error("expected false on mkvpropedit failure")
+	}
+	if len(timer.setTimesCalls) != 0 {
+		t.Error("SetTimes should not be called on failure")
+	}
+}
+
 // --- Run (end-to-end) ---
 
 func TestProcessorRun_SkipsOldFiles(t *testing.T) {

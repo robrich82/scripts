@@ -528,6 +528,8 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 
 // applyRatingOnlyMKV writes only the LAW_RATING/COUNTRY tags to an MKV file,
 // skipping all other metadata (title, date, poster, timestamps).
+// The original file timestamps are preserved so that downstream tools (e.g.
+// mkv-tvshow in full mode) don't see every file as newly modified.
 // Returns true even when rating is RatingNone (nothing to do, not a failure).
 func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	if !p.mkv.Available() {
@@ -537,6 +539,9 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	if rating == RatingNone {
 		return true // nothing to write
 	}
+
+	// Snapshot the current mtime before mkvpropedit touches it.
+	origStat, statErr := os.Stat(filePath)
 
 	xml := fmt.Sprintf(
 		"<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>"+
@@ -561,8 +566,19 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
 	if !success {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
+		return false
 	}
-	return success
+
+	// Restore the original timestamps so the file appears unmodified to other tools.
+	if statErr == nil {
+		if err := p.timer.SetTimes(filePath, origStat.ModTime()); err != nil {
+			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		}
+		if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
+			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		}
+	}
+	return true
 }
 
 // applyPlexRatings pushes cached ratings to Plex at episode, season, and show
