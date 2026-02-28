@@ -136,16 +136,44 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 		return rating
 	}
 
-	ans, _ := r.prompter(fmt.Sprintf(
+	// Loop until a valid rating is entered or the user leaves blank to skip.
+	promptMsg := fmt.Sprintf(
 		"No NZ rating found for %q.\nEnter rating (G/PG/M/RP13/R13/RP15/R15/RP16/R16/RP18/R18)\nTip: check Netflix, or classificationoffice.govt.nz\nLeave blank to skip: ",
 		title,
-	))
-	rating, _ := ParseNZRating(strings.TrimSpace(ans))
-	r.sessionPrompted[key] = rating
-	if rating != RatingNone {
-		r.cache.Set(key, rating)
+	)
+	var rating NZRating
+	for {
+		ans, _ := r.prompter(promptMsg)
+		ans = strings.TrimSpace(ans)
+		if ans == "" {
+			break // user skipped
+		}
+		parsed, ok := ParseNZRating(ans)
+		if ok {
+			rating = parsed
+			r.cache.Set(key, rating)
+			break
+		}
+		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (G/PG/M/RP13/R13/RP15/R15/RP16/R16/RP18/R18) or blank to skip: ", ans)
 	}
+	r.sessionPrompted[key] = rating
 	return rating
+}
+
+// IsTagsApplied reports whether filePath already has rating r written as Matroska tags.
+// Returns false when --overwrite-ratings is active so tags are always rewritten.
+func (r *MovieRatingResolver) IsTagsApplied(filePath string, rating NZRating) bool {
+	if r.overwrite || r.cache == nil {
+		return false
+	}
+	return r.cache.IsApplied(filePath, rating)
+}
+
+// MarkTagsApplied records that filePath has had its rating tags successfully written.
+func (r *MovieRatingResolver) MarkTagsApplied(filePath string, rating NZRating) {
+	if r.cache != nil {
+		r.cache.MarkApplied(filePath, rating)
+	}
 }
 
 // processFile reads the mediainfo date for filePath, compares it to the
@@ -197,7 +225,7 @@ func processFile(filePath string, mi MediaInfoReader, syncer MKVSyncer, timer Fi
 		// Use "title:YEAR" as the cache key (TMDB source may upgrade to numeric ID).
 		cacheKey := title + ":" + year
 		rating = rr.ResolveMovieRating(cacheKey, title)
-		if rating != RatingNone {
+		if rating != RatingNone && !rr.IsTagsApplied(filePath, rating) {
 			tagsPath, err = writeTempTagsXML(rating)
 			if err != nil {
 				fmt.Printf("[ERR]     %s: write tags: %v\n", basename, err)
@@ -214,8 +242,12 @@ func processFile(filePath string, mi MediaInfoReader, syncer MKVSyncer, timer Fi
 		}
 		if err := syncer.SyncHeader(filePath, dateArg, tagsPath); err != nil {
 			fmt.Printf("[ERR]     %s: sync header: %v\n", basename, err)
+		} else {
+			mkvRan = true
+			if rr != nil && rating != RatingNone && tagsPath != "" {
+				rr.MarkTagsApplied(filePath, rating)
+			}
 		}
-		mkvRan = true
 	}
 	if tagsPath != "" {
 		os.Remove(tagsPath)
@@ -306,6 +338,7 @@ func walkAndProcess(root string, mi MediaInfoReader, syncer MKVSyncer, timer Fil
 		case ResultError:
 			stats.Errors++
 		}
+		fmt.Println()
 		return nil
 	})
 	if rr != nil && rr.cache != nil {

@@ -220,7 +220,7 @@ func TestProcessFile_WithRating_TagsWrittenAndTimestampRestored(t *testing.T) {
 
 	result := processFile(path, mi, syncer, timer, rr)
 	if result != ResultUpdated {
-		t.Errorf("got %v, want ResultUpdated (rating tag written)", result)
+		t.Errorf("got %v, want ResultUpdated (rating tag written first time)", result)
 	}
 	// SyncHeader should have been called with a non-empty tagsPath.
 	if len(syncer.calls) == 0 || syncer.calls[0].tagsPath == "" {
@@ -229,6 +229,60 @@ func TestProcessFile_WithRating_TagsWrittenAndTimestampRestored(t *testing.T) {
 	// Timestamps must be restored after mkvpropedit.
 	if len(timer.setTimesCalls) == 0 {
 		t.Error("SetTimes must be called to restore timestamp after rating tag write")
+	}
+}
+
+func TestProcessFile_WithRating_AlreadyApplied_ShowsOK(t *testing.T) {
+	path := makeTempMKV(t)
+	target := time.Date(2020, 6, 15, 0, 0, 0, 0, time.Local)
+	os.Chtimes(path, target, target)
+
+	mi := &fakeMediaInfoReader{best: "2020-06-15", header: "2020-06-15", title: "My Film"}
+	syncer := &fakeMKVSyncer{}
+	timer := &fakeFileTimer{}
+
+	dir := t.TempDir()
+	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
+	prompter := func(string) (string, error) { return "", nil }
+	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
+	cache.Set("My Film:2020", RatingM)
+	// Mark as already applied — simulates a second run.
+	cache.MarkApplied(path, RatingM)
+
+	result := processFile(path, mi, syncer, timer, rr)
+	if result != ResultOK {
+		t.Errorf("got %v, want ResultOK (tags already applied, date current)", result)
+	}
+	if len(syncer.calls) != 0 {
+		t.Error("SyncHeader must not be called when tags are already applied and date is current")
+	}
+}
+
+func TestResolveMovieRating_InvalidInput_RePrompts(t *testing.T) {
+	dir := t.TempDir()
+	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
+
+	calls := 0
+	prompter := func(string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "PG-13", nil // US rating, not valid NZ
+		}
+		return "R16", nil // valid on second try
+	}
+	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
+
+	rating := rr.ResolveMovieRating("title:2020", "Some Movie")
+	if rating != RatingR16 {
+		t.Errorf("got %q, want R16", rating)
+	}
+	if calls != 2 {
+		t.Errorf("prompter called %d times, want 2", calls)
+	}
+	// Rating must be cached after valid entry.
+	cached, ok := cache.Get("title:2020")
+	if !ok || cached != RatingR16 {
+		t.Errorf("cache has %q ok=%v, want R16", cached, ok)
 	}
 }
 

@@ -16,7 +16,8 @@ type MovieRatingCache struct {
 }
 
 type movieRatingCacheData struct {
-	Movies map[string]string `json:"movies"`
+	Movies  map[string]string `json:"movies"`
+	Applied map[string]string `json:"applied,omitempty"` // absFilePath → rating already written
 }
 
 // LoadMovieRatingCache loads the cache from path. If the file does not exist an
@@ -24,7 +25,10 @@ type movieRatingCacheData struct {
 func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	c := &MovieRatingCache{
 		path: path,
-		data: movieRatingCacheData{Movies: make(map[string]string)},
+		data: movieRatingCacheData{
+			Movies:  make(map[string]string),
+			Applied: make(map[string]string),
+		},
 	}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -39,7 +43,20 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	if c.data.Movies == nil {
 		c.data.Movies = make(map[string]string)
 	}
+	if c.data.Applied == nil {
+		c.data.Applied = make(map[string]string)
+	}
 	return c, nil
+}
+
+// IsApplied returns true if the file at filePath already has rating r written as tags.
+func (c *MovieRatingCache) IsApplied(filePath string, r NZRating) bool {
+	return NZRating(c.data.Applied[filePath]) == r && r != RatingNone
+}
+
+// MarkApplied records that the given file has had its rating tags successfully written.
+func (c *MovieRatingCache) MarkApplied(filePath string, r NZRating) {
+	c.data.Applied[filePath] = string(r)
 }
 
 // Get returns the cached rating for key (TMDB ID or "title:YEAR").
