@@ -59,6 +59,18 @@ func plexAllShowsJSON(ratingKey, tmdbGUID string) string {
 	return `{"MediaContainer":{"Metadata":[{"ratingKey":"` + ratingKey + `","Guid":[{"id":"` + tmdbGUID + `"}]}]}}`
 }
 
+// plexAllShowsJSONLegacyGuid returns JSON where Guid is a plain string (not an array),
+// matching the format returned by older Plex metadata agents.
+func plexAllShowsJSONLegacyGuid(ratingKey, guidStr string) string {
+	return `{"MediaContainer":{"Metadata":[{"ratingKey":"` + ratingKey + `","Guid":"` + guidStr + `"}]}}`
+}
+
+// plexAllShowsJSONLegacyLower returns JSON where the lowercase guid field holds
+// the legacy agent string (e.g. "com.plexapp.agents.themoviedb://12345?lang=en").
+func plexAllShowsJSONLegacyLower(ratingKey, guidStr string) string {
+	return `{"MediaContainer":{"Metadata":[{"ratingKey":"` + ratingKey + `","guid":"` + guidStr + `"}]}}`
+}
+
 func TestHTTPPlexClient_FindShowByTMDBID_Found(t *testing.T) {
 	var gotSectionPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,5 +250,74 @@ func TestHTTPPlexClient_SetContentRating_ErrorOnNon2xx(t *testing.T) {
 	err := c.SetContentRating("1", PlexTypeShow, RatingM)
 	if err == nil {
 		t.Error("expected error for non-2xx response")
+	}
+}
+
+// --- Legacy GUID format tests ---
+
+func TestHTTPPlexClient_FindShowByTMDBID_LegacyGuidString(t *testing.T) {
+	// Plex returns Guid as a plain string instead of an array (legacy agents).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexSectionsJSON("1", "show")))
+		} else {
+			w.Write([]byte(plexAllShowsJSONLegacyGuid("42", "tmdb://12345")))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	key, err := c.FindShowByTMDBID("12345")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "42" {
+		t.Errorf("got ratingKey %q; want 42", key)
+	}
+}
+
+func TestHTTPPlexClient_FindShowByTMDBID_LegacyLowercaseGuid(t *testing.T) {
+	// Plex returns guid (lowercase) as "com.plexapp.agents.themoviedb://12345?lang=en".
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexSectionsJSON("1", "show")))
+		} else {
+			w.Write([]byte(plexAllShowsJSONLegacyLower("55", "com.plexapp.agents.themoviedb://12345?lang=en")))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	key, err := c.FindShowByTMDBID("12345")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "55" {
+		t.Errorf("got ratingKey %q; want 55", key)
+	}
+}
+
+// --- guidStringMatchesTMDBID unit tests ---
+
+func TestGuidStringMatchesTMDBID(t *testing.T) {
+	tests := []struct {
+		s, tmdbID string
+		want      bool
+	}{
+		{"tmdb://12345", "12345", true},
+		{"tmdb://12345?lang=en", "12345", true},
+		{"com.plexapp.agents.themoviedb://12345?lang=en", "12345", true},
+		{"tmdb://123456", "12345", false},      // partial match — must not fire
+		{"tmdb://12345", "123456", false},      // different ID
+		{"", "12345", false},                   // empty string
+		{"tmdb://12345", "", false},            // empty ID
+	}
+	for _, tc := range tests {
+		got := guidStringMatchesTMDBID(tc.s, tc.tmdbID)
+		if got != tc.want {
+			t.Errorf("guidStringMatchesTMDBID(%q, %q) = %v; want %v", tc.s, tc.tmdbID, got, tc.want)
+		}
 	}
 }

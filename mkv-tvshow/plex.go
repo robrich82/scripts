@@ -142,13 +142,14 @@ func (c *httpPlexClient) findInSection(sectionKey, wantGUID string) (string, err
 	}
 	defer resp.Body.Close()
 
+	// Guid may be a JSON array (modern Plex TV agent) or a plain string
+	// (legacy metadata agents). Use RawMessage so we can try both.
 	var allResp struct {
 		MediaContainer struct {
 			Metadata []struct {
-				RatingKey string `json:"ratingKey"`
-				Guid      []struct {
-					ID string `json:"id"`
-				} `json:"Guid"`
+				RatingKey string          `json:"ratingKey"`
+				Guid      json.RawMessage `json:"Guid"`
+				GuidLower string          `json:"guid"` // legacy lowercase plain-string guid
 			} `json:"Metadata"`
 		} `json:"MediaContainer"`
 	}
@@ -156,14 +157,62 @@ func (c *httpPlexClient) findInSection(sectionKey, wantGUID string) (string, err
 		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
 	}
 
+	// tmdbID is the bare numeric ID extracted from wantGUID ("tmdb://12345" → "12345").
+	tmdbID := strings.TrimPrefix(wantGUID, "tmdb://")
+
 	for _, item := range allResp.MediaContainer.Metadata {
-		for _, g := range item.Guid {
-			if g.ID == wantGUID {
-				return item.RatingKey, nil
-			}
+		if plexItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID) {
+			return item.RatingKey, nil
 		}
 	}
 	return "", nil
+}
+
+// plexItemHasTMDBID reports whether a Plex metadata item matches the given
+// TMDB ID. It handles three GUID representations:
+//
+//  1. Modern (Plex TV agent): Guid is a JSON array, e.g. [{"id":"tmdb://12345"}]
+//  2. Legacy Guid string:     Guid is a plain JSON string containing "://tmdbID"
+//  3. Legacy lowercase guid:  guid field is a plain string, e.g.
+//     "com.plexapp.agents.themoviedb://12345?lang=en"
+func plexItemHasTMDBID(guidRaw json.RawMessage, guidLower, wantGUID, tmdbID string) bool {
+	// Modern format: array of objects.
+	if len(guidRaw) > 0 && guidRaw[0] == '[' {
+		var guids []struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(guidRaw, &guids) == nil {
+			for _, g := range guids {
+				if g.ID == wantGUID {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Legacy: Guid is a plain JSON string.
+	if len(guidRaw) > 0 {
+		var s string
+		if json.Unmarshal(guidRaw, &s) == nil && guidStringMatchesTMDBID(s, tmdbID) {
+			return true
+		}
+	}
+
+	// Legacy: lowercase guid field.
+	return guidStringMatchesTMDBID(guidLower, tmdbID)
+}
+
+// guidStringMatchesTMDBID returns true when s contains "://tmdbID" followed
+// by a non-digit (or end of string), preventing partial-ID false positives.
+func guidStringMatchesTMDBID(s, tmdbID string) bool {
+	target := "://" + tmdbID
+	idx := strings.Index(s, target)
+	if idx == -1 {
+		return false
+	}
+	rest := s[idx+len(target):]
+	return rest == "" || rest[0] < '0' || rest[0] > '9'
 }
 
 // GetSeasons implements PlexClient.
