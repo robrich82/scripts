@@ -16,9 +16,11 @@ const mkvpropeditSuccessMsg = "The changes are written to the file. Done."
 
 // Config holds all runtime configuration for a processing run.
 type Config struct {
-	MediaDir   string
-	CutoffDate time.Time
-	ProcessAll bool
+	MediaDir         string
+	CutoffDate       time.Time
+	ProcessAll       bool
+	RatingsOnly      bool // skip all standard MKV processing; only update ratings
+	OverwriteRatings bool // ignore cached ratings and re-fetch/re-prompt
 }
 
 // Stats counts outcomes across an entire processing run.
@@ -39,8 +41,14 @@ type Processor struct {
 	timer      FileTimer
 	retryList  *RetryList
 
-	sessionSkipped   map[string]bool
-	sessionConfirmed map[string]string
+	// Rating pipeline — all optional (nil disables the feature).
+	ratingCache   *RatingCache
+	ratingSources []RatingSource
+	plex          PlexClient
+
+	sessionSkipped       map[string]bool
+	sessionConfirmed     map[string]string
+	sessionPromptedRating map[string]NZRating // tmdbID → rating from user prompt this run
 }
 
 // NewProcessor constructs a Processor with the given dependencies.
@@ -53,18 +61,25 @@ func NewProcessor(
 	prompter Prompter,
 	timer FileTimer,
 	retryList *RetryList,
+	ratingCache *RatingCache,
+	ratingSources []RatingSource,
+	plex PlexClient,
 ) *Processor {
 	return &Processor{
-		cfg:              cfg,
-		cache:            cache,
-		manualData:       manualData,
-		tmdb:             tmdb,
-		mkv:              mkv,
-		prompter:         prompter,
-		timer:            timer,
-		retryList:        retryList,
-		sessionSkipped:   make(map[string]bool),
-		sessionConfirmed: make(map[string]string),
+		cfg:                   cfg,
+		cache:                 cache,
+		manualData:            manualData,
+		tmdb:                  tmdb,
+		mkv:                   mkv,
+		prompter:              prompter,
+		timer:                 timer,
+		retryList:             retryList,
+		ratingCache:           ratingCache,
+		ratingSources:         ratingSources,
+		plex:                  plex,
+		sessionSkipped:        make(map[string]bool),
+		sessionConfirmed:      make(map[string]string),
+		sessionPromptedRating: make(map[string]NZRating),
 	}
 }
 
@@ -96,14 +111,20 @@ func (p *Processor) Run() Stats {
 			continue
 		}
 
+		// The canonical show name used for rating lookups.
+		showName := cleanSearchQuery(showFolder)
+
 		// Fetch the show's main poster path and first air date as fallbacks.
+		// In --ratings-only mode we skip the expensive TMDB calls.
 		mainPoster := ""
 		showFirstAirDate := ""
-		if details, err := p.tmdb.GetShow(showID); err == nil {
-			if details.PosterPath != "" {
-				mainPoster = tmdbImageBase + details.PosterPath
+		if !p.cfg.RatingsOnly {
+			if details, err := p.tmdb.GetShow(showID); err == nil {
+				if details.PosterPath != "" {
+					mainPoster = tmdbImageBase + details.PosterPath
+				}
+				showFirstAirDate = details.FirstAirDate
 			}
-			showFirstAirDate = details.FirstAirDate
 		}
 
 		// seasonCache is reset for each directory in the walk (matching Python behaviour).
@@ -129,9 +150,13 @@ func (p *Processor) Run() Stats {
 			if err != nil {
 				return nil
 			}
-			if info.ModTime().Before(p.cfg.CutoffDate) && !p.retryList.Has(path) {
-				stats.SkippedOld++
-				return nil
+
+			// In --ratings-only mode, process all files regardless of modification date.
+			if !p.cfg.RatingsOnly {
+				if info.ModTime().Before(p.cfg.CutoffDate) && !p.retryList.Has(path) {
+					stats.SkippedOld++
+					return nil
+				}
 			}
 
 			file, filePath := p.normalizeFilename(dir, d.Name())
@@ -145,7 +170,23 @@ func (p *Processor) Run() Stats {
 
 			currID, tmdbSeason, tmdbEpisode := p.resolveEpisode(showFolder, showID, sNum, eNum)
 
-			// Fetch season data (cached per directory run).
+			// Resolve NZ content rating for this episode.
+			rating := p.resolveEpisodeRating(currID, showName, tmdbSeason, tmdbEpisode)
+
+			if p.cfg.RatingsOnly {
+				// Ratings-only mode: only write LAW_RATING to MKV, skip all other processing.
+				if p.applyRatingOnlyMKV(filePath, rating) {
+					fmt.Printf("[✓] Rating updated: %s\n", file)
+					stats.Success++
+				} else {
+					fmt.Printf("  [X] Rating update failed: %s\n", file)
+					stats.Failed++
+				}
+				time.Sleep(50 * time.Millisecond)
+				return nil
+			}
+
+			// Full processing mode: fetch season data and apply all metadata.
 			var relDate, stampDate, posterURL, summary string
 			posterURL = mainPoster
 			cKey := fmt.Sprintf("%s_S%d", currID, tmdbSeason)
@@ -188,7 +229,7 @@ func (p *Processor) Run() Stats {
 			}
 
 			title := cleanMetadataTitle(file)
-			if p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL) {
+			if p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating) {
 				if stampDate != "" {
 					p.retryList.Remove(filePath)
 				} else {
@@ -204,6 +245,14 @@ func (p *Processor) Run() Stats {
 			time.Sleep(50 * time.Millisecond)
 			return nil
 		})
+
+		// After processing all episodes for this show, save rating cache and update Plex.
+		if p.ratingCache != nil {
+			if err := p.ratingCache.Save(); err != nil {
+				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
+			}
+		}
+		p.applyPlexRatings(showID)
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -338,7 +387,7 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 // the poster as a cover attachment, and sets filesystem timestamps to the
 // episode air date. dateStr is written to MKV metadata; stampDate (which may
 // differ or be empty) is used for filesystem timestamps.
-func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDate, posterURL string) bool {
+func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDate, posterURL string, rating NZRating) bool {
 	if !p.mkv.Available() {
 		fmt.Println("  [!] mkvpropedit not found in PATH")
 		return false
@@ -351,7 +400,7 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 
 	// Write tags XML to a temp file.
 	var tagsPath string
-	if xml := buildTagXML(title, summary, tmdbID, dateStr); xml != "" {
+	if xml := buildTagXML(title, summary, tmdbID, dateStr, rating); xml != "" {
 		var err error
 		tagsPath, err = p.mkv.WriteTempTags(xml)
 		if err == nil {
@@ -410,4 +459,168 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 	}
 
 	return success
+}
+
+// resolveEpisodeRating returns the best NZ rating for a single episode,
+// trying sources in priority order and prompting the user as a last resort.
+// The result (including RatingNone) is cached at the show level to avoid
+// re-prompting for subsequent episodes of the same show within one run.
+func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episode int) NZRating {
+	if p.ratingCache == nil {
+		return RatingNone
+	}
+
+	// 1. Episode-level cache hit.
+	if !p.cfg.OverwriteRatings {
+		if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok {
+			return r
+		}
+	}
+
+	// 2. Episode-level sources (currently none return data, but the interface is open).
+	for _, src := range p.ratingSources {
+		r, err := src.FetchEpisodeRating(tmdbID, showName, season, episode)
+		if err != nil {
+			fmt.Printf("  [!] %s episode rating error: %v\n", src.Name(), err)
+			continue
+		}
+		if r != RatingNone {
+			p.ratingCache.SetEpisodeRating(tmdbID, season, episode, r)
+			return r
+		}
+	}
+
+	// 3. Show-level cache hit.
+	if !p.cfg.OverwriteRatings {
+		if r, ok := p.ratingCache.GetShowRating(tmdbID); ok {
+			return r
+		}
+	}
+
+	// 4. Show-level sources (TMDB, Classification Office).
+	for _, src := range p.ratingSources {
+		r, err := src.FetchShowRating(tmdbID, showName)
+		if err != nil {
+			fmt.Printf("  [!] %s show rating error: %v\n", src.Name(), err)
+			continue
+		}
+		if r != RatingNone {
+			p.ratingCache.SetShowRating(tmdbID, r)
+			return r
+		}
+	}
+
+	// 5. User prompt — at most once per show per run.
+	if r, alreadyPrompted := p.sessionPromptedRating[tmdbID]; alreadyPrompted {
+		return r
+	}
+	ans, _ := p.prompter.Ask(fmt.Sprintf(
+		"No NZ rating found for %q.\nEnter rating (G/PG/M/RP13/R13/RP15/R15/RP16/R16/RP18/R18)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
+		showName,
+	))
+	r, _ := ParseNZRating(strings.TrimSpace(ans))
+	p.sessionPromptedRating[tmdbID] = r
+	if r != RatingNone {
+		p.ratingCache.SetShowRating(tmdbID, r)
+	}
+	return r
+}
+
+// applyRatingOnlyMKV writes only the LAW_RATING/COUNTRY tags to an MKV file,
+// skipping all other metadata (title, date, poster, timestamps).
+// Returns true even when rating is RatingNone (nothing to do, not a failure).
+func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
+	if !p.mkv.Available() {
+		fmt.Println("  [!] mkvpropedit not found in PATH")
+		return false
+	}
+	if rating == RatingNone {
+		return true // nothing to write
+	}
+
+	xml := fmt.Sprintf(
+		"<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>"+
+			"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple>"+
+			"<Simple><Name>COUNTRY</Name><String>NZ</String></Simple>"+
+			"</Tag></Tags>",
+		rating,
+	)
+	tagsPath, err := p.mkv.WriteTempTags(xml)
+	if err != nil {
+		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
+		return false
+	}
+
+	combined, rc, err := p.mkv.Apply(filePath, []string{"--tags", "all:" + tagsPath})
+	p.mkv.Cleanup(tagsPath)
+
+	if err != nil {
+		fmt.Printf("  [!] subprocess error: %v\n", err)
+		return false
+	}
+	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
+	if !success {
+		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
+	}
+	return success
+}
+
+// applyPlexRatings pushes cached ratings to Plex at episode, season, and show
+// level. Season and show ratings are computed as the maximum (most restrictive)
+// rating across their child items. Does nothing when Plex is not configured.
+func (p *Processor) applyPlexRatings(tmdbID string) {
+	if p.plex == nil || p.ratingCache == nil {
+		return
+	}
+
+	showKey, err := p.plex.FindShowByTMDBID(tmdbID)
+	if err != nil {
+		if err != ErrPlexNotFound {
+			fmt.Printf("  [!] Plex: FindShowByTMDBID(%s): %v\n", tmdbID, err)
+		}
+		return
+	}
+
+	seasons, err := p.plex.GetSeasons(showKey)
+	if err != nil {
+		fmt.Printf("  [!] Plex: GetSeasons(%s): %v\n", showKey, err)
+		return
+	}
+
+	showMax := RatingNone
+	for _, season := range seasons {
+		episodes, err := p.plex.GetEpisodes(season.RatingKey)
+		if err != nil {
+			fmt.Printf("  [!] Plex: GetEpisodes(%s) season %d: %v\n", season.RatingKey, season.SeasonNumber, err)
+			continue
+		}
+
+		seasonMax := RatingNone
+		for _, ep := range episodes {
+			r, ok := p.ratingCache.GetEpisodeRating(tmdbID, ep.SeasonNumber, ep.EpisodeNumber)
+			if !ok {
+				r, ok = p.ratingCache.GetShowRating(tmdbID)
+			}
+			if !ok || r == RatingNone {
+				continue
+			}
+			if err := p.plex.SetContentRating(ep.RatingKey, PlexTypeEpisode, r); err != nil {
+				fmt.Printf("  [!] Plex: set episode %s rating: %v\n", ep.RatingKey, err)
+			}
+			seasonMax = MaxRating(seasonMax, r)
+		}
+
+		if seasonMax != RatingNone {
+			if err := p.plex.SetContentRating(season.RatingKey, PlexTypeSeason, seasonMax); err != nil {
+				fmt.Printf("  [!] Plex: set season %s rating: %v\n", season.RatingKey, err)
+			}
+			showMax = MaxRating(showMax, seasonMax)
+		}
+	}
+
+	if showMax != RatingNone {
+		if err := p.plex.SetContentRating(showKey, PlexTypeShow, showMax); err != nil {
+			fmt.Printf("  [!] Plex: set show %s rating: %v\n", showKey, err)
+		}
+	}
 }

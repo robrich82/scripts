@@ -1,0 +1,242 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+)
+
+// --- fakePlexClient for use in processor tests ---
+
+type setRatingCall struct {
+	ratingKey string
+	itemType  PlexItemType
+	rating    NZRating
+}
+
+type fakePlexClient struct {
+	showRatingKey   string
+	findErr         error
+	seasons         []PlexSeason
+	seasonsErr      error
+	episodesByKey   map[string][]PlexEpisodeItem
+	episodesErr     error
+	setRatingCalls  []setRatingCall
+	setRatingErr    error
+}
+
+func (f *fakePlexClient) FindShowByTMDBID(_ string) (string, error) {
+	return f.showRatingKey, f.findErr
+}
+
+func (f *fakePlexClient) GetSeasons(_ string) ([]PlexSeason, error) {
+	return f.seasons, f.seasonsErr
+}
+
+func (f *fakePlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem, error) {
+	if f.episodesErr != nil {
+		return nil, f.episodesErr
+	}
+	if f.episodesByKey != nil {
+		return f.episodesByKey[seasonRatingKey], nil
+	}
+	return nil, nil
+}
+
+func (f *fakePlexClient) SetContentRating(ratingKey string, t PlexItemType, rating NZRating) error {
+	f.setRatingCalls = append(f.setRatingCalls, setRatingCall{ratingKey, t, rating})
+	return f.setRatingErr
+}
+
+// --- httpPlexClient unit tests ---
+
+func plexSectionsJSON(sectionKey, sectionType string) string {
+	return `{"MediaContainer":{"Directory":[{"key":"` + sectionKey + `","type":"` + sectionType + `"}]}}`
+}
+
+func plexAllShowsJSON(ratingKey, tmdbGUID string) string {
+	return `{"MediaContainer":{"Metadata":[{"ratingKey":"` + ratingKey + `","Guid":[{"id":"` + tmdbGUID + `"}]}]}}`
+}
+
+func TestHTTPPlexClient_FindShowByTMDBID_Found(t *testing.T) {
+	var gotSectionPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexSectionsJSON("1", "show")))
+		} else {
+			gotSectionPath = r.URL.Path
+			w.Write([]byte(plexAllShowsJSON("42", "tmdb://12345")))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	key, err := c.FindShowByTMDBID("12345")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "42" {
+		t.Errorf("got ratingKey %q; want 42", key)
+	}
+	if gotSectionPath != "/library/sections/1/all" {
+		t.Errorf("unexpected section path %q", gotSectionPath)
+	}
+}
+
+func TestHTTPPlexClient_FindShowByTMDBID_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexSectionsJSON("1", "show")))
+		} else {
+			// Show present but different TMDB ID.
+			w.Write([]byte(plexAllShowsJSON("99", "tmdb://99999")))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	_, err := c.FindShowByTMDBID("12345")
+	if err != ErrPlexNotFound {
+		t.Errorf("expected ErrPlexNotFound, got %v", err)
+	}
+}
+
+func TestHTTPPlexClient_FindShowByTMDBID_SkipsMovieSections(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			// Only a "movie" section — should be skipped.
+			w.Write([]byte(plexSectionsJSON("1", "movie")))
+		} else {
+			t.Error("should not scan non-show section")
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	_, err := c.FindShowByTMDBID("12345")
+	if err != ErrPlexNotFound {
+		t.Errorf("expected ErrPlexNotFound, got %v", err)
+	}
+}
+
+func TestHTTPPlexClient_FindShowByTMDBID_CachesResult(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexSectionsJSON("1", "show")))
+		} else {
+			w.Write([]byte(plexAllShowsJSON("42", "tmdb://12345")))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	c.FindShowByTMDBID("12345")
+	callsAfterFirst := calls
+	c.FindShowByTMDBID("12345") // should use cache
+	if calls != callsAfterFirst {
+		t.Errorf("second FindShowByTMDBID made HTTP requests (calls went from %d to %d)", callsAfterFirst, calls)
+	}
+}
+
+func TestHTTPPlexClient_GetSeasons(t *testing.T) {
+	body := `{"MediaContainer":{"Metadata":[
+		{"ratingKey":"10","type":"season","index":1},
+		{"ratingKey":"11","type":"season","index":2},
+		{"ratingKey":"12","type":"episode","index":1}
+	]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	seasons, err := c.GetSeasons("5")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(seasons) != 2 {
+		t.Fatalf("got %d seasons; want 2", len(seasons))
+	}
+	if seasons[0].RatingKey != "10" || seasons[0].SeasonNumber != 1 {
+		t.Errorf("season[0] = %+v; want {10, 1}", seasons[0])
+	}
+	if seasons[1].RatingKey != "11" || seasons[1].SeasonNumber != 2 {
+		t.Errorf("season[1] = %+v; want {11, 2}", seasons[1])
+	}
+}
+
+func TestHTTPPlexClient_GetEpisodes(t *testing.T) {
+	body := `{"MediaContainer":{"Metadata":[
+		{"ratingKey":"20","type":"episode","parentIndex":1,"index":1},
+		{"ratingKey":"21","type":"episode","parentIndex":1,"index":2},
+		{"ratingKey":"22","type":"season","parentIndex":0,"index":1}
+	]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	eps, err := c.GetEpisodes("10")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(eps) != 2 {
+		t.Fatalf("got %d episodes; want 2", len(eps))
+	}
+	if eps[0].RatingKey != "20" || eps[0].EpisodeNumber != 1 {
+		t.Errorf("ep[0] = %+v; want {20, 1, 1}", eps[0])
+	}
+}
+
+func TestHTTPPlexClient_SetContentRating_SendsCorrectParams(t *testing.T) {
+	var gotQuery url.Values
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotQuery = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "mytoken")
+	err := c.SetContentRating("99", PlexTypeEpisode, RatingR16)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method = %q; want PUT", gotMethod)
+	}
+	if gotQuery.Get("contentRating.value") != "R16" {
+		t.Errorf("contentRating.value = %q; want R16", gotQuery.Get("contentRating.value"))
+	}
+	if gotQuery.Get("contentRating.locked") != "1" {
+		t.Errorf("contentRating.locked = %q; want 1", gotQuery.Get("contentRating.locked"))
+	}
+	if gotQuery.Get("type") != "4" {
+		t.Errorf("type = %q; want 4 (PlexTypeEpisode)", gotQuery.Get("type"))
+	}
+}
+
+func TestHTTPPlexClient_SetContentRating_ErrorOnNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "bad-token")
+	err := c.SetContentRating("1", PlexTypeShow, RatingM)
+	if err == nil {
+		t.Error("expected error for non-2xx response")
+	}
+}

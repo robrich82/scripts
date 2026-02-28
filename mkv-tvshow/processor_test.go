@@ -32,12 +32,14 @@ func (c *captureFileTimer) SetCreationTime(path string, t time.Time) error {
 
 // fakeTMDB is a test double for TMDBClient with fixed return values.
 type fakeTMDB struct {
-	searchResults []ShowResult
-	searchErr     error
-	showDetails   ShowDetails
-	showErr       error
-	seasonResult  SeasonResult
-	seasonErr     error
+	searchResults    []ShowResult
+	searchErr        error
+	showDetails      ShowDetails
+	showErr          error
+	seasonResult     SeasonResult
+	seasonErr        error
+	contentRating    NZRating
+	contentRatingErr error
 }
 
 func (f *fakeTMDB) SearchTV(_ string) ([]ShowResult, error) {
@@ -49,6 +51,18 @@ func (f *fakeTMDB) GetShow(_ string) (ShowDetails, error) {
 func (f *fakeTMDB) GetSeason(_ string, _ int) (SeasonResult, error) {
 	return f.seasonResult, f.seasonErr
 }
+func (f *fakeTMDB) GetContentRatings(_ string) (NZRating, error) {
+	return f.contentRating, f.contentRatingErr
+}
+
+// fakeTMDB also implements RatingSource so it can be used in ratingSources slices.
+func (f *fakeTMDB) Name() string { return "fakeTMDB" }
+func (f *fakeTMDB) FetchShowRating(_ string, _ string) (NZRating, error) {
+	return f.contentRating, f.contentRatingErr
+}
+func (f *fakeTMDB) FetchEpisodeRating(_, _ string, _, _ int) (NZRating, error) {
+	return RatingNone, nil
+}
 
 // helpers
 
@@ -58,12 +72,19 @@ func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tm
 		cfg.MediaDir = dir
 	}
 	timer := &captureFileTimer{}
-	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t)), timer
+	rc, _ := LoadRatingCache(filepath.Join(t.TempDir(), "rating_cache.json"))
+	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t), rc, nil, nil), timer
 }
 
 func emptyRetryList(t *testing.T) *RetryList {
 	t.Helper()
 	return &RetryList{path: filepath.Join(t.TempDir(), "pending_dates.json"), data: make(map[string]bool)}
+}
+
+func emptyRatingCache(t *testing.T) *RatingCache {
+	t.Helper()
+	rc, _ := LoadRatingCache(filepath.Join(t.TempDir(), "rating_cache.json"))
+	return rc
 }
 
 func emptyCache(t *testing.T) *ShowCache {
@@ -249,7 +270,7 @@ func TestNormalizeFilename_ThreeEpisodes_Renamed(t *testing.T) {
 func TestApplyMKV_MkvpropeditNotFound(t *testing.T) {
 	runner := &fakeMKVRunner{avail: false}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyMKV("file.mkv", "Title", "", "id", "", "", "")
+	ok := p.applyMKV("file.mkv", "Title", "", "id", "", "", "", RatingNone)
 	if ok {
 		t.Error("expected false when mkvpropedit not available")
 	}
@@ -265,7 +286,7 @@ func TestApplyMKV_Success_ArgsIncludeEditAndTitle(t *testing.T) {
 		tagsPath:    "tags.xml",
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "My Title", "", "", "", "", "")
+	p.applyMKV("show.mkv", "My Title", "", "", "", "", "", RatingNone)
 
 	if len(runner.calls) == 0 {
 		t.Fatal("expected Apply to be called")
@@ -279,7 +300,7 @@ func TestApplyMKV_Success_ArgsIncludeEditAndTitle(t *testing.T) {
 func TestApplyMKV_WithDate_SetsDateArg(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "2021-05-10T00:00:00Z", "", "")
+	p.applyMKV("show.mkv", "T", "", "", "2021-05-10T00:00:00Z", "", "", RatingNone)
 
 	args := runner.calls[0].args
 	if !containsAll(args, "--set", "date=2021-05-10T00:00:00Z") {
@@ -296,7 +317,7 @@ func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 		posterOK:    true,
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg")
+	p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone)
 
 	args := runner.calls[0].args
 	if !containsAll(args, "--add-attachment", "poster.jpg") {
@@ -307,7 +328,7 @@ func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 func TestApplyMKV_NoPosterURL_NoAttachment(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "")
+	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone)
 
 	args := runner.calls[0].args
 	for _, a := range args {
@@ -325,7 +346,7 @@ func TestApplyMKV_ExistingJPEG_DeleteArgAdded(t *testing.T) {
 		tagsPath:    "t.xml",
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "")
+	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone)
 
 	args := runner.calls[0].args
 	if !containsAll(args, "--delete-attachment", "mime-type:image/jpeg") {
@@ -337,7 +358,7 @@ func TestApplyMKV_Success_SetsTimestamps(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyRC: 0, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
-	p.applyMKV("show.mkv", "T", "", "", "2020-06-15T00:00:00Z", "2020-06-15T00:00:00Z", "")
+	p.applyMKV("show.mkv", "T", "", "", "2020-06-15T00:00:00Z", "2020-06-15T00:00:00Z", "", RatingNone)
 
 	want := time.Date(2020, 6, 15, 0, 0, 0, 0, time.Local)
 	if len(timer.setTimesCalls) == 0 {
@@ -358,7 +379,7 @@ func TestApplyMKV_Failure_NoTimestamps(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyRC: 1, applyResult: "Error"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
-	p.applyMKV("show.mkv", "T", "", "", "2020-01-01T00:00:00Z", "2020-01-01T00:00:00Z", "")
+	p.applyMKV("show.mkv", "T", "", "", "2020-01-01T00:00:00Z", "2020-01-01T00:00:00Z", "", RatingNone)
 
 	if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
 		t.Error("timestamps should not be set on failure")
@@ -506,7 +527,7 @@ func TestProcessorRun_NoEpisodeDate_FallsBackToPreviousEpisode(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t))
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -535,7 +556,7 @@ func TestProcessorRun_NoEpisodeDate_NoPrevious_FallsBackToSeasonDate(t *testing.
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t))
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -564,7 +585,7 @@ func TestProcessorRun_NoEpisodeDate_NoSeasonDate_FallsBackToShowDate(t *testing.
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t))
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -591,7 +612,7 @@ func TestProcessorRun_FallbackDate_AddsToRetryList(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil)
 
 	p.Run()
 
@@ -616,7 +637,7 @@ func TestProcessorRun_RealDate_RemovesFromRetryList(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
 	retryList.Add(mkvPath) // pre-populate as if a previous run used a fallback
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil)
 
 	p.Run()
 
@@ -645,7 +666,7 @@ func TestProcessorRun_RetryList_BypassesCutoff(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
 	retryList.Add(mkvPath) // file is in retry list despite being old
-	p := NewProcessor(Config{MediaDir: dir, CutoffDate: time.Now(), ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList)
+	p := NewProcessor(Config{MediaDir: dir, CutoffDate: time.Now(), ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil)
 
 	stats := p.Run()
 

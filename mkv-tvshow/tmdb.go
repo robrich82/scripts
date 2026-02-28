@@ -39,6 +39,9 @@ type TMDBClient interface {
 	SearchTV(query string) ([]ShowResult, error)
 	GetShow(id string) (ShowDetails, error)
 	GetSeason(showID string, season int) (SeasonResult, error)
+	// GetContentRatings returns the NZ content rating for a TV series.
+	// Returns (RatingNone, nil) when no NZ rating is present in TMDB.
+	GetContentRatings(showID string) (NZRating, error)
 }
 
 // httpTMDBClient is the production TMDBClient that makes real HTTP requests.
@@ -86,6 +89,48 @@ func (c *httpTMDBClient) GetShow(id string) (ShowDetails, error) {
 		return ShowDetails{}, err
 	}
 	return d, nil
+}
+
+func (c *httpTMDBClient) GetContentRatings(showID string) (NZRating, error) {
+	params := url.Values{"api_key": {c.apiKey}}
+	resp, err := c.client.Get(
+		fmt.Sprintf("%s/tv/%s/content_ratings?%s", c.baseURL, showID, params.Encode()),
+	)
+	if err != nil {
+		return RatingNone, err
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		Results []struct {
+			ISO31661 string `json:"iso_3166_1"`
+			Rating   string `json:"rating"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return RatingNone, err
+	}
+	for _, r := range data.Results {
+		if r.ISO31661 == "NZ" {
+			if rating, ok := ParseNZRating(r.Rating); ok {
+				return rating, nil
+			}
+		}
+	}
+	return RatingNone, nil
+}
+
+// Name implements RatingSource.
+func (c *httpTMDBClient) Name() string { return "TMDB" }
+
+// FetchShowRating implements RatingSource by calling GetContentRatings.
+func (c *httpTMDBClient) FetchShowRating(tmdbID, _ string) (NZRating, error) {
+	return c.GetContentRatings(tmdbID)
+}
+
+// FetchEpisodeRating implements RatingSource. TMDB has no per-episode NZ ratings.
+func (c *httpTMDBClient) FetchEpisodeRating(_, _ string, _, _ int) (NZRating, error) {
+	return RatingNone, nil
 }
 
 func (c *httpTMDBClient) GetSeason(showID string, season int) (SeasonResult, error) {

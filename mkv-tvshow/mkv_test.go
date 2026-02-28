@@ -56,7 +56,7 @@ func (f *fakeMKVRunner) Cleanup(paths ...string) {
 // --- buildTagXML tests ---
 
 func TestBuildTagXML_WithDate(t *testing.T) {
-	xml := buildTagXML("Title", "", "", "2020-04-01T00:00:00Z")
+	xml := buildTagXML("Title", "", "", "2020-04-01T00:00:00Z", RatingNone)
 	if !strings.Contains(xml, "<Simple><Name>DATE</Name><String>2020-04-01</String></Simple>") {
 		t.Errorf("missing DATE node in: %s", xml)
 	}
@@ -66,36 +66,53 @@ func TestBuildTagXML_WithDate(t *testing.T) {
 }
 
 func TestBuildTagXML_WithSummary(t *testing.T) {
-	xml := buildTagXML("Title", "Episode summary", "", "")
+	xml := buildTagXML("Title", "Episode summary", "", "", RatingNone)
 	if !strings.Contains(xml, "<Simple><Name>SUMMARY</Name><String>Episode summary</String></Simple>") {
 		t.Errorf("missing SUMMARY node in: %s", xml)
 	}
 }
 
 func TestBuildTagXML_WithTMDBID(t *testing.T) {
-	xml := buildTagXML("Title", "", "12345", "")
+	xml := buildTagXML("Title", "", "12345", "", RatingNone)
 	if !strings.Contains(xml, "<Simple><Name>TMDB_ID</Name><String>12345</String></Simple>") {
 		t.Errorf("missing TMDB_ID node in: %s", xml)
 	}
 }
 
 func TestBuildTagXML_NoDate_ExcludesDateNodes(t *testing.T) {
-	xml := buildTagXML("Title", "summary", "id", "")
+	xml := buildTagXML("Title", "summary", "id", "", RatingNone)
 	if strings.Contains(xml, "DATE") || strings.Contains(xml, "YEAR") {
 		t.Errorf("unexpected DATE/YEAR in: %s", xml)
 	}
 }
 
 func TestBuildTagXML_AllEmpty_ReturnsEmpty(t *testing.T) {
-	xml := buildTagXML("Title", "", "", "")
+	xml := buildTagXML("Title", "", "", "", RatingNone)
 	if xml != "" {
 		t.Errorf("expected empty string, got: %s", xml)
 	}
 }
 
 func TestBuildTagXML_WrappedInTagsElement(t *testing.T) {
-	xml := buildTagXML("Title", "s", "", "")
+	xml := buildTagXML("Title", "s", "", "", RatingNone)
 	if !strings.HasPrefix(xml, "<Tags>") || !strings.HasSuffix(xml, "</Tags>") {
 		t.Errorf("expected <Tags>...</Tags> wrapper, got: %s", xml)
+	}
+}
+
+func TestBuildTagXML_WithRating_IncludesLAWRatingAndCountry(t *testing.T) {
+	xml := buildTagXML("Title", "s", "123", "", RatingR16)
+	if !strings.Contains(xml, "<Simple><Name>LAW_RATING</Name><String>R16</String></Simple>") {
+		t.Errorf("missing LAW_RATING node in: %s", xml)
+	}
+	if !strings.Contains(xml, "<Simple><Name>COUNTRY</Name><String>NZ</String></Simple>") {
+		t.Errorf("missing COUNTRY node in: %s", xml)
+	}
+}
+
+func TestBuildTagXML_NoRating_OmitsLAWRating(t *testing.T) {
+	xml := buildTagXML("Title", "s", "123", "", RatingNone)
+	if strings.Contains(xml, "LAW_RATING") || strings.Contains(xml, "COUNTRY") {
+		t.Errorf("unexpected LAW_RATING/COUNTRY in: %s", xml)
 	}
 }
