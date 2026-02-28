@@ -554,10 +554,11 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	// Snapshot the current mtime before mkvpropedit touches it.
 	origStat, statErr := os.Stat(filePath)
 
+	// COUNTRY is a nesting tag; LAW_RATING must be nested inside it.
 	xml := fmt.Sprintf(
 		"<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>"+
-			"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple>"+
-			"<Simple><Name>COUNTRY</Name><String>NZ</String></Simple>"+
+			"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
+			"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>"+
 			"</Tag></Tags>",
 		rating,
 	)

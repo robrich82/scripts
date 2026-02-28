@@ -155,10 +155,11 @@ func buildTagXML(title, summary, tmdbID, dateStr string, rating NZRating) string
 		)
 	}
 	if rating != RatingNone {
-		elements = append(elements,
-			fmt.Sprintf("<Simple><Name>LAW_RATING</Name><String>%s</String></Simple>", rating),
-			"<Simple><Name>COUNTRY</Name><String>NZ</String></Simple>",
-		)
+		// COUNTRY is a nesting tag; LAW_RATING must be nested inside it.
+		elements = append(elements, fmt.Sprintf(
+			"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
+				"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>",
+			rating))
 	}
 
 	if len(elements) == 0 {

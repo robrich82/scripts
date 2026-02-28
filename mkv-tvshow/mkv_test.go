@@ -100,13 +100,13 @@ func TestBuildTagXML_WrappedInTagsElement(t *testing.T) {
 	}
 }
 
-func TestBuildTagXML_WithRating_IncludesLAWRatingAndCountry(t *testing.T) {
+func TestBuildTagXML_WithRating_IncludesLAWRatingNestedInCountry(t *testing.T) {
 	xml := buildTagXML("Title", "s", "123", "", RatingR16)
-	if !strings.Contains(xml, "<Simple><Name>LAW_RATING</Name><String>R16</String></Simple>") {
-		t.Errorf("missing LAW_RATING node in: %s", xml)
-	}
-	if !strings.Contains(xml, "<Simple><Name>COUNTRY</Name><String>NZ</String></Simple>") {
-		t.Errorf("missing COUNTRY node in: %s", xml)
+	// LAW_RATING must be nested *inside* COUNTRY (COUNTRY is a nesting tag per Matroska spec).
+	want := "<Simple><Name>COUNTRY</Name><String>NZ</String>" +
+		"<Simple><Name>LAW_RATING</Name><String>R16</String></Simple></Simple>"
+	if !strings.Contains(xml, want) {
+		t.Errorf("expected nested COUNTRY>LAW_RATING in: %s", xml)
 	}
 }
 
