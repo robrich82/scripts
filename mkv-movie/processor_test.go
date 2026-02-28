@@ -8,25 +8,31 @@ import (
 	"time"
 )
 
-// fakeMediaInfoReader returns pre-set dates.
+// fakeMediaInfoReader returns pre-set dates and title.
 type fakeMediaInfoReader struct {
 	best   string
 	header string
+	title  string
 	err    error
 }
 
-func (f *fakeMediaInfoReader) Query(_ string) (string, string, error) {
-	return f.best, f.header, f.err
+func (f *fakeMediaInfoReader) Query(_ string) (string, string, string, error) {
+	return f.best, f.header, f.title, f.err
 }
 
 // fakeMKVSyncer records SyncHeader calls.
 type fakeMKVSyncer struct {
-	calls []string
+	calls []fakeSyncCall
 	err   error
 }
 
-func (f *fakeMKVSyncer) SyncHeader(_ string, dateStr string) error {
-	f.calls = append(f.calls, dateStr)
+type fakeSyncCall struct {
+	dateStr  string
+	tagsPath string
+}
+
+func (f *fakeMKVSyncer) SyncHeader(_ string, dateStr, tagsPath string) error {
+	f.calls = append(f.calls, fakeSyncCall{dateStr, tagsPath})
 	return f.err
 }
 
@@ -105,9 +111,7 @@ func TestParseDate_InvalidYear(t *testing.T) {
 func TestProcessFile_NoDate_Skipped(t *testing.T) {
 	path := makeTempMKV(t)
 	mi := &fakeMediaInfoReader{best: "", header: ""}
-	timer := &fakeFileTimer{}
-
-	result := processFile(path, mi, nil, timer)
+	result := processFile(path, mi, nil, &fakeFileTimer{}, nil)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped", result)
 	}
@@ -116,9 +120,7 @@ func TestProcessFile_NoDate_Skipped(t *testing.T) {
 func TestProcessFile_MediaInfoError_Error(t *testing.T) {
 	path := makeTempMKV(t)
 	mi := &fakeMediaInfoReader{err: fmt.Errorf("mediainfo not found")}
-	timer := &fakeFileTimer{}
-
-	result := processFile(path, mi, nil, timer)
+	result := processFile(path, mi, nil, &fakeFileTimer{}, nil)
 	if result != ResultError {
 		t.Errorf("got %v, want ResultError", result)
 	}
@@ -126,7 +128,6 @@ func TestProcessFile_MediaInfoError_Error(t *testing.T) {
 
 func TestProcessFile_HeaderDiffers_SyncsAndUpdates(t *testing.T) {
 	path := makeTempMKV(t)
-	// Set file mtime far in the past so mtime update is also needed.
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, past, past)
 
@@ -134,11 +135,11 @@ func TestProcessFile_HeaderDiffers_SyncsAndUpdates(t *testing.T) {
 	syncer := &fakeMKVSyncer{}
 	timer := &fakeFileTimer{}
 
-	result := processFile(path, mi, syncer, timer)
+	result := processFile(path, mi, syncer, timer, nil)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated", result)
 	}
-	if len(syncer.calls) != 1 || syncer.calls[0] != "2021-04-10" {
+	if len(syncer.calls) != 1 || syncer.calls[0].dateStr != "2021-04-10" {
 		t.Errorf("SyncHeader calls: %v", syncer.calls)
 	}
 }
@@ -146,14 +147,13 @@ func TestProcessFile_HeaderDiffers_SyncsAndUpdates(t *testing.T) {
 func TestProcessFile_AlreadyCurrent_OK(t *testing.T) {
 	path := makeTempMKV(t)
 	target := time.Date(2021, 4, 10, 0, 0, 0, 0, time.Local)
-	// Set mtime to match the target date so no update is needed.
 	os.Chtimes(path, target, target)
 
 	mi := &fakeMediaInfoReader{best: "2021-04-10", header: "2021-04-10"}
 	syncer := &fakeMKVSyncer{}
 	timer := &fakeFileTimer{}
 
-	result := processFile(path, mi, syncer, timer)
+	result := processFile(path, mi, syncer, timer, nil)
 	if result != ResultOK {
 		t.Errorf("got %v, want ResultOK", result)
 	}
@@ -174,12 +174,61 @@ func TestProcessFile_YearOnly_ParsedAndUpdated(t *testing.T) {
 	syncer := &fakeMKVSyncer{}
 	timer := &fakeFileTimer{}
 
-	result := processFile(path, mi, syncer, timer)
+	result := processFile(path, mi, syncer, timer, nil)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated", result)
 	}
 	if len(syncer.calls) == 0 {
 		t.Error("expected SyncHeader to be called")
+	}
+}
+
+func TestProcessFile_MkvpropeditRuns_AlwaysRestoresMtime(t *testing.T) {
+	// mtime is already at the target date, but header differs → mkvpropedit runs.
+	// After mkvpropedit the mtime would silently be "now" without the fix.
+	// Verify SetTimes is still called.
+	path := makeTempMKV(t)
+	target := time.Date(2021, 4, 10, 0, 0, 0, 0, time.Local)
+	os.Chtimes(path, target, target) // mtime already correct
+
+	mi := &fakeMediaInfoReader{best: "2021-04-10", header: ""} // header wrong
+	syncer := &fakeMKVSyncer{}
+	timer := &fakeFileTimer{}
+
+	processFile(path, mi, syncer, timer, nil)
+
+	if len(timer.setTimesCalls) == 0 {
+		t.Error("SetTimes must be called after mkvpropedit even when mtime was already correct")
+	}
+}
+
+func TestProcessFile_WithRating_TagsWrittenAndTimestampRestored(t *testing.T) {
+	path := makeTempMKV(t)
+	target := time.Date(2020, 6, 15, 0, 0, 0, 0, time.Local)
+	os.Chtimes(path, target, target)
+
+	mi := &fakeMediaInfoReader{best: "2020-06-15", header: "2020-06-15", title: "My Film"}
+	syncer := &fakeMKVSyncer{}
+	timer := &fakeFileTimer{}
+
+	dir := t.TempDir()
+	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
+	prompter := func(string) (string, error) { return "", nil }
+	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
+	// Pre-load cache so no prompt is needed.
+	cache.Set("My Film:2020", RatingM)
+
+	result := processFile(path, mi, syncer, timer, rr)
+	if result != ResultUpdated {
+		t.Errorf("got %v, want ResultUpdated (rating tag written)", result)
+	}
+	// SyncHeader should have been called with a non-empty tagsPath.
+	if len(syncer.calls) == 0 || syncer.calls[0].tagsPath == "" {
+		t.Error("expected SyncHeader to be called with tagsPath for rating tag")
+	}
+	// Timestamps must be restored after mkvpropedit.
+	if len(timer.setTimesCalls) == 0 {
+		t.Error("SetTimes must be called to restore timestamp after rating tag write")
 	}
 }
 
@@ -190,7 +239,7 @@ func TestWalkAndProcess_SkipsNonMKV(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "subtitle.srt"), []byte{}, 0644)
 
 	mi := &fakeMediaInfoReader{best: ""}
-	stats := walkAndProcess(dir, mi, nil, &fakeFileTimer{})
+	stats := walkAndProcess(dir, mi, nil, &fakeFileTimer{}, nil)
 	if stats.Skipped != 0 || stats.Updated != 0 || stats.Errors != 0 {
 		t.Errorf("unexpected stats for non-mkv file: %+v", stats)
 	}
@@ -200,8 +249,8 @@ func TestWalkAndProcess_CountsSkipped(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "movie.mkv"), []byte{}, 0644)
 
-	mi := &fakeMediaInfoReader{best: ""} // no date -> skipped
-	stats := walkAndProcess(dir, mi, nil, &fakeFileTimer{})
+	mi := &fakeMediaInfoReader{best: ""}
+	stats := walkAndProcess(dir, mi, nil, &fakeFileTimer{}, nil)
 	if stats.Skipped != 1 {
 		t.Errorf("got Skipped=%d, want 1", stats.Skipped)
 	}

@@ -1,0 +1,212 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
+)
+
+const tmdbAPIBase = "https://api.themoviedb.org/3"
+
+// tmdbMovieSource implements RatingSource using the TMDB API.
+// It searches for a movie by title+year, then fetches the NZ certification
+// from /movie/{id}/release_dates.
+// If apiKey is empty, FetchRating immediately returns (RatingNone, nil).
+type tmdbMovieSource struct {
+	apiKey     string
+	httpClient *http.Client
+}
+
+func newTMDBMovieSource(apiKey string) *tmdbMovieSource {
+	return &tmdbMovieSource{apiKey: apiKey, httpClient: &http.Client{}}
+}
+
+// Name implements RatingSource.
+func (t *tmdbMovieSource) Name() string { return "TMDB" }
+
+// FetchRating implements RatingSource.
+// key is unused (movies have no prior TMDB ID); title is "Title:YEAR" or just the title.
+// year is embedded in the title string by the caller as "title:YEAR"; we split it out.
+// Actually the caller passes title and year separately via the key parameter convention:
+// key = TMDB numeric ID when already known; title = movie title for search.
+func (t *tmdbMovieSource) FetchRating(key, title string) (NZRating, error) {
+	if t.apiKey == "" {
+		return RatingNone, nil
+	}
+
+	// key may be a TMDB numeric ID from a previous cache entry — skip search if so.
+	var tmdbID string
+	var year string
+	if isNumeric(key) {
+		tmdbID = key
+	} else {
+		// key is "title:YEAR" — extract year for the search.
+		if idx := strings.LastIndex(key, ":"); idx >= 0 {
+			year = key[idx+1:]
+		}
+		var err error
+		tmdbID, err = t.searchMovie(title, year)
+		if err != nil {
+			return RatingNone, fmt.Errorf("TMDB search %q: %w", title, err)
+		}
+		if tmdbID == "" {
+			return RatingNone, nil // no match found
+		}
+	}
+
+	return t.nzCertification(tmdbID)
+}
+
+// SearchMovieID searches TMDB for title+year and returns the numeric TMDB ID
+// of the best match, or "" if nothing found. Exported for testing.
+func (t *tmdbMovieSource) SearchMovieID(title, year string) (string, error) {
+	return t.searchMovie(title, year)
+}
+
+func (t *tmdbMovieSource) searchMovie(title, year string) (string, error) {
+	u := fmt.Sprintf("%s/search/movie?api_key=%s&query=%s&language=en-US",
+		tmdbAPIBase, url.QueryEscape(t.apiKey), url.QueryEscape(title))
+	if year != "" {
+		u += "&year=" + url.QueryEscape(year)
+	}
+
+	resp, err := t.httpClient.Get(u)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Results []struct {
+			ID          int    `json:"id"`
+			ReleaseDate string `json:"release_date"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode search response: %w", err)
+	}
+
+	for _, r := range result.Results {
+		// Match by year if provided — release_date is "YYYY-MM-DD".
+		if year == "" || strings.HasPrefix(r.ReleaseDate, year) {
+			return fmt.Sprintf("%d", r.ID), nil
+		}
+	}
+	return "", nil
+}
+
+// nzCertification fetches the NZ release certification for a TMDB movie ID.
+func (t *tmdbMovieSource) nzCertification(tmdbID string) (NZRating, error) {
+	u := fmt.Sprintf("%s/movie/%s/release_dates?api_key=%s",
+		tmdbAPIBase, tmdbID, url.QueryEscape(t.apiKey))
+
+	resp, err := t.httpClient.Get(u)
+	if err != nil {
+		return RatingNone, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Results []struct {
+			ISO   string `json:"iso_3166_1"`
+			Dates []struct {
+				Cert string `json:"certification"`
+				Type int    `json:"type"`
+			} `json:"release_dates"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return RatingNone, fmt.Errorf("decode release_dates: %w", err)
+	}
+
+	for _, country := range result.Results {
+		if country.ISO != "NZ" {
+			continue
+		}
+		// Prefer theatrical release (type 3); fall back to any non-empty cert.
+		var fallback string
+		for _, d := range country.Dates {
+			if d.Cert == "" {
+				continue
+			}
+			if d.Type == 3 {
+				if r, ok := ParseNZRating(d.Cert); ok {
+					return r, nil
+				}
+			}
+			if fallback == "" {
+				fallback = d.Cert
+			}
+		}
+		if fallback != "" {
+			if r, ok := ParseNZRating(fallback); ok {
+				return r, nil
+			}
+		}
+	}
+	return RatingNone, nil
+}
+
+// isNumeric returns true when s contains only digits.
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// yearRe matches a 4-digit year, optionally surrounded by dots, underscores,
+// spaces, or parentheses.
+var yearRe = regexp.MustCompile(`[\s._(\[]((?:19|20)\d{2})[\s._)\]]`)
+
+// titleFromFilename derives a human-readable movie title from a filename.
+// It strips the extension, removes the year and everything after it, then
+// replaces dots and underscores with spaces.
+func titleFromFilename(filename, year string) string {
+	// Strip extension.
+	if idx := strings.LastIndex(filename, "."); idx > 0 {
+		filename = filename[:idx]
+	}
+
+	// If year is known, truncate at first occurrence of the year pattern.
+	// Patterns with a trailing separator handle mid-stem years; patterns without
+	// handle a year at the very end of the (already extension-stripped) stem.
+	if year != "" {
+		patterns := []string{
+			"." + year + ".",
+			"_" + year + "_",
+			"(" + year + ")",
+			"[" + year + "]",
+			" " + year + " ",
+			// year at end of stem:
+			"." + year,
+			"_" + year,
+			" " + year,
+		}
+		for _, p := range patterns {
+			if idx := strings.Index(filename, p); idx >= 0 {
+				filename = filename[:idx]
+				break
+			}
+		}
+	} else {
+		// Try to detect a year automatically.
+		if m := yearRe.FindStringIndex(" " + filename + " "); m != nil {
+			// m[0] is the space/dot before the year; chop before it.
+			filename = strings.TrimRight(filename[:m[0]], ". _([")
+		}
+	}
+
+	// Replace separators with spaces.
+	filename = strings.ReplaceAll(filename, ".", " ")
+	filename = strings.ReplaceAll(filename, "_", " ")
+	return strings.TrimSpace(filename)
+}

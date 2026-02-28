@@ -1,11 +1,15 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 )
 
 func main() {
+	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
+	flag.Parse()
+
 	mi, err := newRealMediaInfoReader()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error: 'mediainfo' CLI not found. Please install it and add to PATH.")
@@ -27,8 +31,30 @@ func main() {
 
 	timer := &win32FileTimer{}
 
+	// Rating pipeline (all optional).
+	tmdbKey := os.Getenv("TMDB_API_KEY")
+	plexURL := os.Getenv("PLEX_URL")
+	plexToken := os.Getenv("PLEX_TOKEN")
+
+	ratingCache, err := LoadMovieRatingCache("movie_rating_cache.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not load rating cache: %v\n", err)
+		ratingCache, _ = LoadMovieRatingCache("/dev/null") // empty fallback
+	}
+
+	var plex PlexMovieClient
+	if plexURL != "" && plexToken != "" {
+		plex = newHTTPPlexMovieClient(plexURL, plexToken)
+	}
+
+	sources := []RatingSource{
+		newTMDBMovieSource(tmdbKey),
+		newClassificationSource(),
+	}
+	rr := newMovieRatingResolver(sources, ratingCache, *overwriteRatings, plex, stdinPrompter)
+
 	fmt.Printf("Scanning %s...\n", dir)
-	stats := walkAndProcess(dir, mi, syncer, timer)
+	stats := walkAndProcess(dir, mi, syncer, timer, rr)
 
 	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Errors: %d\n",
 		stats.Updated, stats.OK, stats.Skipped, stats.Errors)
