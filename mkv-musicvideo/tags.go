@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -228,9 +229,16 @@ func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix str
 
 		// Remove any existing cover attachment before re-adding. These calls
 		// will fail (non-zero) when the attachment doesn't exist, which is
-		// fine — we swallow the error intentionally.
-		exec.Command(t.mkvpropeditPath, mkvPath, "--delete-attachment", "name:cover.jpg").Run() //nolint:errcheck
-		exec.Command(t.mkvpropeditPath, mkvPath, "--delete-attachment", "name:cover.png").Run() //nolint:errcheck
+		// fine — we swallow the error intentionally.  Stdout/stderr are
+		// discarded to suppress the "The file is being analyzed." progress line.
+		deleteAttachment := func(name string) {
+			cmd := exec.Command(t.mkvpropeditPath, mkvPath, "--delete-attachment", "name:"+name)
+			cmd.Stdout = io.Discard
+			cmd.Stderr = io.Discard
+			cmd.Run() //nolint:errcheck
+		}
+		deleteAttachment("cover.jpg")
+		deleteAttachment("cover.png")
 	}
 
 	// Single mkvpropedit call: title header + tags + optional cover attachment.
