@@ -79,30 +79,58 @@ func readAudioTags(path string) (AudioTags, error) {
 }
 
 // buildTagsXML returns a Matroska tags XML document for the given AudioTags.
-// All non-empty / non-zero fields are written as Simple tags at target level 50.
+//
+// Per the Matroska spec, TITLE at TargetTypeValue=50 means the album/collection
+// title, and TITLE at TargetTypeValue=30 means the track title.  ARTIST at
+// level 50 is the album artist; ARTIST at level 30 is the track artist.
+// Using a single level-50 block with track-level fields causes tag viewers
+// (e.g. Mp3tag) to misread them.
 func buildTagsXML(t AudioTags) string {
-	var elems []string
-	add := func(name, value string) {
+	simple := func(name, value string) string {
+		return "<Simple><Name>" + name + "</Name><String>" + xmlEscape(value) + "</String></Simple>"
+	}
+
+	var lvl50, lvl30 []string
+	addTo := func(elems *[]string, name, value string) {
 		if value != "" {
-			elems = append(elems, "<Simple><Name>"+name+"</Name><String>"+xmlEscape(value)+"</String></Simple>")
+			*elems = append(*elems, simple(name, value))
 		}
 	}
-	add("TITLE", t.Title)
-	add("ARTIST", t.Artist)
-	add("ALBUMARTIST", t.AlbumArtist)
-	add("ALBUM", t.Album)
-	if t.TrackNum > 0 {
-		add("PART_NUMBER", strconv.Itoa(t.TrackNum))
-	}
-	if t.Year > 0 {
-		add("DATE_RECORDED", strconv.Itoa(t.Year))
-	}
-	add("GENRE", t.Genre)
-	add("COMMENT", t.Comment)
 
-	return "<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>" +
-		strings.Join(elems, "") +
-		"</Tag></Tags>"
+	// Album-level tags (TargetTypeValue=50): TITLE=album title, ARTIST=album artist.
+	addTo(&lvl50, "TITLE", t.Album)
+	addTo(&lvl50, "ARTIST", t.AlbumArtist)
+	if t.Year > 0 {
+		addTo(&lvl50, "DATE_RECORDED", strconv.Itoa(t.Year))
+	}
+	addTo(&lvl50, "GENRE", t.Genre)
+	addTo(&lvl50, "COMMENT", t.Comment)
+
+	// Track-level tags (TargetTypeValue=30): TITLE=track title, ARTIST=track artist.
+	addTo(&lvl30, "TITLE", t.Title)
+	addTo(&lvl30, "ARTIST", t.Artist)
+	if t.TrackNum > 0 {
+		addTo(&lvl30, "PART_NUMBER", strconv.Itoa(t.TrackNum))
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<Tags>")
+	if len(lvl50) > 0 {
+		sb.WriteString("<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>")
+		for _, e := range lvl50 {
+			sb.WriteString(e)
+		}
+		sb.WriteString("</Tag>")
+	}
+	if len(lvl30) > 0 {
+		sb.WriteString("<Tag><Targets><TargetTypeValue>30</TargetTypeValue></Targets>")
+		for _, e := range lvl30 {
+			sb.WriteString(e)
+		}
+		sb.WriteString("</Tag>")
+	}
+	sb.WriteString("</Tags>")
+	return sb.String()
 }
 
 // rawVorbisString reads a string value from the raw Vorbis comment map returned
