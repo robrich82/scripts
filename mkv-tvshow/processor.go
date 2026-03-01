@@ -46,9 +46,10 @@ type Processor struct {
 	ratingSources []RatingSource
 	plex          PlexClient
 
-	sessionSkipped       map[string]bool
-	sessionConfirmed     map[string]string
+	sessionSkipped        map[string]bool
+	sessionConfirmed      map[string]string
 	sessionPromptedRating map[string]NZRating // tmdbID → rating from user prompt this run
+	sessionPlexKey        map[string]string   // tmdbID → Plex show ratingKey (cached across methods)
 }
 
 // NewProcessor constructs a Processor with the given dependencies.
@@ -80,6 +81,7 @@ func NewProcessor(
 		sessionSkipped:        make(map[string]bool),
 		sessionConfirmed:      make(map[string]string),
 		sessionPromptedRating: make(map[string]NZRating),
+		sessionPlexKey:        make(map[string]string),
 	}
 }
 
@@ -252,7 +254,7 @@ func (p *Processor) Run() Stats {
 				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
 			}
 		}
-		p.applyPlexRatings(showID)
+		p.applyPlexRatings(showID, showName)
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -552,6 +554,9 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 			}
 		}
 		if showKey != "" {
+			if p.sessionPlexKey != nil {
+				p.sessionPlexKey[tmdbID] = showKey
+			}
 			var fetchErr error
 			plexDefault, fetchErr = p.plex.GetContentRating(showKey)
 			if fetchErr != nil {
@@ -670,16 +675,32 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 // applyPlexRatings pushes cached ratings to Plex at episode, season, and show
 // level. Season and show ratings are computed as the maximum (most restrictive)
 // rating across their child items. Does nothing when Plex is not configured.
-func (p *Processor) applyPlexRatings(tmdbID string) {
+// showName is used as a title-match fallback when TMDB GUID lookup fails.
+func (p *Processor) applyPlexRatings(tmdbID, showName string) {
 	if p.plex == nil || p.ratingCache == nil {
 		return
 	}
 
-	showKey, err := p.plex.FindShowByTMDBID(tmdbID)
-	if err != nil {
-		if err != ErrPlexNotFound {
-			fmt.Printf("  [!] Plex: FindShowByTMDBID(%s): %v\n", tmdbID, err)
+	// Use the showKey already discovered during rating lookup if available;
+	// otherwise repeat the TMDB-ID → title fallback chain.
+	showKey, ok := p.sessionPlexKey[tmdbID]
+	if !ok {
+		var err error
+		showKey, err = p.plex.FindShowByTMDBID(tmdbID)
+		if err != nil {
+			if err != ErrPlexNotFound {
+				fmt.Printf("  [!] Plex: FindShowByTMDBID(%s): %v\n", tmdbID, err)
+			} else {
+				// Title fallback for shows using non-TMDB agents (e.g. HAMA).
+				var titleErr error
+				showKey, titleErr = p.plex.FindShowByTitle(showName)
+				if titleErr != nil && titleErr != ErrPlexNotFound {
+					fmt.Printf("  [!] Plex: FindShowByTitle(%q): %v\n", showName, titleErr)
+				}
+			}
 		}
+	}
+	if showKey == "" {
 		return
 	}
 
