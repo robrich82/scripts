@@ -16,18 +16,20 @@ type setRatingCall struct {
 }
 
 type fakePlexClient struct {
-	showRatingKey    string
-	findErr          error
-	titleRatingKey   string
-	findTitleErr     error
-	seasons          []PlexSeason
-	seasonsErr       error
-	episodesByKey    map[string][]PlexEpisodeItem
-	episodesErr      error
-	setRatingCalls   []setRatingCall
-	setRatingErr     error
-	contentRating    NZRating
-	contentRatingErr error
+	showRatingKey      string
+	findErr            error
+	titleRatingKey     string
+	findTitleErr       error
+	filePathRatingKey  string
+	filePathErr        error
+	seasons            []PlexSeason
+	seasonsErr         error
+	episodesByKey      map[string][]PlexEpisodeItem
+	episodesErr        error
+	setRatingCalls     []setRatingCall
+	setRatingErr       error
+	contentRating      NZRating
+	contentRatingErr   error
 }
 
 func (f *fakePlexClient) FindShowByTMDBID(_ string) (string, error) {
@@ -36,6 +38,10 @@ func (f *fakePlexClient) FindShowByTMDBID(_ string) (string, error) {
 
 func (f *fakePlexClient) FindShowByTitle(_ string) (string, error) {
 	return f.titleRatingKey, f.findTitleErr
+}
+
+func (f *fakePlexClient) FindShowByFilePath(_ string) (string, error) {
+	return f.filePathRatingKey, f.filePathErr
 }
 
 func (f *fakePlexClient) GetSeasons(_ string) ([]PlexSeason, error) {
@@ -445,6 +451,71 @@ func TestHTTPPlexClient_FindShowByTitle_SkipsMovieSections(t *testing.T) {
 
 	c := newHTTPPlexClient(srv.URL, "token")
 	_, err := c.FindShowByTitle("AIKa")
+	if err != ErrPlexNotFound {
+		t.Errorf("expected ErrPlexNotFound, got %v", err)
+	}
+}
+
+// --- FindShowByFilePath tests ---
+
+func TestHTTPPlexClient_FindShowByFilePath_Found(t *testing.T) {
+	const filePath = `G:\TV\AIKa (1997)\Season 01\AIKa - S01E01 - Trial 1꞉ Beautiful Agent.mkv`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexSectionsJSON("2", "show")))
+		} else {
+			// Verify the part.file param is passed.
+			if r.URL.Query().Get("part.file") != filePath {
+				t.Errorf("part.file = %q; want %q", r.URL.Query().Get("part.file"), filePath)
+			}
+			w.Write([]byte(`{"MediaContainer":{"Metadata":[{"grandparentRatingKey":"23067"}]}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	key, err := c.FindShowByFilePath(filePath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "23067" {
+		t.Errorf("got ratingKey %q; want 23067", key)
+	}
+}
+
+func TestHTTPPlexClient_FindShowByFilePath_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexSectionsJSON("2", "show")))
+		} else {
+			w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	_, err := c.FindShowByFilePath(`G:\TV\Unknown\S01E01.mkv`)
+	if err != ErrPlexNotFound {
+		t.Errorf("expected ErrPlexNotFound, got %v", err)
+	}
+}
+
+func TestHTTPPlexClient_FindShowByFilePath_SkipsMovieSections(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			w.Write([]byte(plexSectionsJSON("1", "movie")))
+		} else {
+			t.Error("should not scan non-show section")
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	_, err := c.FindShowByFilePath(`G:\TV\Something\S01E01.mkv`)
 	if err != ErrPlexNotFound {
 		t.Errorf("expected ErrPlexNotFound, got %v", err)
 	}

@@ -171,7 +171,7 @@ func (p *Processor) Run() Stats {
 			currID, tmdbSeason, tmdbEpisode := p.resolveEpisode(showFolder, showID, sNum, eNum)
 
 			// Resolve NZ content rating for this episode.
-			rating := p.resolveEpisodeRating(currID, showName, tmdbSeason, tmdbEpisode)
+			rating := p.resolveEpisodeRating(currID, showName, filePath, tmdbSeason, tmdbEpisode)
 
 			if p.cfg.RatingsOnly {
 				// Ratings-only mode: only write LAW_RATING to MKV, skip all other processing.
@@ -465,7 +465,9 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 // trying sources in priority order and prompting the user as a last resort.
 // The result (including RatingNone) is cached at the show level to avoid
 // re-prompting for subsequent episodes of the same show within one run.
-func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episode int) NZRating {
+// filePath is the absolute path to the MKV being processed; it is used as a
+// last-resort Plex lookup when TMDB GUID and title matching both fail.
+func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, season, episode int) NZRating {
 	if p.ratingCache == nil {
 		return RatingNone
 	}
@@ -527,8 +529,8 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 	}
 
 	// Check Plex for an existing rating to use as the default on blank input.
-	// Try TMDB-ID lookup first; fall back to title search for shows using
-	// non-TMDB agents (e.g. HAMA for anime).
+	// Try TMDB-ID lookup first, then title match, then file-path lookup (most
+	// reliable for anime whose Plex title differs from the folder name).
 	var plexDefault NZRating
 	if p.plex != nil {
 		showKey, err := p.plex.FindShowByTMDBID(tmdbID)
@@ -542,6 +544,13 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 				fmt.Printf("  [i] Plex: title lookup error for %q: %v\n", showName, titleErr)
 			}
 		}
+		if showKey == "" && filePath != "" {
+			var pathErr error
+			showKey, pathErr = p.plex.FindShowByFilePath(filePath)
+			if pathErr != nil && pathErr != ErrPlexNotFound {
+				fmt.Printf("  [i] Plex: file-path lookup error for %q: %v\n", showName, pathErr)
+			}
+		}
 		if showKey != "" {
 			var fetchErr error
 			plexDefault, fetchErr = p.plex.GetContentRating(showKey)
@@ -551,7 +560,7 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 				fmt.Printf("  [i] Plex: %q found but no NZ content rating is set\n", showName)
 			}
 		} else {
-			fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID and title match)\n", showName)
+			fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID, title, and file path)\n", showName)
 		}
 	}
 

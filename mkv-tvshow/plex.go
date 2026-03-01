@@ -46,6 +46,13 @@ type PlexClient interface {
 	// title (normalised) matches title. Used as a fallback when the show uses a
 	// non-TMDB agent (e.g. HAMA for anime). Returns ErrPlexNotFound if absent.
 	FindShowByTitle(title string) (string, error)
+	// FindShowByFilePath searches all "show" library sections for the show that
+	// owns the episode file at filePath. It queries episode metadata filtered by
+	// part.file and returns the grandparentRatingKey (show ratingKey) of the
+	// matching episode. Used as a last resort when TMDB GUID and title matching
+	// both fail (e.g. when the Plex title differs from the filesystem folder
+	// name). Returns ErrPlexNotFound if no episode with that path exists.
+	FindShowByFilePath(filePath string) (string, error)
 	// GetSeasons returns the ratingKey and season number for every season of
 	// the show identified by showRatingKey.
 	GetSeasons(showRatingKey string) ([]PlexSeason, error)
@@ -350,6 +357,70 @@ func (c *httpPlexClient) findShowInSectionByTitle(sectionKey, normTitle string) 
 		if normalizeShowTitle(item.Title) == normTitle {
 			return item.RatingKey, nil
 		}
+	}
+	return "", nil
+}
+
+// FindShowByFilePath implements PlexClient. It queries each show library
+// section for episodes (type=4) whose Part file matches filePath exactly,
+// then returns the grandparentRatingKey of the first match — the show's Plex
+// ratingKey. This is the most reliable fallback for shows whose Plex title
+// differs from the filesystem folder name (e.g. anime using HAMA agent).
+func (c *httpPlexClient) FindShowByFilePath(filePath string) (string, error) {
+	resp, err := c.plexGet("/library/sections")
+	if err != nil {
+		return "", fmt.Errorf("plex: list sections: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var sectionsResp struct {
+		MediaContainer struct {
+			Directory []struct {
+				Key  string `json:"key"`
+				Type string `json:"type"`
+			} `json:"Directory"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
+		return "", fmt.Errorf("plex: decode sections: %w", err)
+	}
+
+	for _, section := range sectionsResp.MediaContainer.Directory {
+		if section.Type != "show" {
+			continue
+		}
+		key, err := c.findShowInSectionByFilePath(section.Key, filePath)
+		if err != nil {
+			return "", err
+		}
+		if key != "" {
+			return key, nil
+		}
+	}
+	return "", ErrPlexNotFound
+}
+
+func (c *httpPlexClient) findShowInSectionByFilePath(sectionKey, filePath string) (string, error) {
+	path := "/library/sections/" + sectionKey + "/all?type=4&part.file=" + url.QueryEscape(filePath)
+	resp, err := c.plexGet(path)
+	if err != nil {
+		return "", fmt.Errorf("plex: list section %s by file: %w", sectionKey, err)
+	}
+	defer resp.Body.Close()
+
+	var allResp struct {
+		MediaContainer struct {
+			Metadata []struct {
+				GrandparentRatingKey string `json:"grandparentRatingKey"`
+			} `json:"Metadata"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
+		return "", fmt.Errorf("plex: decode section %s file results: %w", sectionKey, err)
+	}
+
+	if len(allResp.MediaContainer.Metadata) > 0 {
+		return allResp.MediaContainer.Metadata[0].GrandparentRatingKey, nil
 	}
 	return "", nil
 }
