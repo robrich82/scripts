@@ -247,10 +247,11 @@ func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix str
 		)
 	}
 	cmd := exec.Command(t.mkvpropeditPath, args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
 	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(out.String())
 		if msg != "" {
 			return fmt.Errorf("mkvpropedit: %w\n%s", err, msg)
 		}
