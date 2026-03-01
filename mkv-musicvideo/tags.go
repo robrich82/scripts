@@ -53,10 +53,21 @@ func readAudioTags(path string) (AudioTags, error) {
 		coverMIME = pic.MIMEType
 	}
 
+	// dhowden/tag maps the Vorbis "artist" key but not "performer".
+	// Some FLAC files (e.g. ripped with certain tools) use PERFORMER instead of ARTIST.
+	artist := m.Artist()
+	if artist == "" {
+		artist = rawVorbisString(m.Raw(), "performer")
+	}
+	albumArtist := m.AlbumArtist()
+	if albumArtist == "" {
+		albumArtist = rawVorbisString(m.Raw(), "album_artist")
+	}
+
 	return AudioTags{
 		Title:       m.Title(),
-		Artist:      m.Artist(),
-		AlbumArtist: m.AlbumArtist(),
+		Artist:      artist,
+		AlbumArtist: albumArtist,
 		Album:       m.Album(),
 		TrackNum:    trackNum,
 		Year:        m.Year(),
@@ -78,7 +89,7 @@ func buildTagsXML(t AudioTags) string {
 	}
 	add("TITLE", t.Title)
 	add("ARTIST", t.Artist)
-	add("ALBUM_ARTIST", t.AlbumArtist)
+	add("ALBUMARTIST", t.AlbumArtist)
 	add("ALBUM", t.Album)
 	if t.TrackNum > 0 {
 		add("PART_NUMBER", strconv.Itoa(t.TrackNum))
@@ -92,6 +103,31 @@ func buildTagsXML(t AudioTags) string {
 	return "<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>" +
 		strings.Join(elems, "") +
 		"</Tag></Tags>"
+}
+
+// rawVorbisString reads a string value from the raw Vorbis comment map returned
+// by tag.Metadata.Raw(). Values can be strings or []string (multiple comments
+// with the same key); we return the first non-empty value found.
+func rawVorbisString(raw interface{}, key string) string {
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	v, ok := m[key]
+	if !ok {
+		return ""
+	}
+	switch s := v.(type) {
+	case string:
+		return s
+	case []string:
+		for _, item := range s {
+			if item != "" {
+				return item
+			}
+		}
+	}
+	return ""
 }
 
 // xmlEscape replaces XML special characters with their entity references.
