@@ -42,6 +42,10 @@ type PlexClient interface {
 	// Guid list contains "tmdb://{tmdbID}". Returns the ratingKey on success,
 	// or ErrPlexNotFound if no match exists.
 	FindShowByTMDBID(tmdbID string) (string, error)
+	// FindShowByTitle searches all "show" library sections for an item whose
+	// title (normalised) matches title. Used as a fallback when the show uses a
+	// non-TMDB agent (e.g. HAMA for anime). Returns ErrPlexNotFound if absent.
+	FindShowByTitle(title string) (string, error)
 	// GetSeasons returns the ratingKey and season number for every season of
 	// the show identified by showRatingKey.
 	GetSeasons(showRatingKey string) ([]PlexSeason, error)
@@ -282,6 +286,85 @@ func (c *httpPlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem,
 		}
 	}
 	return episodes, nil
+}
+
+// FindShowByTitle implements PlexClient. It scans all "show" library sections
+// for an item whose normalised title matches title, regardless of which
+// metadata agent is in use. This is a fallback for when FindShowByTMDBID fails
+// because the show uses a non-TMDB agent (e.g. HAMA for anime).
+func (c *httpPlexClient) FindShowByTitle(title string) (string, error) {
+	resp, err := c.plexGet("/library/sections")
+	if err != nil {
+		return "", fmt.Errorf("plex: list sections: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var sectionsResp struct {
+		MediaContainer struct {
+			Directory []struct {
+				Key  string `json:"key"`
+				Type string `json:"type"`
+			} `json:"Directory"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
+		return "", fmt.Errorf("plex: decode sections: %w", err)
+	}
+
+	normTitle := normalizeShowTitle(title)
+	for _, section := range sectionsResp.MediaContainer.Directory {
+		if section.Type != "show" {
+			continue
+		}
+		key, err := c.findShowInSectionByTitle(section.Key, normTitle)
+		if err != nil {
+			return "", err
+		}
+		if key != "" {
+			return key, nil
+		}
+	}
+	return "", ErrPlexNotFound
+}
+
+func (c *httpPlexClient) findShowInSectionByTitle(sectionKey, normTitle string) (string, error) {
+	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=2")
+	if err != nil {
+		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
+	}
+	defer resp.Body.Close()
+
+	var allResp struct {
+		MediaContainer struct {
+			Metadata []struct {
+				RatingKey string `json:"ratingKey"`
+				Title     string `json:"title"`
+			} `json:"Metadata"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
+		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
+	}
+
+	for _, item := range allResp.MediaContainer.Metadata {
+		if normalizeShowTitle(item.Title) == normTitle {
+			return item.RatingKey, nil
+		}
+	}
+	return "", nil
+}
+
+// normalizeShowTitle returns a lowercase alphanumeric-only string for fuzzy
+// title matching, consistent with normalizePlexTitle in mkv-movie.
+func normalizeShowTitle(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, c := range s {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
 }
 
 // GetContentRating implements PlexClient.

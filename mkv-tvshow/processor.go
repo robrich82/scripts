@@ -527,12 +527,17 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 	}
 
 	// Check Plex for an existing rating to use as the default on blank input.
+	// Try TMDB-ID lookup first; fall back to title search for shows using
+	// non-TMDB agents (e.g. HAMA for anime).
 	var plexDefault NZRating
 	if p.plex != nil {
-		if showKey, err := p.plex.FindShowByTMDBID(tmdbID); err == nil {
+		showKey, err := p.plex.FindShowByTMDBID(tmdbID)
+		if err != nil {
+			showKey, _ = p.plex.FindShowByTitle(showName)
+		}
+		if showKey != "" {
 			plexDefault, _ = p.plex.GetContentRating(showKey)
 		}
-		// Silently ignore errors (Plex unavailable or show not found).
 	}
 
 	// Build the initial prompt message.

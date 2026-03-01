@@ -510,6 +510,32 @@ func TestResolveEpisodeRating_BlankWithNoPlexDefault_Skips(t *testing.T) {
 	}
 }
 
+func TestResolveEpisodeRating_BlankUsesPlexTitleFallback(t *testing.T) {
+	// TMDB-ID lookup fails (e.g. HAMA agent); title lookup succeeds.
+	rc := emptyRatingCache(t)
+	prompter := &scriptedPrompter{answers: []string{""}}
+	plex := &fakePlexClient{
+		findErr:        ErrPlexNotFound, // TMDB ID not in Plex GUID
+		titleRatingKey: "88",
+		contentRating:  Rating16,
+	}
+	p := &Processor{
+		ratingCache:           rc,
+		ratingSources:         []RatingSource{},
+		prompter:              prompter,
+		plex:                  plex,
+		sessionPromptedRating: make(map[string]NZRating),
+	}
+
+	got := p.resolveEpisodeRating("12345", "AIKa", 1, 1)
+	if got != Rating16 {
+		t.Errorf("got %q, want 16 (Plex title-fallback default)", got)
+	}
+	if cached, ok := rc.GetShowRating("12345"); !ok || cached != Rating16 {
+		t.Errorf("show cache has %q ok=%v, want 16", cached, ok)
+	}
+}
+
 func TestApplyRatingOnlyMKV_AlreadyApplied_SkipsWrite(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "ep.mkv")
