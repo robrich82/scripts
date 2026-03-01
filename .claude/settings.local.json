@@ -21,7 +21,10 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:forums.plex.tv)",
       "WebFetch(domain:python-plexapi.readthedocs.io)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(git -C /c/Users/robri/code/scripts diff --stat)",
+      "Bash(git -C /c/Users/robri/code/scripts diff mkv-movie/go.mod mkv-tvshow/go.mod)",
+      "Bash(go mod tidy:*)"
     ]
   }
 }
