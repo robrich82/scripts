@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -170,24 +171,45 @@ func xmlEscape(s string) string {
 	return s
 }
 
-// realMusicVideoTagger implements MusicVideoTagger using mkvpropedit.
+// realMusicVideoTagger implements MusicVideoTagger using MKVToolNix utilities.
+// mkvpropedit writes tags to MKV; mkvextract + mkvmerge read tags from MKA.
 type realMusicVideoTagger struct {
 	mkvpropeditPath string
+	mkvextractPath  string
+	mkvmergePath    string
 }
 
 func newRealMusicVideoTagger() (*realMusicVideoTagger, error) {
-	path, err := exec.LookPath("mkvpropedit")
+	propedit, err := exec.LookPath("mkvpropedit")
 	if err != nil {
 		return nil, fmt.Errorf("mkvpropedit not found: %w", err)
 	}
-	return &realMusicVideoTagger{mkvpropeditPath: path}, nil
+	extract, err := exec.LookPath("mkvextract")
+	if err != nil {
+		return nil, fmt.Errorf("mkvextract not found: %w", err)
+	}
+	merge, err := exec.LookPath("mkvmerge")
+	if err != nil {
+		return nil, fmt.Errorf("mkvmerge not found: %w", err)
+	}
+	return &realMusicVideoTagger{
+		mkvpropeditPath: propedit,
+		mkvextractPath:  extract,
+		mkvmergePath:    merge,
+	}, nil
 }
 
 // CopyTagsToMKV implements MusicVideoTagger.
 // It reads tags from audioPath, optionally appends titleSuffix to the title
 // (with a space separator), then writes tags and cover art to mkvPath.
 func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error {
-	tags, err := readAudioTags(audioPath)
+	var tags AudioTags
+	var err error
+	if strings.EqualFold(filepath.Ext(audioPath), ".mka") {
+		tags, err = readAudioTagsFromMKA(audioPath, t.mkvextractPath, t.mkvmergePath)
+	} else {
+		tags, err = readAudioTags(audioPath)
+	}
 	if err != nil {
 		return err
 	}
