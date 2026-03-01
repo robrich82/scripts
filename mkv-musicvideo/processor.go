@@ -30,6 +30,7 @@ type Processor struct {
 	prompter        Prompter
 	renamer         func(oldPath, newPath string) error
 	patternAppender func(filePath, pattern string) error
+	tagger          MusicVideoTagger // nil = tag copying disabled
 }
 
 // NewProcessor creates a Processor for the given root directory.
@@ -90,6 +91,24 @@ func buildAudioData(dirFiles []string) map[string]string {
 		}
 	}
 	return data
+}
+
+// buildAudioPaths returns a map of audio basename (without extension) to the
+// full filename (with extension) for each audio file that has a " - " separator.
+// It mirrors the filtering logic in buildAudioData so the two maps share keys.
+func buildAudioPaths(dirFiles []string) map[string]string {
+	m := make(map[string]string)
+	for _, f := range dirFiles {
+		ext := strings.ToLower(filepath.Ext(f))
+		if !containsStr(audioExts, ext) {
+			continue
+		}
+		base := strings.TrimSuffix(f, filepath.Ext(f))
+		if parts := strings.SplitN(base, " - ", 2); len(parts) > 1 {
+			m[base] = f
+		}
+	}
+	return m
 }
 
 // cleanVideoBase strips the last occurrence of a known suffix from base.
@@ -159,10 +178,45 @@ func containsStr(slice []string, s string) bool {
 	return false
 }
 
+// findIgnoredPatterns returns the trimmed, space-joined set of ignore patterns
+// that appear in cleanVideo. This is appended to the audio title when copying
+// tags so that e.g. " (Alternate Version)" survives in the MKV title tag.
+func (p *Processor) findIgnoredPatterns(cleanVideo string) string {
+	var found []string
+	for _, pat := range p.ignorePatterns {
+		if strings.Contains(cleanVideo, pat) {
+			if t := strings.TrimSpace(pat); t != "" {
+				found = append(found, t)
+			}
+		}
+	}
+	return strings.Join(found, " ")
+}
+
+// copyTagsIfConfigured copies tags from the matched audio file to mkvPath when
+// a tagger is configured. cleanVideo is the video base before ignore-pattern
+// stripping and is used to detect which patterns should be appended to the title.
+func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir string, audioPaths map[string]string) {
+	if p.tagger == nil || audioPaths == nil {
+		return
+	}
+	audioFilename, ok := audioPaths[matchKey]
+	if !ok {
+		return
+	}
+	audioFullPath := filepath.Join(videoDir, audioFilename)
+	titleSuffix := p.findIgnoredPatterns(cleanVideo)
+	if err := p.tagger.CopyTagsToMKV(audioFullPath, mkvPath, titleSuffix); err != nil {
+		fmt.Printf("    [WARN] tag copy failed: %v\n", err)
+	} else {
+		fmt.Printf("    [TAG] Copied tags from %s\n", audioFilename)
+	}
+}
+
 // processVideo handles one video file: matches it to audio data, prints a
 // mismatch if needed, and interactively renames/ignores/skips.
 // Returns "renamed", "skipped", or "" (no action / no match).
-func (p *Processor) processVideo(videoDir, videoFile string, audioData map[string]string) string {
+func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPaths map[string]string) string {
 	ext := filepath.Ext(videoFile)
 	videoBase := strings.TrimSuffix(videoFile, ext)
 	cleanVideo, foundSuffix := cleanVideoBase(videoBase)
@@ -180,11 +234,13 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData map[strin
 	}
 	targetName := matchedBase + effectiveSuffix
 	currentName := cleanVideoIgnored + effectiveSuffix
+	fullPath := filepath.Join(videoDir, videoFile)
 	if targetName == currentName {
+		// Filename is already correct — just copy tags.
+		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, videoDir, audioPaths)
 		return ""
 	}
 
-	fullPath := filepath.Join(videoDir, videoFile)
 	fmt.Printf("\n[?] UNMATCHED VIDEO: %s\n", videoFile)
 	fmt.Printf("    SUGGESTED MATCH: %s%s\n", targetName, ext)
 	fmt.Printf("    Current: %s\n", cleanVideo)
@@ -203,6 +259,8 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData map[strin
 			fmt.Printf("    [ERROR] Could not rename: %v\n", err)
 		} else {
 			fmt.Printf("    [OK] Renamed to: %s%s\n", targetName, ext)
+			// Copy tags to the new path after a successful rename.
+			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, videoDir, audioPaths)
 			return "renamed"
 		}
 	case "i":
@@ -257,12 +315,13 @@ func (p *Processor) Run() (Stats, []string) {
 	for _, dir := range dirOrder {
 		files := dirFiles[dir]
 		audioData := buildAudioData(files)
+		audioPaths := buildAudioPaths(files)
 		for _, f := range files {
 			ext := strings.ToLower(filepath.Ext(f))
 			if !containsStr(videoExts, ext) {
 				continue
 			}
-			result := p.processVideo(dir, f, audioData)
+			result := p.processVideo(dir, f, audioData, audioPaths)
 			switch result {
 			case "renamed":
 				stats.Renamed++

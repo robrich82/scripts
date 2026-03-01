@@ -19,6 +19,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: could not load ignore patterns: %v\n", err)
 	}
 
+	tagger, err := newRealMusicVideoTagger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v — tag copying disabled\n", err)
+	} else {
+		processor.tagger = tagger
+	}
+
 	fmt.Printf("--- Scanning and Matching in: %s ---\n\n", root)
 
 	stats, skippedVideos := processor.Run()
