@@ -533,10 +533,25 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName string, season, episod
 	if p.plex != nil {
 		showKey, err := p.plex.FindShowByTMDBID(tmdbID)
 		if err != nil {
-			showKey, _ = p.plex.FindShowByTitle(showName)
+			if err != ErrPlexNotFound {
+				fmt.Printf("  [i] Plex: TMDB lookup error for %q: %v\n", showName, err)
+			}
+			var titleErr error
+			showKey, titleErr = p.plex.FindShowByTitle(showName)
+			if titleErr != nil && titleErr != ErrPlexNotFound {
+				fmt.Printf("  [i] Plex: title lookup error for %q: %v\n", showName, titleErr)
+			}
 		}
 		if showKey != "" {
-			plexDefault, _ = p.plex.GetContentRating(showKey)
+			var fetchErr error
+			plexDefault, fetchErr = p.plex.GetContentRating(showKey)
+			if fetchErr != nil {
+				fmt.Printf("  [i] Plex: rating fetch error for %q: %v\n", showName, fetchErr)
+			} else if plexDefault == RatingNone {
+				fmt.Printf("  [i] Plex: %q found but no NZ content rating is set\n", showName)
+			}
+		} else {
+			fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID and title match)\n", showName)
 		}
 	}
 
