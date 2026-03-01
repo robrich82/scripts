@@ -207,7 +207,7 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir
 	audioFullPath := filepath.Join(videoDir, audioFilename)
 	titleSuffix := p.findIgnoredPatterns(cleanVideo)
 	if err := p.tagger.CopyTagsToMKV(audioFullPath, mkvPath, titleSuffix); err != nil {
-		fmt.Printf("    [WARN] tag copy failed: %v\n", err)
+		fmt.Printf("    [WARN] tag copy failed for %s: %v\n", filepath.Base(mkvPath), err)
 	} else {
 		fmt.Printf("    [TAG] Copied tags from %s\n", audioFilename)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -245,7 +246,14 @@ func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix str
 			"--add-attachment", coverTmpPath,
 		)
 	}
-	if err := exec.Command(t.mkvpropeditPath, args...).Run(); err != nil {
+	cmd := exec.Command(t.mkvpropeditPath, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return fmt.Errorf("mkvpropedit: %w\n%s", err, msg)
+		}
 		return fmt.Errorf("mkvpropedit: %w", err)
 	}
 	return nil
