@@ -1,0 +1,250 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// Asset represents a downloadable file from a release.
+type Asset struct {
+	Name string
+	URL  string
+}
+
+// CheckResult holds the outcome of a version check.
+type CheckResult struct {
+	Version string
+	Assets  []Asset
+}
+
+// Checker checks for the latest upstream version of an app.
+type Checker interface {
+	Check(app App) (*CheckResult, error)
+}
+
+// NewChecker returns a Checker that dispatches based on app.Checker.Type.
+func NewChecker(client *http.Client) Checker {
+	return &checkerDispatch{client: client}
+}
+
+type checkerDispatch struct {
+	client *http.Client
+}
+
+func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
+	switch app.Checker.Type {
+	case "github":
+		return (&githubChecker{client: d.client}).check(app)
+	case "html":
+		return (&htmlChecker{client: d.client}).check(app)
+	case "":
+		return nil, fmt.Errorf("no checker type configured for %q", app.Name)
+	default:
+		return nil, fmt.Errorf("unknown checker type %q for %q", app.Checker.Type, app.Name)
+	}
+}
+
+// ---- GitHub checker ----
+
+type githubChecker struct {
+	client *http.Client
+}
+
+type ghRelease struct {
+	TagName    string    `json:"tag_name"`
+	Prerelease bool      `json:"prerelease"`
+	Draft      bool      `json:"draft"`
+	Assets     []ghAsset `json:"assets"`
+}
+
+type ghAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+func (g *githubChecker) check(app App) (*CheckResult, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases", app.Checker.Repo)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var releases []ghRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, err
+	}
+
+	for _, rel := range releases {
+		if rel.Draft {
+			continue
+		}
+		if rel.Prerelease && !app.Checker.Prerelease {
+			continue
+		}
+		assets := selectAssets(rel.Assets, app.Checker.AssetPatterns)
+		return &CheckResult{
+			Version: strings.TrimPrefix(rel.TagName, "v"),
+			Assets:  assets,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("no suitable release found for %s", app.Checker.Repo)
+}
+
+// selectAssets matches release assets against patterns (or auto-selects for Windows).
+func selectAssets(ghAssets []ghAsset, patterns []string) []Asset {
+	if len(patterns) > 0 {
+		var out []Asset
+		for _, pat := range patterns {
+			for _, a := range ghAssets {
+				matched, _ := filepath.Match(pat, a.Name)
+				if matched {
+					out = append(out, Asset{Name: a.Name, URL: a.BrowserDownloadURL})
+				}
+			}
+		}
+		return out
+	}
+	return autoSelectWindows(ghAssets)
+}
+
+var (
+	nonWindowsExts        = []string{".AppImage", ".deb", ".rpm", ".dmg"}
+	nonWindowsSubstrings  = []string{"-linux-", "-macos-", "-darwin-", ".tar.xz", "-steamrt-", "-musl-"}
+	windowsPreferKeywords = []string{"win", "windows", "x64", "amd64", "x86_64"}
+	windowsPreferExts     = []string{".exe", ".msi", ".zip", ".7z"}
+)
+
+func autoSelectWindows(ghAssets []ghAsset) []Asset {
+	// Pass 1: exclude obvious non-Windows assets.
+	var candidates []ghAsset
+	for _, a := range ghAssets {
+		if !isNonWindowsAsset(a.Name) {
+			candidates = append(candidates, a)
+		}
+	}
+	if len(candidates) == 0 {
+		candidates = ghAssets
+	}
+
+	// Pass 2: prefer assets with explicit Windows keywords.
+	var windowsKeyed []ghAsset
+	for _, a := range candidates {
+		lower := strings.ToLower(a.Name)
+		for _, kw := range windowsPreferKeywords {
+			if strings.Contains(lower, kw) {
+				windowsKeyed = append(windowsKeyed, a)
+				break
+			}
+		}
+	}
+	if len(windowsKeyed) > 0 {
+		candidates = windowsKeyed
+	}
+
+	// Pass 3: prefer Windows-friendly extensions.
+	var extMatched []ghAsset
+	for _, a := range candidates {
+		lower := strings.ToLower(a.Name)
+		for _, ext := range windowsPreferExts {
+			if strings.HasSuffix(lower, ext) {
+				extMatched = append(extMatched, a)
+				break
+			}
+		}
+	}
+	if len(extMatched) > 0 {
+		candidates = extMatched
+	}
+
+	var out []Asset
+	for _, a := range candidates {
+		out = append(out, Asset{Name: a.Name, URL: a.BrowserDownloadURL})
+	}
+	return out
+}
+
+func isNonWindowsAsset(name string) bool {
+	lower := strings.ToLower(name)
+	for _, ext := range nonWindowsExts {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	for _, sub := range nonWindowsSubstrings {
+		if strings.Contains(lower, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- HTML checker ----
+
+type htmlChecker struct {
+	client *http.Client
+}
+
+func (h *htmlChecker) check(app App) (*CheckResult, error) {
+	if app.Checker.URL == "" {
+		return nil, fmt.Errorf("html checker requires url")
+	}
+	if app.Checker.VersionRegex == "" {
+		return nil, fmt.Errorf("html checker requires version_regex (not configured yet)")
+	}
+
+	req, err := http.NewRequest("GET", app.Checker.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "sw-update/1.0 (+https://github.com/)")
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	re, err := regexp.Compile(app.Checker.VersionRegex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid version_regex: %w", err)
+	}
+
+	m := re.FindSubmatch(body)
+	if m == nil {
+		return nil, fmt.Errorf("version_regex did not match page content")
+	}
+
+	version := string(m[0])
+	if len(m) > 1 {
+		version = string(m[1])
+	}
+	return &CheckResult{Version: version}, nil
+}

@@ -1,6 +1,6 @@
-.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow test
+.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update test
 
-all: mkv-audit mkv-movie mkv-musicvideo mkv-tvshow
+all: mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update
 
 mkv-audit:
 	cd mkv-audit && go build -o ../dist/mkv-audit.exe .
@@ -13,6 +13,9 @@ mkv-musicvideo:
 
 mkv-tvshow:
 	cd mkv-tvshow && go build -o ../dist/mkv-tvshow.exe .
+
+sw-update:
+	cd sw-update && go build -o ../dist/sw-update.exe .
 
 test:
 	cd mkv-audit && go test ./...

@@ -1,0 +1,109 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+)
+
+// CheckerConfig describes how to check for a new upstream version.
+type CheckerConfig struct {
+	Type          string   `json:"type"`                    // "github" or "html"
+	Repo          string   `json:"repo,omitempty"`          // owner/repo (github)
+	Prerelease    bool     `json:"prerelease,omitempty"`    // include pre-releases (github)
+	AssetPatterns []string `json:"asset_patterns,omitempty"` // glob patterns for assets (github)
+	URL           string   `json:"url,omitempty"`           // page URL (html)
+	VersionRegex  string   `json:"version_regex,omitempty"` // regex to extract version (html)
+}
+
+// LocalConfig describes how to detect the locally installed version.
+type LocalConfig struct {
+	Type         string   `json:"type"`                    // "none", "exe", "file-version"
+	Path         string   `json:"path,omitempty"`          // exe or file path
+	Args         []string `json:"args,omitempty"`          // args for exe detector
+	VersionRegex string   `json:"version_regex,omitempty"` // regex to extract version from output
+}
+
+// App represents a single tracked application.
+type App struct {
+	Name    string        `json:"name"`
+	Enabled bool          `json:"enabled"`
+	URL     string        `json:"url,omitempty"` // original bookmark URL (for reference)
+	Checker CheckerConfig `json:"checker"`
+	Local   LocalConfig   `json:"local"`
+}
+
+// Config is the top-level configuration file.
+type Config struct {
+	DownloadDir string `json:"download_dir,omitempty"`
+	Apps        []App  `json:"apps"`
+}
+
+// configDir returns the directory where config and state files are stored.
+func configDir() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "sw-update"), nil
+}
+
+// LoadConfig loads the config from disk, returning an empty config if none exists.
+func LoadConfig() (*Config, error) {
+	dir, err := configDir()
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, "sw-update.json")
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return &Config{Apps: []App{}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// SaveConfig writes the config to disk.
+func SaveConfig(cfg *Config) error {
+	dir, err := configDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "sw-update.json")
+	data, err := json.MarshalIndent(cfg, "", "    ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// FindApp returns a pointer to the app with the given name, or nil.
+func (cfg *Config) FindApp(name string) *App {
+	for i := range cfg.Apps {
+		if cfg.Apps[i].Name == name {
+			return &cfg.Apps[i]
+		}
+	}
+	return nil
+}
+
+// DefaultDownloadDir returns the configured download dir, or ~/Downloads/sw-update.
+func (cfg *Config) DefaultDownloadDir() (string, error) {
+	if cfg.DownloadDir != "" {
+		return cfg.DownloadDir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Downloads", "sw-update"), nil
+}
