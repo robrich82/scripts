@@ -21,10 +21,10 @@ type AnalysisResult struct {
 
 // LocalFixes counts individual fix types within one file analysis.
 type LocalFixes struct {
-	Lang   int
-	Video  int
-	Flags  int
-	Names  int
+	Lang  int
+	Video int
+	Flags int
+	Names int
 }
 
 // normalizeLanguage aggressively maps regional codes (en-US, ja_JP) to
@@ -198,7 +198,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 	if len(videoTracks) > 0 && len(audioTracks) > 0 {
 		firstAudioLang := tracks[audioTracks[0]].Properties.Language
 		for _, vi := range videoTracks {
-			if tracks[vi].Properties.Language == "und" && firstAudioLang != "und" {
+			if tracks[vi].Properties.Language != firstAudioLang && firstAudioLang != "und" {
 				res.Edits = append(res.Edits, trackEdit(tracks[vi].ID, "language", firstAudioLang)...)
 				tracks[vi].Properties.Language = firstAudioLang
 				res.LocalFixes.Video++

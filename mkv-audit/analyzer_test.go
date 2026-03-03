@@ -117,6 +117,20 @@ func TestAnalyzeFile_VideoAlreadyHasLanguage_NoInherit(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFile_VideoLanguageMismatch_Inherits(t *testing.T) {
+	info := MKVInfo{Tracks: []Track{
+		videoTrack(0, "eng"),
+		audioTrack(1, "jpn", "A_FLAC", 2, true),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if res.LocalFixes.Video != 1 {
+		t.Errorf("expected 1 video inherit, got %d", res.LocalFixes.Video)
+	}
+	if !hasEdit(res.Edits, "language=jpn") {
+		t.Errorf("expected language=jpn in edits: %v", res.Edits)
+	}
+}
+
 // --- AnalyzeFile: audio default flags ---
 
 func TestAnalyzeFile_PicksHigherChannelAudio(t *testing.T) {
