@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 const failedCacheFile = "failed_files.json"
@@ -106,50 +108,70 @@ func RunAll(root string, ident MKVIdentifier, editor MKVEditor, prompter Prompte
 		})
 	}
 
+	sem := make(chan struct{}, runtime.NumCPU())
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
 	for _, path := range filesToScan {
-		stats.Scanned++
-		basename := filepath.Base(path)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(p string) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-		info, err := ident.Identify(path)
-		if err != nil {
-			fmt.Printf("[ERR]    %s: %v\n", basename, err)
-			stats.Failed++
-			stats.FailedPaths = append(stats.FailedPaths, path)
-			continue
-		}
+			basename := filepath.Base(p)
+			var buf strings.Builder
+			var local Stats
+			var localCodecs []string
 
-		res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: resolveIETFMap(path, root, dirCfg)})
+			info, err := ident.Identify(p)
+			if err != nil {
+				fmt.Fprintf(&buf, "[ERR]    %s: %v\n", basename, err)
+				local.Failed++
+				local.FailedPaths = append(local.FailedPaths, p)
+			} else {
+				res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: resolveIETFMap(p, root, dirCfg)})
+				for _, c := range res.UnknownCodecs {
+					localCodecs = append(localCodecs, c)
+				}
+				if res.Failed {
+					fmt.Fprintf(&buf, "[FAILED] %s: %s\n", basename, strings.Join(res.FailReasons, ", "))
+					local.Failed++
+					local.FailedPaths = append(local.FailedPaths, p)
+				} else if len(res.Edits) == 0 {
+					fmt.Fprintf(&buf, "[OK]     %s (no changes needed)\n", basename)
+				} else if err := editor.Apply(p, res.Edits); err != nil {
+					fmt.Fprintf(&buf, "[ERR]    %s: mkvpropedit: %v\n", basename, err)
+					local.Failed++
+					local.FailedPaths = append(local.FailedPaths, p)
+				} else {
+					fmt.Fprintf(&buf, "[FIXED]  %s\n", basename)
+					local.Fixed++
+					local.LangFixes += res.LocalFixes.Lang
+					local.VideoInherit += res.LocalFixes.Video
+					local.FlagFixes += res.LocalFixes.Flags
+					local.NamesAdded += res.LocalFixes.Names
+				}
+			}
 
-		for _, c := range res.UnknownCodecs {
-			unknownCodecs[c] = true
-		}
-
-		if res.Failed {
-			fmt.Printf("[FAILED] %s: %s\n", basename, strings.Join(res.FailReasons, ", "))
-			stats.Failed++
-			stats.FailedPaths = append(stats.FailedPaths, path)
-			continue
-		}
-
-		if len(res.Edits) == 0 {
-			fmt.Printf("[OK]     %s (no changes needed)\n", basename)
-			continue
-		}
-
-		if err := editor.Apply(path, res.Edits); err != nil {
-			fmt.Printf("[ERR]    %s: mkvpropedit: %v\n", basename, err)
-			stats.Failed++
-			stats.FailedPaths = append(stats.FailedPaths, path)
-			continue
-		}
-
-		fmt.Printf("[FIXED]  %s\n", basename)
-		stats.Fixed++
-		stats.LangFixes += res.LocalFixes.Lang
-		stats.VideoInherit += res.LocalFixes.Video
-		stats.FlagFixes += res.LocalFixes.Flags
-		stats.NamesAdded += res.LocalFixes.Names
+			mu.Lock()
+			fmt.Print(buf.String())
+			stats.Scanned++
+			stats.Failed += local.Failed
+			stats.FailedPaths = append(stats.FailedPaths, local.FailedPaths...)
+			stats.Fixed += local.Fixed
+			stats.LangFixes += local.LangFixes
+			stats.VideoInherit += local.VideoInherit
+			stats.FlagFixes += local.FlagFixes
+			stats.NamesAdded += local.NamesAdded
+			for _, c := range localCodecs {
+				unknownCodecs[c] = true
+			}
+			mu.Unlock()
+		}(path)
 	}
+
+	wg.Wait()
 
 	// Persist failure list and unknown codecs.
 	if len(stats.FailedPaths) > 0 {
