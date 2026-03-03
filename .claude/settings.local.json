@@ -24,7 +24,10 @@
       "Bash(grep:*)",
       "Bash(git -C /c/Users/robri/code/scripts diff --stat)",
       "Bash(git -C /c/Users/robri/code/scripts diff mkv-movie/go.mod mkv-tvshow/go.mod)",
-      "Bash(go mod tidy:*)"
+      "Bash(go mod tidy:*)",
+      "Bash(mkvinfo:*)",
+      "Bash(mediainfo:*)",
+      "Bash(python:*)"
     ]
   }
 }
