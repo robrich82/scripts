@@ -206,6 +206,10 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir
 	}
 	audioFullPath := filepath.Join(videoDir, audioFilename)
 	titleSuffix := p.findIgnoredPatterns(cleanVideo)
+	if match, err := p.tagger.TagsMatchMKV(audioFullPath, mkvPath, titleSuffix); err == nil && match {
+		fmt.Printf("    [TAG] Already up to date: %s\n", filepath.Base(mkvPath))
+		return
+	}
 	if err := p.tagger.CopyTagsToMKV(audioFullPath, mkvPath, titleSuffix); err != nil {
 		fmt.Printf("    [WARN] tag copy failed for %s: %v\n", filepath.Base(mkvPath), err)
 	} else {
@@ -282,6 +286,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			reChecked := removeIgnoredParts(cleanVideo, p.ignorePatterns)
 			if reChecked == matchedBase {
 				fmt.Println("    [OK] File now matches after ignoring pattern!")
+				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, videoDir, audioPaths)
 			} else {
 				fmt.Println("    Still doesn't match after ignoring")
 			}

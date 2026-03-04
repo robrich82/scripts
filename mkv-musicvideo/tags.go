@@ -14,8 +14,12 @@ import (
 )
 
 // MusicVideoTagger copies tags and cover art from a source audio file to a
-// destination MKV file.
+// destination MKV file, and can check whether the MKV tags already match.
 type MusicVideoTagger interface {
+	// TagsMatchMKV returns true if the MKV at mkvPath already has tags
+	// identical to what CopyTagsToMKV would write from audioPath.
+	// Returns false (not true) on any error so the caller falls back to copying.
+	TagsMatchMKV(audioPath, mkvPath, titleSuffix string) (bool, error)
 	CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error
 }
 
@@ -197,6 +201,58 @@ func newRealMusicVideoTagger() (*realMusicVideoTagger, error) {
 		mkvextractPath:  extract,
 		mkvmergePath:    merge,
 	}, nil
+}
+
+// TagsMatchMKV implements MusicVideoTagger.
+// It reads tags from audioPath and the current tags embedded in mkvPath,
+// then compares all text fields (cover art is not compared).
+// Returns false on any error so the caller falls back to copying.
+func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix string) (bool, error) {
+	var want AudioTags
+	var err error
+	if strings.EqualFold(filepath.Ext(audioPath), ".mka") {
+		want, err = readAudioTagsFromMKA(audioPath, t.mkvextractPath, t.mkvmergePath)
+	} else {
+		want, err = readAudioTags(audioPath)
+	}
+	if err != nil {
+		return false, err
+	}
+	if titleSuffix != "" && want.Title != "" {
+		want.Title = want.Title + " " + titleSuffix
+	}
+
+	xmlTmp, err := os.CreateTemp("", "mkv-check-tags-*.xml")
+	if err != nil {
+		return false, nil
+	}
+	xmlTmp.Close()
+	defer os.Remove(xmlTmp.Name())
+
+	cmd := exec.Command(t.mkvextractPath, mkvPath, "tags", xmlTmp.Name())
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.Run() //nolint:errcheck
+
+	lvl50, lvl30 := parseMKVTagsXML(xmlTmp.Name())
+
+	wantTrack := ""
+	if want.TrackNum > 0 {
+		wantTrack = strconv.Itoa(want.TrackNum)
+	}
+	wantYear := ""
+	if want.Year > 0 {
+		wantYear = strconv.Itoa(want.Year)
+	}
+
+	return lvl30["TITLE"] == want.Title &&
+		lvl30["ARTIST"] == want.Artist &&
+		lvl30["PART_NUMBER"] == wantTrack &&
+		lvl50["TITLE"] == want.Album &&
+		lvl50["ARTIST"] == want.AlbumArtist &&
+		lvl50["DATE_RECORDED"] == wantYear &&
+		lvl50["GENRE"] == want.Genre &&
+		lvl50["COMMENT"] == want.Comment, nil
 }
 
 // CopyTagsToMKV implements MusicVideoTagger.

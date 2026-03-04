@@ -23,14 +23,19 @@ func (f *fakePrompter) Ask(_ string) (string, error) {
 
 // fakeTagger records calls made to CopyTagsToMKV.
 type fakeTagger struct {
-	calls []taggerCall
-	err   error
+	calls        []taggerCall
+	err          error
+	tagsMatch    bool // return value for TagsMatchMKV; default false → copy always runs
 }
 
 type taggerCall struct {
 	audioPath   string
 	mkvPath     string
 	titleSuffix string
+}
+
+func (f *fakeTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix string) (bool, error) {
+	return f.tagsMatch, nil
 }
 
 func (f *fakeTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error {
@@ -356,6 +361,52 @@ func TestFindIgnoredPatterns_MultipleMatches(t *testing.T) {
 	got := p.findIgnoredPatterns("01 - Song (Live) (Acoustic)")
 	if got != "(Live) (Acoustic)" {
 		t.Errorf("got %q, want '(Live) (Acoustic)'", got)
+	}
+}
+
+func TestProcessVideo_AlreadyCorrect_TagsUpToDate_SkipsCopy(t *testing.T) {
+	dir := t.TempDir()
+	mkvFile := "Artist - Song - Song-video.mkv"
+	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+
+	ft := &fakeTagger{tagsMatch: true}
+	p := NewProcessor(dir, &fakePrompter{})
+	p.tagger = ft
+
+	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
+	audioPaths := map[string]string{"Artist - Song": "Artist - Song.flac"}
+
+	p.processVideo(dir, mkvFile, audioData, audioPaths)
+
+	if len(ft.calls) != 0 {
+		t.Errorf("expected no CopyTagsToMKV call when tags already match, got %d", len(ft.calls))
+	}
+}
+
+func TestProcessVideo_Ignore_MatchesAfterPattern_CopiesTags(t *testing.T) {
+	dir := t.TempDir()
+	// Video name = matchedBase ("Artist - Song - Song") + " OFFICIAL" + "-video"
+	// After ignoring " OFFICIAL", reChecked == matchedBase → tags should be copied.
+	mkvFile := "Artist - Song - Song OFFICIAL-video.mkv"
+	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+
+	ft := &fakeTagger{}
+	p := NewProcessor(dir, &fakePrompter{answers: []string{"i", " OFFICIAL"}})
+	p.tagger = ft
+	p.patternAppender = func(_, _ string) error { return nil }
+
+	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
+	audioPaths := map[string]string{"Artist - Song": "Artist - Song.flac"}
+
+	p.processVideo(dir, mkvFile, audioData, audioPaths)
+
+	if len(ft.calls) != 1 {
+		t.Fatalf("expected 1 tagger call after ignore match, got %d", len(ft.calls))
+	}
+	if ft.calls[0].mkvPath != filepath.Join(dir, mkvFile) {
+		t.Errorf("mkvPath = %q, want %q", ft.calls[0].mkvPath, filepath.Join(dir, mkvFile))
 	}
 }
 
