@@ -43,6 +43,8 @@ func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
 		return (&githubChecker{client: d.client}).check(app)
 	case "html":
 		return (&htmlChecker{client: d.client}).check(app)
+	case "sourceforge":
+		return (&sfChecker{client: d.client}).check(app)
 	case "":
 		return nil, fmt.Errorf("no checker type configured for %q", app.Name)
 	default:

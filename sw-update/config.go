@@ -8,12 +8,14 @@ import (
 
 // CheckerConfig describes how to check for a new upstream version.
 type CheckerConfig struct {
-	Type          string   `json:"type"`                    // "github" or "html"
-	Repo          string   `json:"repo,omitempty"`          // owner/repo (github)
-	Prerelease    bool     `json:"prerelease,omitempty"`    // include pre-releases (github)
-	AssetPatterns []string `json:"asset_patterns,omitempty"` // glob patterns for assets (github)
-	URL           string   `json:"url,omitempty"`           // page URL (html)
-	VersionRegex  string   `json:"version_regex,omitempty"` // regex to extract version (html)
+	Type          string   `json:"type"`                     // "github", "html", or "sourceforge"
+	Repo          string   `json:"repo,omitempty"`           // owner/repo (github)
+	Prerelease    bool     `json:"prerelease,omitempty"`     // include pre-releases (github)
+	AssetPatterns []string `json:"asset_patterns,omitempty"` // glob patterns for assets (github, sourceforge)
+	URL           string   `json:"url,omitempty"`            // page URL (html)
+	VersionRegex  string   `json:"version_regex,omitempty"`  // regex to extract version (html, sourceforge)
+	Project       string   `json:"project,omitempty"`        // project slug (sourceforge)
+	SFPath        string   `json:"sf_path,omitempty"`        // path filter for RSS, e.g. "/munt" (sourceforge)
 }
 
 // LocalConfig describes how to detect the locally installed version.

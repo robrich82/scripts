@@ -242,8 +242,8 @@ See [mkv-tvshow/manual_data.json.example](mkv-tvshow/manual_data.json.example) f
 
 ## sw-update
 
-Tracks installed software versions and checks for updates via GitHub releases
-or web page scraping. Downloads and runs installers on demand.
+Tracks installed software versions and checks for updates via GitHub releases,
+SourceForge file releases, or web page scraping. Downloads and runs installers on demand.
 
 ### Usage
 
@@ -280,6 +280,35 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 |------|-------------|
 | `github` | Fetches latest release from a GitHub repo (`owner/repo`) |
 | `html` | Scrapes a version string from a web page using a regex |
+| `sourceforge` | Scans a SourceForge project's RSS feed for new file releases |
+
+**`github` checker fields:**
+
+| Field | Description |
+|-------|-------------|
+| `repo` | Repository in `owner/repo` form |
+| `prerelease` | `true` to include pre-releases (default: `false`) |
+| `asset_patterns` | Glob patterns to select specific release assets |
+
+**`html` checker fields:**
+
+| Field | Description |
+|-------|-------------|
+| `url` | Page URL to fetch |
+| `version_regex` | Go regex; capture group 1 is used as version if present |
+
+**`sourceforge` checker fields:**
+
+| Field | Description |
+|-------|-------------|
+| `project` | SourceForge project slug (e.g. `munt`) |
+| `sf_path` | Path within the project's files tree to filter RSS results (e.g. `/munt`) |
+| `version_regex` | Go regex applied to each RSS file path; capture group 1 is used as version |
+| `asset_patterns` | Glob patterns to select specific files as download assets |
+
+> The SourceForge checker uses the project's public RSS feed, which is not
+> subject to bot-protection. It scans all entries for filenames matching
+> `version_regex` and returns the highest version found.
 
 #### Local detector types
 
