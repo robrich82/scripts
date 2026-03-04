@@ -66,8 +66,9 @@ var reverseChars = []struct{ from, to string }{
 var yearSuffixRe = regexp.MustCompile(`\s\(\d{4}\)`)
 
 // opEdRe matches an OP/ED/NCOP/NCED suffix (with optional number) preceded by
-// whitespace at the end of a filename stem, e.g. " NCOP1", " ED", " OP2".
-var opEdRe = regexp.MustCompile(`(?i)\s+((?:NC)?(?:OP|ED)\d*)$`)
+// whitespace or a hyphen at the end of a filename stem, e.g. " NCOP1",
+// "-NCED2", " ED", "-OP2".
+var opEdRe = regexp.MustCompile(`(?i)(?:\s+|-)((?:NC)?(?:OP|ED)\d*)$`)
 
 // extractOpEdSuffix detects an OP/ED/NCOP/NCED suffix at the end of a
 // filename stem. Returns (base, suffix) where suffix is uppercase (e.g.

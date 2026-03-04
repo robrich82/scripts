@@ -1025,6 +1025,59 @@ func TestProcessorRun_ManualExtra_OpEdSuffix_FilenameTitle(t *testing.T) {
 	}
 }
 
+func TestProcessorRun_ManualExtra_EpisodePatternInName_TreatedAsExtra(t *testing.T) {
+	// A file with S##E## in its name but explicitly listed in extras should go
+	// through the extras path (not the episode path), using the hyphen-prefix
+	// NCOP suffix and the referenced episode's TMDB data.
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S01E03 - A Friend-NCOP.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails: ShowDetails{PosterPath: "/show.jpg"},
+		seasonResult: SeasonResult{
+			PosterPath: "/season1.jpg",
+			Episodes: []Episode{
+				{EpisodeNumber: 3, AirDate: "2021-01-25", Overview: "Ep3 summary", Name: "A Friend"},
+			},
+		},
+	}
+	runner := &fakeMKVRunner{
+		avail:       true,
+		applyResult: mkvpropeditSuccessMsg,
+		tagsPath:    "t.xml",
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {
+			Extras: map[string]ExtraEntry{
+				"My Show - S01E03 - A Friend-NCOP": {Season: 1, Episode: 3},
+			},
+		},
+	}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Fatalf("expected Success=1, got %+v", stats)
+	}
+	if len(runner.calls) == 0 {
+		t.Fatal("expected Apply to be called")
+	}
+	// Extras path: title = TMDB episode name + (NCOP); hyphen separator detected.
+	if !containsAll(runner.calls[0].args, "title=A Friend (NCOP)") {
+		t.Errorf("expected 'title=A Friend (NCOP)' in %v", runner.calls[0].args)
+	}
+	// Date from episode air date.
+	wantTime := time.Date(2021, 1, 25, 0, 0, 0, 0, time.Local)
+	if len(timer.setTimesCalls) == 0 || !timer.setTimesCalls[0].t.Equal(wantTime) {
+		t.Errorf("SetTimes: got %v, want %v", timer.setTimesCalls, wantTime)
+	}
+}
+
 func TestProcessorRun_ManualExtra_NoEntry_Skipped(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")

@@ -162,87 +162,92 @@ func (p *Processor) Run() Stats {
 			}
 
 			file, filePath := p.normalizeFilename(dir, d.Name())
+			stem := strings.TrimSuffix(file, filepath.Ext(file))
+
+			// Check extras map first — an explicit entry overrides the S##E## episode
+			// regex, so that NCOP/NCED files whose name includes an episode number are
+			// processed as extras rather than as regular episodes.
+			if !p.cfg.RatingsOnly {
+				if entry, hasEntry := p.manualData[showFolder]; hasEntry {
+					if extra, hasExtra := entry.Extras[stem]; hasExtra {
+						var relDate, stampDate, posterURL, summary, title string
+						posterURL = mainPoster
+
+						// Detect OP/ED/NCOP/NCED suffix in the filename stem.
+						_, opEdSuffix := extractOpEdSuffix(stem)
+
+						// Fetch season data (needed for poster and optional episode lookup).
+						if extra.Season != 0 {
+							cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
+							if _, ok := seasonCache[cKey]; !ok {
+								if sr, err := p.tmdb.GetSeason(showID, extra.Season); err == nil {
+									seasonCache[cKey] = sr
+								}
+							}
+							if sr, ok := seasonCache[cKey]; ok && sr.PosterPath != "" {
+								posterURL = tmdbImageBase + sr.PosterPath
+							}
+						}
+
+						if extra.Episode > 0 {
+							// Use a specific episode's metadata instead of a manual date.
+							cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
+							if sr, ok := seasonCache[cKey]; ok {
+								for _, ep := range sr.Episodes {
+									if ep.EpisodeNumber == extra.Episode {
+										if ep.AirDate != "" {
+											relDate = ep.AirDate + "T00:00:00Z"
+											stampDate = relDate
+										}
+										summary = ep.Overview
+										title = ep.Name
+										break
+									}
+								}
+							}
+						} else if extra.Date != "" {
+							relDate = extra.Date + "T00:00:00Z"
+							stampDate = relDate
+						}
+
+						// Build title: episode title from TMDB if available, otherwise
+						// derive from the filename. When an OP/ED suffix is detected and
+						// the title comes from the filename, use the base (without suffix)
+						// so the suffix is not duplicated.
+						if title == "" {
+							if opEdSuffix != "" {
+								base, _ := extractOpEdSuffix(stem)
+								title = cleanMetadataTitle(base)
+							} else {
+								title = cleanMetadataTitle(file)
+							}
+						}
+						// Append OP/ED suffix if detected.
+						if opEdSuffix != "" {
+							title = fmt.Sprintf("%s (%s)", title, opEdSuffix)
+						}
+
+						rating := p.resolveEpisodeRating(showID, showName, filePath, extra.Season, 0)
+						if p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating) {
+							if stampDate != "" {
+								p.retryList.Remove(filePath)
+							} else {
+								p.retryList.Add(filePath)
+							}
+							fmt.Printf("[✓] Processed (extra): %s\n", file)
+							stats.Success++
+						} else {
+							fmt.Printf("  [X] Failed (extra): %s\n", file)
+							stats.Failed++
+						}
+						time.Sleep(50 * time.Millisecond)
+						return nil
+					}
+				}
+			}
 
 			epMatch := epRe.FindStringSubmatch(file)
 			if epMatch == nil {
-				if !p.cfg.RatingsOnly {
-					stem := strings.TrimSuffix(file, filepath.Ext(file))
-					if entry, hasEntry := p.manualData[showFolder]; hasEntry {
-						if extra, hasExtra := entry.Extras[stem]; hasExtra {
-							var relDate, stampDate, posterURL, summary, title string
-							posterURL = mainPoster
-
-							// Detect OP/ED/NCOP/NCED suffix in the filename stem.
-							_, opEdSuffix := extractOpEdSuffix(stem)
-
-							// Fetch season data (needed for poster and optional episode lookup).
-							if extra.Season != 0 {
-								cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
-								if _, ok := seasonCache[cKey]; !ok {
-									if sr, err := p.tmdb.GetSeason(showID, extra.Season); err == nil {
-										seasonCache[cKey] = sr
-									}
-								}
-								if sr, ok := seasonCache[cKey]; ok && sr.PosterPath != "" {
-									posterURL = tmdbImageBase + sr.PosterPath
-								}
-							}
-
-							if extra.Episode > 0 {
-								// Use a specific episode's metadata instead of a manual date.
-								cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
-								if sr, ok := seasonCache[cKey]; ok {
-									for _, ep := range sr.Episodes {
-										if ep.EpisodeNumber == extra.Episode {
-											if ep.AirDate != "" {
-												relDate = ep.AirDate + "T00:00:00Z"
-												stampDate = relDate
-											}
-											summary = ep.Overview
-											title = ep.Name
-											break
-										}
-									}
-								}
-							} else if extra.Date != "" {
-								relDate = extra.Date + "T00:00:00Z"
-								stampDate = relDate
-							}
-
-							// Build title: episode title from TMDB if available, otherwise
-							// derive from the filename. When an OP/ED suffix is detected and
-							// the title comes from the filename, use the base (without suffix)
-							// so the suffix is not duplicated.
-							if title == "" {
-								if opEdSuffix != "" {
-									base, _ := extractOpEdSuffix(stem)
-									title = cleanMetadataTitle(base)
-								} else {
-									title = cleanMetadataTitle(file)
-								}
-							}
-							// Append OP/ED suffix if detected.
-							if opEdSuffix != "" {
-								title = fmt.Sprintf("%s (%s)", title, opEdSuffix)
-							}
-
-							rating := p.resolveEpisodeRating(showID, showName, filePath, extra.Season, 0)
-							if p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating) {
-								if stampDate != "" {
-									p.retryList.Remove(filePath)
-								} else {
-									p.retryList.Add(filePath)
-								}
-								fmt.Printf("[✓] Processed (extra): %s\n", file)
-								stats.Success++
-							} else {
-								fmt.Printf("  [X] Failed (extra): %s\n", file)
-								stats.Failed++
-							}
-							time.Sleep(50 * time.Millisecond)
-						}
-					}
-				}
 				return nil
 			}
 			sNum, _ := strconv.Atoi(epMatch[1])

@@ -207,6 +207,11 @@ func TestExtractOpEdSuffix(t *testing.T) {
 		{"Show Name", "Show Name", ""},
 		{"OP", "OP", ""},    // no leading space
 		{"S01E01", "S01E01", ""},
+		// Hyphen separator (actual filename convention)
+		{"Show - S01E03 - A Friend-NCOP", "Show - S01E03 - A Friend", "NCOP"},
+		{"Show - S01 - Ending 1 (Episodes 01-11)-NCED", "Show - S01 - Ending 1 (Episodes 01-11)", "NCED"},
+		{"Show - S02 - Opening 2-NCOP2", "Show - S02 - Opening 2", "NCOP2"},
+		{"Show - S01 - Ending 2-NCED2", "Show - S01 - Ending 2", "NCED2"},
 	}
 	for _, tc := range cases {
 		base, suffix := extractOpEdSuffix(tc.stem)
