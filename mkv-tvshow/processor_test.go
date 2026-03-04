@@ -135,6 +135,18 @@ func TestResolveShowID_AlreadyInCache_PromptNo(t *testing.T) {
 	}
 }
 
+func TestResolveShowID_AlreadyInCache_TypoDefaultsToSkip(t *testing.T) {
+	// Anything other than "y" should skip, not process.
+	cache := cacheWith(t, map[string]string{"Show D": "444"})
+	p, _ := newTestProcessor(t, "", Config{}, cache,
+		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"nn"}})
+
+	id := p.resolveShowID("Show D")
+	if id != "SKIP" {
+		t.Errorf("got %q, want SKIP (typo should default to skip)", id)
+	}
+}
+
 func TestResolveShowID_NewShow_AcceptFirstResult(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 456, Name: "New Show", FirstAirDate: "2021-01-01"}}}

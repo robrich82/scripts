@@ -315,7 +315,7 @@ func (p *Processor) resolveShowID(showFolder string) string {
 	if id, ok := p.cache.Get(showFolder); ok {
 		if !p.cfg.ProcessAll {
 			ans, _ := p.prompter.Ask(fmt.Sprintf("\nShow '%s' found in cache. Process? [y/n]: ", showFolder))
-			if strings.ToLower(strings.TrimSpace(ans)) == "n" {
+			if strings.ToLower(strings.TrimSpace(ans)) != "y" {
 				p.sessionSkipped[showFolder] = true
 				return "SKIP"
 			}
