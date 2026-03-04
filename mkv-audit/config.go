@@ -52,6 +52,18 @@ var ietfMap = map[string]string{
 	"und": "und",
 }
 
+// trackNameLanguageHints maps leading language words in a track name to ISO
+// 639-2 codes. Used to infer the correct language for Signs/Songs/Forced
+// subtitle tracks whose language tag disagrees with their name
+// (e.g. "English [Signs/Songs]" mislabelled as jpn → eng).
+var trackNameLanguageHints = map[string]string{
+	"english":  "eng",
+	"japanese": "jpn",
+	"korean":   "kor",
+	"french":   "fre",
+	"russian":  "rus",
+}
+
 // trackRegionKeywords maps track-name keywords to IETF region overrides.
 // When a track's name contains one of these words and the language prefix
 // matches, the IETF tag is overridden to the region-specific value.

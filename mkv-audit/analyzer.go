@@ -96,6 +96,19 @@ func applyRegionKeyword(baseIETF, trackName string) string {
 	return baseIETF
 }
 
+// inferForcedSubLanguage checks whether a Signs/Songs/Forced subtitle track
+// name starts with a language keyword from trackNameLanguageHints (e.g.
+// "English [Signs/Songs]" → "eng"). Returns "" when no match is found.
+func inferForcedSubLanguage(trackName string) string {
+	lower := strings.ToLower(trackName)
+	for keyword, iso := range trackNameLanguageHints {
+		if strings.HasPrefix(lower, keyword) {
+			return iso
+		}
+	}
+	return ""
+}
+
 // containsAny returns true if name (lowercased) contains any of the keywords.
 func containsAny(name string, keywords []string) bool {
 	lower := strings.ToLower(name)
@@ -151,6 +164,16 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 	for i := range tracks {
 		props := &tracks[i].Properties
 		norm := normalizeLanguage(props.Language)
+
+		// For Signs/Songs/Forced subtitle tracks, try to infer the language
+		// from the track name when it starts with a known language word
+		// (e.g. "English [Signs/Songs]" mislabelled as jpn → correct to eng).
+		if tracks[i].Type == "subtitles" && containsAny(props.TrackName, forcedKeywords) {
+			if inferred := inferForcedSubLanguage(props.TrackName); inferred != "" && inferred != norm {
+				norm = inferred
+			}
+		}
+
 		normIETF := effectiveIETFTag(norm, opts)
 		// Apply per-track region detection from the track name (e.g. "British" → en-GB).
 		normIETF = applyRegionKeyword(normIETF, props.TrackName)
@@ -390,7 +413,12 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 
 		// Handle forced/Signs tracks (single or multiple with mains).
-		if len(forcedCands) == 1 {
+		// Guard: only run when mainCands is non-empty. When mainCands is empty
+		// the else-if branch above already promoted the forced track to main
+		// (forced=0, default=1). Running this block in that state would flip
+		// forced back to 1, then the else-if branch would flip it back to 0
+		// on the next pass — an infinite fix loop.
+		if len(forcedCands) == 1 && len(mainCands) > 0 {
 			fi := forcedCands[0]
 			isOnlySub := 0
 			if len(subTracks) == 1 {

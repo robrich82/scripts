@@ -186,15 +186,96 @@ func TestAnalyzeFile_BestSubByCodecBecomesDefault(t *testing.T) {
 	}
 }
 
-func TestAnalyzeFile_ForcedTrackGetsNameAndFlag(t *testing.T) {
+func TestAnalyzeFile_ForcedOnlySub_PromotedToMain(t *testing.T) {
+	// When a forced-keyword subtitle is the only track for its language (no
+	// main candidates), it is promoted to the main slot: default=1, forced=0.
 	info := MKVInfo{Tracks: []Track{
 		audioTrack(0, "jpn", "A_FLAC", 2, true),
-		subTrack(1, "eng", "S_TEXT/ASS", "Signs", false, false), // forced keyword
+		subTrack(1, "eng", "S_TEXT/ASS", "Signs", false, false),
 	}}
 	res := AnalyzeFile(info, AnalyzeOptions{})
-	// Single forced track: should become forced=1, default=0 (not the only sub), name=Signs/Songs.
+	if !hasEdit(res.Edits, "flag-default=1") {
+		t.Errorf("sole forced-keyword sub should become default; edits: %v", res.Edits)
+	}
+	if hasEdit(res.Edits, "flag-forced=1") {
+		t.Errorf("sole forced-keyword sub should not be forced when promoted to main; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_ForcedOnlySub_PromotedToMain_IsStable(t *testing.T) {
+	// After promotion (default=1, forced=0), a second analysis pass should
+	// produce no further edits — the fix must not loop.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "jpn", "A_FLAC", 2, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "Signs", true, false), // already default=1, forced=0
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if res.LocalFixes.Flags != 0 {
+		t.Errorf("expected no flag edits on second pass; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_ForcedSubWithMains_GetsForced(t *testing.T) {
+	// When main subtitle candidates exist, a single Signs/Songs track should
+	// still receive forced=1 (existing behaviour preserved).
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_FLAC", 2, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "English", true, false),
+		subTrack(2, "eng", "S_TEXT/ASS", "Signs", false, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
 	if !hasEdit(res.Edits, "flag-forced=1") {
-		t.Errorf("expected flag-forced=1; edits: %v", res.Edits)
+		t.Errorf("Signs track should get forced=1 when main candidates exist; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_ForcedSubLanguageInferredFromName(t *testing.T) {
+	// "English [Signs/Songs]" mislabelled as jpn should be corrected to eng.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "jpn", "A_OPUS", 2, true),
+		subTrack(1, "eng", "S_HDMV/PGS", "English [Full]", true, false),
+		subTrack(2, "eng", "S_HDMV/PGS", "English [Full/Japanese Names]", false, false),
+		{ID: 3, Type: "subtitles", Properties: TrackProperties{
+			Language: "jpn", CodecID: "S_HDMV/PGS",
+			TrackName: "English [Signs/Songs] (PGS)", DefaultTrack: true, ForcedTrack: false,
+		}},
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	// Language should be corrected to eng.
+	if !hasEdit(res.Edits, "language=eng") {
+		t.Errorf("expected language=eng correction for mislabelled Signs/Songs track; edits: %v", res.Edits)
+	}
+	// After correction, track joins eng subtitle group and should get forced=1.
+	if !hasEdit(res.Edits, "flag-forced=1") {
+		t.Errorf("Signs track should get forced=1 after language correction; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_ForcedSubLanguageInferred_IsStable(t *testing.T) {
+	// After language correction (eng) and flag normalisation, a second pass
+	// should produce no further edits. All LanguageIETF fields are pre-set
+	// to the expected values so the IETF step is already satisfied.
+	info := MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "audio", Properties: TrackProperties{
+			Language: "jpn", LanguageIETF: "ja-JP", CodecID: "A_OPUS",
+			AudioChannels: 2, DefaultTrack: true,
+		}},
+		{ID: 1, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "S_HDMV/PGS",
+			TrackName: "English [Full]", DefaultTrack: true, ForcedTrack: false,
+		}},
+		{ID: 2, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "S_HDMV/PGS",
+			TrackName: "English [Full/Japanese Names]", DefaultTrack: false, ForcedTrack: false,
+		}},
+		{ID: 3, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "S_HDMV/PGS",
+			TrackName: "English [Signs/Songs] (PGS)", DefaultTrack: false, ForcedTrack: true,
+		}},
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if len(res.Edits) != 0 {
+		t.Errorf("expected no edits on already-correct file; edits: %v", res.Edits)
 	}
 }
 
