@@ -27,7 +27,15 @@
       "Bash(go mod tidy:*)",
       "Bash(mkvinfo:*)",
       "Bash(mediainfo:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(c:/Users/robri/code/scripts/dist/sw-update.exe)",
+      "Bash(c:/Users/robri/code/scripts/dist/sw-update.exe list)",
+      "Bash(c:/Users/robri/code/scripts/dist/sw-update.exe import c:/Users/robri/code/scripts/bookmarks.html)",
+      "Bash(c:/Users/robri/code/scripts/dist/sw-update.exe check DXVK)",
+      "Bash(dist/sw-update.exe check DXVK)",
+      "Bash(c:/Users/robri/code/scripts/dist/sw-update.exe check mpv)",
+      "WebFetch(domain:sourceforge.net)",
+      "Bash(./dist/sw-update.exe check Munt)"
     ]
   }
 }
