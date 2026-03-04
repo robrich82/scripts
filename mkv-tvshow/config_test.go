@@ -163,3 +163,56 @@ func TestLoadManualData_InvalidJSON_ReturnsError(t *testing.T) {
 		t.Error("expected error for invalid JSON")
 	}
 }
+
+func TestLoadManualData_ParsesExtrasWithEpisodeRef(t *testing.T) {
+	input := map[string]ManualEntry{
+		"My Show": {
+			Extras: map[string]ExtraEntry{
+				"My Show - S01 NCOP": {Season: 1, Episode: 1},
+			},
+		},
+	}
+	raw, _ := json.Marshal(input)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manual_data.json")
+	os.WriteFile(path, raw, 0644)
+
+	data, err := LoadManualData(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	extra, ok := data["My Show"].Extras["My Show - S01 NCOP"]
+	if !ok {
+		t.Fatal("expected extras entry")
+	}
+	if extra.Season != 1 || extra.Episode != 1 || extra.Date != "" {
+		t.Errorf("unexpected extra: %+v", extra)
+	}
+}
+
+func TestExtractOpEdSuffix(t *testing.T) {
+	cases := []struct {
+		stem       string
+		wantBase   string
+		wantSuffix string
+	}{
+		{"Show S01 OP", "Show S01", "OP"},
+		{"Show S01 OP1", "Show S01", "OP1"},
+		{"Show S02 ED", "Show S02", "ED"},
+		{"Show S02 ED2", "Show S02", "ED2"},
+		{"Show S01 NCOP", "Show S01", "NCOP"},
+		{"Show S02 NCED1", "Show S02", "NCED1"},
+		{"Show S01 ncop2", "Show S01", "NCOP2"}, // case-insensitive, uppercased
+		{"Show S01 - Drama CD", "Show S01 - Drama CD", ""},
+		{"Show Name", "Show Name", ""},
+		{"OP", "OP", ""},    // no leading space
+		{"S01E01", "S01E01", ""},
+	}
+	for _, tc := range cases {
+		base, suffix := extractOpEdSuffix(tc.stem)
+		if base != tc.wantBase || suffix != tc.wantSuffix {
+			t.Errorf("extractOpEdSuffix(%q) = (%q, %q), want (%q, %q)",
+				tc.stem, base, suffix, tc.wantBase, tc.wantSuffix)
+		}
+	}
+}

@@ -20,8 +20,9 @@ type SeasonOverride struct {
 // ExtraEntry holds manual metadata for a non-episode file (extras, specials,
 // bonus content) that does not carry a standard S##E## episode number.
 type ExtraEntry struct {
-	Date   string `json:"date"`   // YYYY-MM-DD; written as the MKV release date
-	Season int    `json:"season"` // season number; used to select the season poster
+	Date    string `json:"date,omitempty"` // YYYY-MM-DD; written as the MKV release date
+	Season  int    `json:"season"`         // season number; used to select the season poster
+	Episode int    `json:"episode,omitempty"` // if > 0, fetch metadata from this TMDB episode instead of using Date
 }
 
 // ManualEntry holds per-show TMDB ID overrides and episode-level remappings.
@@ -63,6 +64,21 @@ var reverseChars = []struct{ from, to string }{
 }
 
 var yearSuffixRe = regexp.MustCompile(`\s\(\d{4}\)`)
+
+// opEdRe matches an OP/ED/NCOP/NCED suffix (with optional number) preceded by
+// whitespace at the end of a filename stem, e.g. " NCOP1", " ED", " OP2".
+var opEdRe = regexp.MustCompile(`(?i)\s+((?:NC)?(?:OP|ED)\d*)$`)
+
+// extractOpEdSuffix detects an OP/ED/NCOP/NCED suffix at the end of a
+// filename stem. Returns (base, suffix) where suffix is uppercase (e.g.
+// "NCOP1"), or (stem, "") if no suffix is found.
+func extractOpEdSuffix(stem string) (base, suffix string) {
+	m := opEdRe.FindStringSubmatchIndex(stem)
+	if m == nil {
+		return stem, ""
+	}
+	return stem[:m[0]], strings.ToUpper(stem[m[2]:m[3]])
+}
 
 // cleanMetadataTitle strips the file extension and restores ASCII characters
 // from their Unicode filesystem-safe lookalikes.

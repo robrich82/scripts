@@ -169,12 +169,13 @@ func (p *Processor) Run() Stats {
 					stem := strings.TrimSuffix(file, filepath.Ext(file))
 					if entry, hasEntry := p.manualData[showFolder]; hasEntry {
 						if extra, hasExtra := entry.Extras[stem]; hasExtra {
-							var relDate, stampDate, posterURL string
+							var relDate, stampDate, posterURL, summary, title string
 							posterURL = mainPoster
-							if extra.Date != "" {
-								relDate = extra.Date + "T00:00:00Z"
-								stampDate = relDate
-							}
+
+							// Detect OP/ED/NCOP/NCED suffix in the filename stem.
+							_, opEdSuffix := extractOpEdSuffix(stem)
+
+							// Fetch season data (needed for poster and optional episode lookup).
 							if extra.Season != 0 {
 								cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
 								if _, ok := seasonCache[cKey]; !ok {
@@ -186,9 +187,47 @@ func (p *Processor) Run() Stats {
 									posterURL = tmdbImageBase + sr.PosterPath
 								}
 							}
+
+							if extra.Episode > 0 {
+								// Use a specific episode's metadata instead of a manual date.
+								cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
+								if sr, ok := seasonCache[cKey]; ok {
+									for _, ep := range sr.Episodes {
+										if ep.EpisodeNumber == extra.Episode {
+											if ep.AirDate != "" {
+												relDate = ep.AirDate + "T00:00:00Z"
+												stampDate = relDate
+											}
+											summary = ep.Overview
+											title = ep.Name
+											break
+										}
+									}
+								}
+							} else if extra.Date != "" {
+								relDate = extra.Date + "T00:00:00Z"
+								stampDate = relDate
+							}
+
+							// Build title: episode title from TMDB if available, otherwise
+							// derive from the filename. When an OP/ED suffix is detected and
+							// the title comes from the filename, use the base (without suffix)
+							// so the suffix is not duplicated.
+							if title == "" {
+								if opEdSuffix != "" {
+									base, _ := extractOpEdSuffix(stem)
+									title = cleanMetadataTitle(base)
+								} else {
+									title = cleanMetadataTitle(file)
+								}
+							}
+							// Append OP/ED suffix if detected.
+							if opEdSuffix != "" {
+								title = fmt.Sprintf("%s (%s)", title, opEdSuffix)
+							}
+
 							rating := p.resolveEpisodeRating(showID, showName, filePath, extra.Season, 0)
-							title := cleanMetadataTitle(file)
-							if p.applyMKV(filePath, title, "", showID, relDate, stampDate, posterURL, rating) {
+							if p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating) {
 								if stampDate != "" {
 									p.retryList.Remove(filePath)
 								} else {

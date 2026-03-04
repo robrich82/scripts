@@ -230,7 +230,8 @@ your files:
       "S01E05": [1, 5]
     },
     "extras": {
-      "Show Name - S02 - Drama CD": { "date": "2022-04-01", "season": 2 }
+      "Show Name - S02 - Drama CD": { "date": "2022-04-01", "season": 2 },
+      "Show Name - S01 NCOP": { "season": 1, "episode": 1 }
     }
   }
 }
@@ -238,11 +239,19 @@ your files:
 
 - `overrides` — redirect a local season to a different TMDB show/season
 - `mapping` — remap a local `S##E##` to a different TMDB `[season, episode]`
-- `extras` — manually set the release date and season poster for non-episode
-  files (e.g. bonus content, drama CDs) that have no `S##E##` in their name.
-  The key is the filename **without the `.mkv` extension**. `date` is written
-  as the MKV release date and used to stamp filesystem timestamps; `season`
-  selects the season poster to attach.
+- `extras` — metadata for non-episode files (bonus content, OPs/EDs, etc.)
+  that have no `S##E##` in their name. The key is the filename **without the
+  `.mkv` extension**.
+  - `date` — YYYY-MM-DD release date written to MKV tags and filesystem
+    timestamps. Omit when using `episode`.
+  - `season` — selects the season poster to attach.
+  - `episode` — optional. When set, fetches the air date, title, and summary
+    from that TMDB episode (season × episode) instead of using a manual `date`.
+
+  If the filename ends with an OP/ED/NCOP/NCED suffix (with optional number,
+  e.g. `NCOP1`, `ED2`), it is automatically detected and the MKV title becomes
+  the episode title (or filename base) with the suffix appended in parentheses,
+  e.g. `"The Kick-Off (NCOP)"` or `"Show Name - S02 (ED)"`.
 
 See [mkv-tvshow/manual_data.json.example](mkv-tvshow/manual_data.json.example) for a full example.
 

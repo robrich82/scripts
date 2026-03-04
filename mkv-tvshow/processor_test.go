@@ -930,6 +930,101 @@ func TestProcessorRun_ManualExtra_Processed(t *testing.T) {
 	}
 }
 
+func TestProcessorRun_ManualExtra_EpisodeRef_UsesEpisodeData(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S01 NCOP.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails: ShowDetails{PosterPath: "/show.jpg"},
+		seasonResult: SeasonResult{
+			PosterPath: "/season1.jpg",
+			Episodes: []Episode{
+				{EpisodeNumber: 1, AirDate: "2021-10-03", Overview: "Episode one overview", Name: "The Kick-Off"},
+				{EpisodeNumber: 2, AirDate: "2021-10-10", Overview: "Episode two overview", Name: "Second Wind"},
+			},
+		},
+	}
+	runner := &fakeMKVRunner{
+		avail:       true,
+		applyResult: mkvpropeditSuccessMsg,
+		tagsPath:    "t.xml",
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {
+			Extras: map[string]ExtraEntry{
+				"My Show - S01 NCOP": {Season: 1, Episode: 1},
+			},
+		},
+	}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Fatalf("expected Success=1, got %+v", stats)
+	}
+	// Filesystem timestamp should match the episode air date.
+	wantTime := time.Date(2021, 10, 3, 0, 0, 0, 0, time.Local)
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected SetTimes to be called")
+	}
+	if !timer.setTimesCalls[0].t.Equal(wantTime) {
+		t.Errorf("SetTimes got %v, want %v", timer.setTimesCalls[0].t, wantTime)
+	}
+	// Title should be the TMDB episode name plus "(NCOP)".
+	if len(runner.calls) == 0 {
+		t.Fatal("expected Apply to be called")
+	}
+	if !containsAll(runner.calls[0].args, "title=The Kick-Off (NCOP)") {
+		t.Errorf("expected title arg 'title=The Kick-Off (NCOP)' in %v", runner.calls[0].args)
+	}
+}
+
+func TestProcessorRun_ManualExtra_OpEdSuffix_FilenameTitle(t *testing.T) {
+	// Extra with manual date (no episode ref) but OP/ED suffix in filename.
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S02 ED.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails:  ShowDetails{PosterPath: "/show.jpg"},
+		seasonResult: SeasonResult{PosterPath: "/season2.jpg"},
+	}
+	runner := &fakeMKVRunner{
+		avail:       true,
+		applyResult: mkvpropeditSuccessMsg,
+		tagsPath:    "t.xml",
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {
+			Extras: map[string]ExtraEntry{
+				"My Show - S02 ED": {Date: "2022-06-15", Season: 2},
+			},
+		},
+	}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Fatalf("expected Success=1, got %+v", stats)
+	}
+	if len(runner.calls) == 0 {
+		t.Fatal("expected Apply to be called")
+	}
+	// Title: filename-based (no episode ref) with (ED) suffix appended.
+	if !containsAll(runner.calls[0].args, "title=My Show - S02 (ED)") {
+		t.Errorf("expected title 'My Show - S02 (ED)' in %v", runner.calls[0].args)
+	}
+}
+
 func TestProcessorRun_ManualExtra_NoEntry_Skipped(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
