@@ -17,10 +17,18 @@ type SeasonOverride struct {
 	MapSeason int    `json:"map_season"`
 }
 
+// ExtraEntry holds manual metadata for a non-episode file (extras, specials,
+// bonus content) that does not carry a standard S##E## episode number.
+type ExtraEntry struct {
+	Date   string `json:"date"`   // YYYY-MM-DD; written as the MKV release date
+	Season int    `json:"season"` // season number; used to select the season poster
+}
+
 // ManualEntry holds per-show TMDB ID overrides and episode-level remappings.
 type ManualEntry struct {
 	Overrides map[string]SeasonOverride `json:"overrides"` // keyed by season key e.g. "S02"
 	Mapping   map[string]EpisodePair    `json:"mapping"`   // keyed by "S01E03" -> [tmdbSeason, tmdbEpisode]
+	Extras    map[string]ExtraEntry     `json:"extras"`    // keyed by filename stem (no .mkv extension)
 }
 
 // LoadManualData reads per-show TMDB corrections from a JSON file.

@@ -121,6 +121,39 @@ func TestLoadManualData_ParsesOverridesAndMappings(t *testing.T) {
 	}
 }
 
+func TestLoadManualData_ParsesExtras(t *testing.T) {
+	input := map[string]ManualEntry{
+		"My Show": {
+			Extras: map[string]ExtraEntry{
+				"My Show - S02 - Drama CD": {Date: "2022-04-01", Season: 2},
+			},
+		},
+	}
+	raw, _ := json.Marshal(input)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manual_data.json")
+	os.WriteFile(path, raw, 0644)
+
+	data, err := LoadManualData(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry, ok := data["My Show"]
+	if !ok {
+		t.Fatal("expected entry for 'My Show'")
+	}
+	extra, ok := entry.Extras["My Show - S02 - Drama CD"]
+	if !ok {
+		t.Fatal("expected extras entry for 'My Show - S02 - Drama CD'")
+	}
+	if extra.Date != "2022-04-01" {
+		t.Errorf("got date %q, want %q", extra.Date, "2022-04-01")
+	}
+	if extra.Season != 2 {
+		t.Errorf("got season %d, want 2", extra.Season)
+	}
+}
+
 func TestLoadManualData_InvalidJSON_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manual_data.json")

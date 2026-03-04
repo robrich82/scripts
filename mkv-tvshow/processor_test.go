@@ -876,6 +876,70 @@ func TestProcessorRun_RetryList_BypassesCutoff(t *testing.T) {
 	}
 }
 
+// --- manual extras ---
+
+func TestProcessorRun_ManualExtra_Processed(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S02 - Drama CD.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails:  ShowDetails{PosterPath: "/show.jpg"},
+		seasonResult: SeasonResult{PosterPath: "/season2.jpg"},
+	}
+	runner := &fakeMKVRunner{
+		avail:       true,
+		applyResult: mkvpropeditSuccessMsg,
+		tagsPath:    "t.xml",
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {
+			Extras: map[string]ExtraEntry{
+				"My Show - S02 - Drama CD": {Date: "2022-04-01", Season: 2},
+			},
+		},
+	}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Fatalf("expected Success=1, got %+v", stats)
+	}
+	want := time.Date(2022, 4, 1, 0, 0, 0, 0, time.Local)
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected SetTimes to be called")
+	}
+	if !timer.setTimesCalls[0].t.Equal(want) {
+		t.Errorf("SetTimes got %v, want %v", timer.setTimesCalls[0].t, want)
+	}
+}
+
+func TestProcessorRun_ManualExtra_NoEntry_Skipped(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S02 - Drama CD.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	runner := &fakeMKVRunner{avail: true}
+	p, _ := newTestProcessor(t, dir, Config{
+		MediaDir:   dir,
+		ProcessAll: true,
+	}, cache, &fakeTMDB{}, runner, &scriptedPrompter{})
+
+	stats := p.Run()
+	if stats.Success != 0 || stats.Failed != 0 {
+		t.Errorf("expected no processing for unknown extra, got %+v", stats)
+	}
+	if len(runner.calls) != 0 {
+		t.Error("Apply should not be called for non-episode file without extras entry")
+	}
+}
+
 // containsAll returns true if all of the given values appear in haystack
 // (as individual elements, in any order).
 func containsAll(haystack []string, needles ...string) bool {

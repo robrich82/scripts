@@ -165,6 +165,45 @@ func (p *Processor) Run() Stats {
 
 			epMatch := epRe.FindStringSubmatch(file)
 			if epMatch == nil {
+				if !p.cfg.RatingsOnly {
+					stem := strings.TrimSuffix(file, filepath.Ext(file))
+					if entry, hasEntry := p.manualData[showFolder]; hasEntry {
+						if extra, hasExtra := entry.Extras[stem]; hasExtra {
+							var relDate, stampDate, posterURL string
+							posterURL = mainPoster
+							if extra.Date != "" {
+								relDate = extra.Date + "T00:00:00Z"
+								stampDate = relDate
+							}
+							if extra.Season != 0 {
+								cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
+								if _, ok := seasonCache[cKey]; !ok {
+									if sr, err := p.tmdb.GetSeason(showID, extra.Season); err == nil {
+										seasonCache[cKey] = sr
+									}
+								}
+								if sr, ok := seasonCache[cKey]; ok && sr.PosterPath != "" {
+									posterURL = tmdbImageBase + sr.PosterPath
+								}
+							}
+							rating := p.resolveEpisodeRating(showID, showName, filePath, extra.Season, 0)
+							title := cleanMetadataTitle(file)
+							if p.applyMKV(filePath, title, "", showID, relDate, stampDate, posterURL, rating) {
+								if stampDate != "" {
+									p.retryList.Remove(filePath)
+								} else {
+									p.retryList.Add(filePath)
+								}
+								fmt.Printf("[✓] Processed (extra): %s\n", file)
+								stats.Success++
+							} else {
+								fmt.Printf("  [X] Failed (extra): %s\n", file)
+								stats.Failed++
+							}
+							time.Sleep(50 * time.Millisecond)
+						}
+					}
+				}
 				return nil
 			}
 			sNum, _ := strconv.Atoi(epMatch[1])

@@ -228,6 +228,9 @@ your files:
     "mapping": {
       "S01E03": [1, 3],
       "S01E05": [1, 5]
+    },
+    "extras": {
+      "Show Name - S02 - Drama CD": { "date": "2022-04-01", "season": 2 }
     }
   }
 }
@@ -235,6 +238,11 @@ your files:
 
 - `overrides` — redirect a local season to a different TMDB show/season
 - `mapping` — remap a local `S##E##` to a different TMDB `[season, episode]`
+- `extras` — manually set the release date and season poster for non-episode
+  files (e.g. bonus content, drama CDs) that have no `S##E##` in their name.
+  The key is the filename **without the `.mkv` extension**. `date` is written
+  as the MKV release date and used to stamp filesystem timestamps; `season`
+  selects the season poster to attach.
 
 See [mkv-tvshow/manual_data.json.example](mkv-tvshow/manual_data.json.example) for a full example.
 
