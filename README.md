@@ -1,6 +1,6 @@
-# MKV Media Tools
+# Scripts
 
-A collection of Go command-line utilities for managing MKV media files.
+A collection of Go command-line utilities for managing MKV media files and software updates.
 
 ## Tools
 
@@ -10,6 +10,7 @@ A collection of Go command-line utilities for managing MKV media files.
 | [mkv-movie](#mkv-movie) | Sync MKV date headers and file timestamps from mediainfo |
 | [mkv-musicvideo](#mkv-musicvideo) | Fuzzy-match video files to audio files for renaming |
 | [mkv-tvshow](#mkv-tvshow) | Tag TV episode MKVs with metadata from TMDB |
+| [sw-update](#sw-update) | Track and install software updates from GitHub releases or web pages |
 
 ## Requirements
 
@@ -33,6 +34,7 @@ make mkv-audit
 make mkv-movie
 make mkv-musicvideo
 make mkv-tvshow
+make sw-update
 ```
 
 Run all tests:
@@ -238,6 +240,57 @@ See [mkv-tvshow/manual_data.json.example](mkv-tvshow/manual_data.json.example) f
 
 ---
 
+## sw-update
+
+Tracks installed software versions and checks for updates via GitHub releases
+or web page scraping. Downloads and runs installers on demand.
+
+### Usage
+
+```sh
+sw-update check              # Check all enabled apps for updates
+sw-update check <name>       # Check a specific app
+sw-update list               # List all apps and their known versions
+sw-update install <name>     # Download latest release and run/open installer
+sw-update add                # Add a new app interactively
+sw-update remove <name>      # Remove an app from config
+sw-update enable <name>      # Enable an app for checking
+sw-update disable <name>     # Disable an app without removing it
+sw-update mark <name>        # Mark current latest as seen (skip next update prompt)
+sw-update import <file>      # Bootstrap config from a Netscape bookmarks HTML file
+```
+
+### Environment
+
+| Variable | Description |
+|----------|-------------|
+| `GITHUB_TOKEN` | Personal access token — raises GitHub API limit from 60 to 5000 req/hour |
+
+### Configuration
+
+Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
+`$XDG_CONFIG_HOME/sw-update/` (Linux/macOS):
+
+- `sw-update.json` — app definitions (checkers, local detectors, download dir)
+- `sw-update-state.json` — auto-updated; tracks latest/installed/seen versions and last-checked timestamps
+
+#### Checker types
+
+| Type | Description |
+|------|-------------|
+| `github` | Fetches latest release from a GitHub repo (`owner/repo`) |
+| `html` | Scrapes a version string from a web page using a regex |
+
+#### Local detector types
+
+| Type | Description |
+|------|-------------|
+| `none` | No local detection; update prompt is shown whenever a new version appears |
+| `exe` | Runs an executable with given args and extracts version from output |
+| `file-version` | Reads the Windows file-version resource from an exe/dll |
+
+---
+
 ## Project Structure
 
 ```
@@ -247,7 +300,8 @@ See [mkv-tvshow/manual_data.json.example](mkv-tvshow/manual_data.json.example) f
 ├── mkv-audit/
 ├── mkv-movie/
 ├── mkv-musicvideo/
-└── mkv-tvshow/
+├── mkv-tvshow/
+└── sw-update/
 ```
 
 Each subdirectory is an independent Go module.
