@@ -22,12 +22,30 @@ func newStdinPrompter() *stdinPrompter {
 }
 
 func (p *stdinPrompter) Ask(prompt string) (string, error) {
-	fmt.Print(prompt)
-	if !p.scanner.Scan() {
-		if err := p.scanner.Err(); err != nil {
-			return "", err
+	for {
+		fmt.Print(prompt)
+		if !p.scanner.Scan() {
+			if err := p.scanner.Err(); err != nil {
+				return "", err
+			}
+			return "", fmt.Errorf("EOF")
 		}
-		return "", fmt.Errorf("EOF")
+		line := strings.TrimSpace(p.scanner.Text())
+		if !hasModifierArtifacts(line) {
+			return line, nil
+		}
 	}
-	return strings.TrimSpace(p.scanner.Text()), nil
+}
+
+// hasModifierArtifacts reports whether s contains characters that indicate a
+// modifier key (Ctrl, Alt, Win) was held when the input was produced.
+// Control characters (ASCII < 32) come from Ctrl+key; ESC prefix (0x1B) is
+// the lead byte of Alt+key sequences on most terminals.
+func hasModifierArtifacts(s string) bool {
+	for _, r := range s {
+		if r < 32 || r == 127 {
+			return true
+		}
+	}
+	return false
 }
