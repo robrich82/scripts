@@ -975,12 +975,12 @@ func TestProcessorRun_ManualExtra_EpisodeRef_UsesEpisodeData(t *testing.T) {
 	if !timer.setTimesCalls[0].t.Equal(wantTime) {
 		t.Errorf("SetTimes got %v, want %v", timer.setTimesCalls[0].t, wantTime)
 	}
-	// Title should be the TMDB episode name plus "(NCOP)".
+	// Title comes from the filename base with the suffix in parens.
 	if len(runner.calls) == 0 {
 		t.Fatal("expected Apply to be called")
 	}
-	if !containsAll(runner.calls[0].args, "title=The Kick-Off (NCOP)") {
-		t.Errorf("expected title arg 'title=The Kick-Off (NCOP)' in %v", runner.calls[0].args)
+	if !containsAll(runner.calls[0].args, "title=My Show - S01 (NCOP)") {
+		t.Errorf("expected title 'My Show - S01 (NCOP)' in %v", runner.calls[0].args)
 	}
 }
 
@@ -1067,9 +1067,9 @@ func TestProcessorRun_ManualExtra_EpisodePatternInName_TreatedAsExtra(t *testing
 	if len(runner.calls) == 0 {
 		t.Fatal("expected Apply to be called")
 	}
-	// Extras path: title = TMDB episode name + (NCOP); hyphen separator detected.
-	if !containsAll(runner.calls[0].args, "title=A Friend (NCOP)") {
-		t.Errorf("expected 'title=A Friend (NCOP)' in %v", runner.calls[0].args)
+	// Title from filename base + suffix in parens; hyphen separator detected.
+	if !containsAll(runner.calls[0].args, "title=My Show - S01E03 - A Friend (NCOP)") {
+		t.Errorf("expected 'title=My Show - S01E03 - A Friend (NCOP)' in %v", runner.calls[0].args)
 	}
 	// Date from episode air date.
 	wantTime := time.Date(2021, 1, 25, 0, 0, 0, 0, time.Local)

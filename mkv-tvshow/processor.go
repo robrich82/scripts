@@ -190,7 +190,8 @@ func (p *Processor) Run() Stats {
 						}
 
 						if extra.Episode > 0 {
-							// Use a specific episode's metadata instead of a manual date.
+							// Use a specific episode's metadata (date, summary) instead of a
+							// manual date. Title always comes from the filename (see below).
 							cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
 							if sr, ok := seasonCache[cKey]; ok {
 								for _, ep := range sr.Episodes {
@@ -200,7 +201,6 @@ func (p *Processor) Run() Stats {
 											stampDate = relDate
 										}
 										summary = ep.Overview
-										title = ep.Name
 										break
 									}
 								}
@@ -210,21 +210,14 @@ func (p *Processor) Run() Stats {
 							stampDate = relDate
 						}
 
-						// Build title: episode title from TMDB if available, otherwise
-						// derive from the filename. When an OP/ED suffix is detected and
-						// the title comes from the filename, use the base (without suffix)
-						// so the suffix is not duplicated.
-						if title == "" {
-							if opEdSuffix != "" {
-								base, _ := extractOpEdSuffix(stem)
-								title = cleanMetadataTitle(base)
-							} else {
-								title = cleanMetadataTitle(file)
-							}
-						}
-						// Append OP/ED suffix if detected.
+						// Build title from the filename, matching the format regular episodes use.
+						// When an OP/ED suffix is detected, strip it from the base and
+						// re-append in parentheses so the separator is normalised.
 						if opEdSuffix != "" {
-							title = fmt.Sprintf("%s (%s)", title, opEdSuffix)
+							base, _ := extractOpEdSuffix(stem)
+							title = fmt.Sprintf("%s (%s)", cleanMetadataTitle(base), opEdSuffix)
+						} else {
+							title = cleanMetadataTitle(file)
 						}
 
 						rating := p.resolveEpisodeRating(showID, showName, filePath, extra.Season, 0)
