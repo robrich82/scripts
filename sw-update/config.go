@@ -20,10 +20,11 @@ type CheckerConfig struct {
 
 // LocalConfig describes how to detect the locally installed version.
 type LocalConfig struct {
-	Type         string   `json:"type"`                    // "none", "exe", "file-version"
-	Path         string   `json:"path,omitempty"`          // exe or file path
-	Args         []string `json:"args,omitempty"`          // args for exe detector
-	VersionRegex string   `json:"version_regex,omitempty"` // regex to extract version from output
+	Type           string   `json:"type"`                      // "none", "exe", "file-version"
+	Path           string   `json:"path,omitempty"`            // exe or file path
+	Args           []string `json:"args,omitempty"`            // args for exe detector
+	VersionRegex   string   `json:"version_regex,omitempty"`   // regex to extract version from output
+	VersionRewrite []string `json:"version_rewrite,omitempty"` // [regex, replacement] applied after extraction
 }
 
 // App represents a single tracked application.

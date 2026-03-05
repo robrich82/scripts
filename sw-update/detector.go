@@ -20,19 +20,54 @@ func NewDetector() LocalDetector {
 type detectorDispatch struct{}
 
 func (d *detectorDispatch) InstalledVersion(app App) (string, error) {
+	var ver string
+	var err error
 	switch app.Local.Type {
 	case "", "none":
 		return "", nil
 	case "exe":
-		return detectViaExe(app.Local)
+		ver, err = detectViaExe(app.Local)
 	case "file-version":
 		if app.Local.Path == "" {
 			return "", fmt.Errorf("file-version detector requires path")
 		}
-		return detectFileVersion(app.Local.Path)
+		ver, err = detectFileVersion(app.Local.Path)
+		if err == nil && app.Local.VersionRegex != "" {
+			ver, err = applyVersionRegex(ver, app.Local.VersionRegex)
+		}
 	default:
 		return "", fmt.Errorf("unknown local detector type: %s", app.Local.Type)
 	}
+	if err != nil {
+		return "", err
+	}
+	return applyVersionRewrite(ver, app.Local.VersionRewrite)
+}
+
+func applyVersionRegex(ver, pattern string) (string, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid version_regex: %w", err)
+	}
+	m := re.FindStringSubmatch(ver)
+	if m == nil {
+		return "", fmt.Errorf("version_regex did not match %q", ver)
+	}
+	if len(m) > 1 {
+		return strings.TrimSpace(m[1]), nil
+	}
+	return strings.TrimSpace(m[0]), nil
+}
+
+func applyVersionRewrite(ver string, rewrite []string) (string, error) {
+	if len(rewrite) != 2 {
+		return ver, nil
+	}
+	re, err := regexp.Compile(rewrite[0])
+	if err != nil {
+		return "", fmt.Errorf("invalid version_rewrite regex: %w", err)
+	}
+	return re.ReplaceAllString(ver, rewrite[1]), nil
 }
 
 func detectViaExe(cfg LocalConfig) (string, error) {
