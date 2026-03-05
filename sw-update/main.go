@@ -8,7 +8,8 @@ import (
 const usage = `sw-update — software update checker
 
 Commands:
-  check [name]       Check for updates (all enabled apps, or a specific app)
+  check [-v] [name]  Check for updates (all enabled apps, or a specific app)
+                     -v / --verbose: also show up-to-date apps
   list               List all configured apps and their known versions
   install <name>     Download latest release and run/open installer
   add                Add a new app interactively

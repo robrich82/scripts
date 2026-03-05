@@ -18,6 +18,17 @@ type checkEntry struct {
 }
 
 func cmdCheck(args []string) error {
+	verbose := false
+	var filtered []string
+	for _, a := range args {
+		if a == "-v" || a == "--verbose" {
+			verbose = true
+		} else {
+			filtered = append(filtered, a)
+		}
+	}
+	args = filtered
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -142,7 +153,7 @@ func cmdCheck(args []string) error {
 		}
 	}
 
-	if len(upToDate) > 0 {
+	if verbose && len(upToDate) > 0 {
 		fmt.Printf("\n=== UP TO DATE (%d) ===\n", len(upToDate))
 		for _, e := range upToDate {
 			fmt.Printf("  [OK]   %-*s  %s\n", nameWidth, e.app.Name, e.result.Version)
