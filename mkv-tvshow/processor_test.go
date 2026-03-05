@@ -204,7 +204,7 @@ func TestResolveShowID_SessionSkipped_NoRePrompt(t *testing.T) {
 	prompter := &scriptedPrompter{answers: []string{"s"}} // only one answer queued
 	p, _ := newTestProcessor(t, "", Config{}, cache, tmdb, &fakeMKVRunner{}, prompter)
 
-	p.resolveShowID("Skipped Show") // consumes the one answer
+	p.resolveShowID("Skipped Show")       // consumes the one answer
 	id := p.resolveShowID("Skipped Show") // should not prompt again
 	if id != "SKIP" {
 		t.Errorf("got %q, want SKIP", id)

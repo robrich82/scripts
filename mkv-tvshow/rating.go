@@ -20,7 +20,7 @@ const (
 	RatingRP16 NZRating = "RP16"
 	Rating16   NZRating = "16"
 	RatingR16  NZRating = "R16"
-	RatingR    NZRating = "R"   // generic Restricted (used by some older NZ classifications)
+	RatingR    NZRating = "R" // generic Restricted (used by some older NZ classifications)
 	RatingRP18 NZRating = "RP18"
 	Rating18   NZRating = "18"
 	RatingR18  NZRating = "R18"

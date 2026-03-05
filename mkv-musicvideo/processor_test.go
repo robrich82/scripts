@@ -23,9 +23,9 @@ func (f *fakePrompter) Ask(_ string) (string, error) {
 
 // fakeTagger records calls made to CopyTagsToMKV.
 type fakeTagger struct {
-	calls        []taggerCall
-	err          error
-	tagsMatch    bool // return value for TagsMatchMKV; default false → copy always runs
+	calls     []taggerCall
+	err       error
+	tagsMatch bool // return value for TagsMatchMKV; default false → copy always runs
 }
 
 type taggerCall struct {

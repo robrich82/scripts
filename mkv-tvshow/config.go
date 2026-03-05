@@ -20,8 +20,8 @@ type SeasonOverride struct {
 // ExtraEntry holds manual metadata for a non-episode file (extras, specials,
 // bonus content) that does not carry a standard S##E## episode number.
 type ExtraEntry struct {
-	Date    string `json:"date,omitempty"` // YYYY-MM-DD; written as the MKV release date
-	Season  int    `json:"season"`         // season number; used to select the season poster
+	Date    string `json:"date,omitempty"`    // YYYY-MM-DD; written as the MKV release date
+	Season  int    `json:"season"`            // season number; used to select the season poster
 	Episode int    `json:"episode,omitempty"` // if > 0, fetch metadata from this TMDB episode instead of using Date
 }
 

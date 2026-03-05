@@ -46,9 +46,9 @@ func TestMaxRating(t *testing.T) {
 
 func TestParseNZRating(t *testing.T) {
 	tests := []struct {
-		input   string
-		want    NZRating
-		wantOK  bool
+		input  string
+		want   NZRating
+		wantOK bool
 	}{
 		// Canonical forms
 		{"G", RatingG, true},

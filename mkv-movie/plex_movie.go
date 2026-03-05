@@ -36,9 +36,9 @@ type PlexMovieClient interface {
 // httpPlexMovieClient is the production PlexMovieClient that communicates with
 // a real Plex Media Server over HTTP.
 type httpPlexMovieClient struct {
-	baseURL      string
-	token        string
-	httpClient   *http.Client
+	baseURL       string
+	token         string
+	httpClient    *http.Client
 	movieKeyCache map[string]string // tmdbID → Plex ratingKey
 }
 

@@ -205,7 +205,7 @@ func TestExtractOpEdSuffix(t *testing.T) {
 		{"Show S01 ncop2", "Show S01", "NCOP2"}, // case-insensitive, uppercased
 		{"Show S01 - Drama CD", "Show S01 - Drama CD", ""},
 		{"Show Name", "Show Name", ""},
-		{"OP", "OP", ""},    // no leading space
+		{"OP", "OP", ""}, // no leading space
 		{"S01E01", "S01E01", ""},
 		// Hyphen separator (actual filename convention)
 		{"Show - S01E03 - A Friend-NCOP", "Show - S01E03 - A Friend", "NCOP"},

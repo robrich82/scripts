@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	reBookmarkLink = regexp.MustCompile(`(?i)HREF="([^"]+)"[^>]*>([^<]+)</A>`)
+	reBookmarkLink   = regexp.MustCompile(`(?i)HREF="([^"]+)"[^>]*>([^<]+)</A>`)
 	reGitHubReleases = regexp.MustCompile(`(?i)^https?://github\.com/([^/]+)/([^/?#]+)/releases`)
 )
 

@@ -383,9 +383,9 @@ func TestAnalyzeFile_EnSubRegionPriority(t *testing.T) {
 	// Track 4 is en-NZ and should win. All tracks have identical codecs.
 	info := MKVInfo{Tracks: []Track{
 		audioTrack(0, "eng", "A_AC3", 2, true),
-		subTrack(1, "eng", "S_TEXT/ASS", "English", false, false),            // generic, score 1
-		subTrack(2, "eng", "S_TEXT/ASS", "British English", false, false),    // en-GB, score 3
-		subTrack(3, "eng", "S_TEXT/ASS", "Australian English", false, false), // en-AU, score 2
+		subTrack(1, "eng", "S_TEXT/ASS", "English", false, false),             // generic, score 1
+		subTrack(2, "eng", "S_TEXT/ASS", "British English", false, false),     // en-GB, score 3
+		subTrack(3, "eng", "S_TEXT/ASS", "Australian English", false, false),  // en-AU, score 2
 		subTrack(4, "eng", "S_TEXT/ASS", "New Zealand English", false, false), // en-NZ, score 4
 	}}
 	res := AnalyzeFile(info, AnalyzeOptions{})

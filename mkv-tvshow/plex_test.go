@@ -16,20 +16,20 @@ type setRatingCall struct {
 }
 
 type fakePlexClient struct {
-	showRatingKey      string
-	findErr            error
-	titleRatingKey     string
-	findTitleErr       error
-	filePathRatingKey  string
-	filePathErr        error
-	seasons            []PlexSeason
-	seasonsErr         error
-	episodesByKey      map[string][]PlexEpisodeItem
-	episodesErr        error
-	setRatingCalls     []setRatingCall
-	setRatingErr       error
-	contentRating      NZRating
-	contentRatingErr   error
+	showRatingKey     string
+	findErr           error
+	titleRatingKey    string
+	findTitleErr      error
+	filePathRatingKey string
+	filePathErr       error
+	seasons           []PlexSeason
+	seasonsErr        error
+	episodesByKey     map[string][]PlexEpisodeItem
+	episodesErr       error
+	setRatingCalls    []setRatingCall
+	setRatingErr      error
+	contentRating     NZRating
+	contentRatingErr  error
 }
 
 func (f *fakePlexClient) FindShowByTMDBID(_ string) (string, error) {
@@ -531,10 +531,10 @@ func TestGuidStringMatchesTMDBID(t *testing.T) {
 		{"tmdb://12345", "12345", true},
 		{"tmdb://12345?lang=en", "12345", true},
 		{"com.plexapp.agents.themoviedb://12345?lang=en", "12345", true},
-		{"tmdb://123456", "12345", false},      // partial match — must not fire
-		{"tmdb://12345", "123456", false},      // different ID
-		{"", "12345", false},                   // empty string
-		{"tmdb://12345", "", false},            // empty ID
+		{"tmdb://123456", "12345", false}, // partial match — must not fire
+		{"tmdb://12345", "123456", false}, // different ID
+		{"", "12345", false},              // empty string
+		{"tmdb://12345", "", false},       // empty ID
 	}
 	for _, tc := range tests {
 		got := guidStringMatchesTMDBID(tc.s, tc.tmdbID)

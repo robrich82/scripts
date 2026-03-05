@@ -8,9 +8,9 @@ import (
 )
 
 func main() {
-	cutoffDateStr    := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
-	processAll       := flag.Bool("all", false, "Process all cached shows without prompting.")
-	ratingsOnly      := flag.Bool("ratings-only", false, "Only update NZ content ratings; skip all other metadata processing.")
+	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
+	processAll := flag.Bool("all", false, "Process all cached shows without prompting.")
+	ratingsOnly := flag.Bool("ratings-only", false, "Only update NZ content ratings; skip all other metadata processing.")
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
 	flag.Parse()
 
@@ -20,7 +20,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	plexURL   := os.Getenv("PLEX_URL")
+	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
 
 	var cutoff time.Time
