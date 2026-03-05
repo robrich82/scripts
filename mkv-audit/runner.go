@@ -131,9 +131,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				local.FailedPaths = append(local.FailedPaths, p)
 			} else {
 				res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: resolveIETFMap(p, root, lib)})
-				for _, c := range res.UnknownCodecs {
-					localCodecs = append(localCodecs, c)
-				}
+				localCodecs = append(localCodecs, res.UnknownCodecs...)
 				if res.Failed {
 					fmt.Fprintf(&buf, "[FAILED] %s: %s\n", basename, strings.Join(res.FailReasons, ", "))
 					local.Failed++
