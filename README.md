@@ -343,6 +343,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `github` | Fetches latest release from a GitHub repo (`owner/repo`) |
 | `html` | Scrapes a version string from a web page using a regex |
 | `sourceforge` | Scans a SourceForge project's RSS feed for new file releases |
+| `http-header` | Reads an HTTP response header from a URL (e.g. `Last-Modified`) as the version |
 
 **`github` checker fields:**
 
@@ -358,6 +359,13 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 |-------|-------------|
 | `url` | Page URL to fetch |
 | `version_regex` | Go regex; capture group 1 is used as version if present |
+
+**`http-header` checker fields:**
+
+| Field | Description |
+|-------|-------------|
+| `url` | URL to send a HEAD request to |
+| `header` | Header to use as the version (default: `Last-Modified`, formatted as `YYYY-MM-DD`) |
 
 **`sourceforge` checker fields:**
 

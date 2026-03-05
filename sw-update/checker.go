@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Asset represents a downloadable file from a release.
@@ -43,6 +44,8 @@ func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
 		return (&githubChecker{client: d.client}).check(app)
 	case "html":
 		return (&htmlChecker{client: d.client}).check(app)
+	case "http-header":
+		return (&headerChecker{client: d.client}).check(app)
 	case "sourceforge":
 		return (&sfChecker{client: d.client}).check(app)
 	case "":
@@ -217,6 +220,54 @@ func isNonWindowsAsset(name string) bool {
 
 type htmlChecker struct {
 	client *http.Client
+}
+
+// ---- HTTP header checker ----
+
+type headerChecker struct {
+	client *http.Client
+}
+
+func (h *headerChecker) check(app App) (*CheckResult, error) {
+	if app.Checker.URL == "" {
+		return nil, fmt.Errorf("http-header checker requires url")
+	}
+
+	req, err := http.NewRequest("HEAD", app.Checker.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "sw-update/1.0 (+https://github.com/)")
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("http-header HEAD request returned %d", resp.StatusCode)
+	}
+
+	headerName := app.Checker.Header
+	if headerName == "" {
+		headerName = "Last-Modified"
+	}
+
+	val := resp.Header.Get(headerName)
+	if val == "" {
+		return nil, fmt.Errorf("http-header: server did not return %s header", headerName)
+	}
+
+	if strings.EqualFold(headerName, "Last-Modified") {
+		t, err := http.ParseTime(val)
+		if err != nil {
+			return nil, fmt.Errorf("http-header: could not parse Last-Modified %q: %w", val, err)
+		}
+		val = t.UTC().Format(time.DateOnly)
+	}
+
+	return &CheckResult{Version: val}, nil
 }
 
 func (h *htmlChecker) check(app App) (*CheckResult, error) {
