@@ -19,7 +19,6 @@ type Episode struct {
 	EpisodeNumber int    `json:"episode_number"`
 	AirDate       string `json:"air_date"`
 	Overview      string `json:"overview"`
-	Name          string `json:"name"`
 }
 
 // SeasonResult holds poster and episode list for a TMDB season.

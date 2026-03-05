@@ -942,8 +942,8 @@ func TestProcessorRun_ManualExtra_EpisodeRef_UsesEpisodeData(t *testing.T) {
 		seasonResult: SeasonResult{
 			PosterPath: "/season1.jpg",
 			Episodes: []Episode{
-				{EpisodeNumber: 1, AirDate: "2021-10-03", Overview: "Episode one overview", Name: "The Kick-Off"},
-				{EpisodeNumber: 2, AirDate: "2021-10-10", Overview: "Episode two overview", Name: "Second Wind"},
+				{EpisodeNumber: 1, AirDate: "2021-10-03", Overview: "Episode one overview"},
+				{EpisodeNumber: 2, AirDate: "2021-10-10", Overview: "Episode two overview"},
 			},
 		},
 	}
@@ -1040,7 +1040,7 @@ func TestProcessorRun_ManualExtra_EpisodePatternInName_TreatedAsExtra(t *testing
 		seasonResult: SeasonResult{
 			PosterPath: "/season1.jpg",
 			Episodes: []Episode{
-				{EpisodeNumber: 3, AirDate: "2021-01-25", Overview: "Ep3 summary", Name: "A Friend"},
+				{EpisodeNumber: 3, AirDate: "2021-01-25", Overview: "Ep3 summary"},
 			},
 		},
 	}
