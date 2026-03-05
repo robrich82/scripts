@@ -1,4 +1,4 @@
-.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update test
+.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update test vet
 
 all: mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update
 
@@ -22,6 +22,13 @@ test:
 	cd mkv-movie && go test ./...
 	cd mkv-musicvideo && go test ./...
 	cd mkv-tvshow && go test ./...
+
+vet:
+	cd mkv-audit && go vet ./... && gofmt -l .
+	cd mkv-movie && go vet ./... && gofmt -l .
+	cd mkv-musicvideo && go vet ./... && gofmt -l .
+	cd mkv-tvshow && go vet ./... && gofmt -l .
+	cd sw-update && go vet ./... && gofmt -l .
 
 clean:
 	rmdir /s /q dist 2>nul || true
