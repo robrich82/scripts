@@ -478,7 +478,7 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 
 	// Write tags XML to a temp file.
 	var tagsPath string
-	if xml := buildTagXML(title, summary, tmdbID, dateStr, rating); xml != "" {
+	if xml := buildTagXML(summary, tmdbID, dateStr, rating); xml != "" {
 		var err error
 		tagsPath, err = p.mkv.WriteTempTags(xml)
 		if err == nil {

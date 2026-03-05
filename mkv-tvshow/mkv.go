@@ -133,7 +133,7 @@ func (r *realMKVRunner) Cleanup(paths ...string) {
 
 // buildTagXML constructs the Matroska tags XML string for the given metadata.
 // Returns an empty string if there is nothing to tag.
-func buildTagXML(title, summary, tmdbID, dateStr string, rating NZRating) string {
+func buildTagXML(summary, tmdbID, dateStr string, rating NZRating) string {
 	var elements []string
 
 	if dateStr != "" {
