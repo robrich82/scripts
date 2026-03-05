@@ -120,14 +120,21 @@ func cmdCheck(args []string) error {
 		}
 	}
 
+	nameWidth := 0
+	for _, e := range entries {
+		if len(e.app.Name) > nameWidth {
+			nameWidth = len(e.app.Name)
+		}
+	}
+
 	if len(updates) > 0 {
 		fmt.Printf("\n=== UPDATES AVAILABLE (%d) ===\n", len(updates))
 		for _, e := range updates {
 			known := e.state.KnownVersion()
 			if known == "" {
-				fmt.Printf("  [NEW]  %-35s  %s\n", e.app.Name, e.result.Version)
+				fmt.Printf("  [NEW]  %-*s  %s\n", nameWidth, e.app.Name, e.result.Version)
 			} else {
-				fmt.Printf("  [UPD]  %-35s  %s -> %s\n", e.app.Name, known, e.result.Version)
+				fmt.Printf("  [UPD]  %-*s  %s -> %s\n", nameWidth, e.app.Name, known, e.result.Version)
 			}
 			for _, a := range e.result.Assets {
 				fmt.Printf("           %s\n", a.Name)
@@ -138,14 +145,14 @@ func cmdCheck(args []string) error {
 	if len(upToDate) > 0 {
 		fmt.Printf("\n=== UP TO DATE (%d) ===\n", len(upToDate))
 		for _, e := range upToDate {
-			fmt.Printf("  [OK]   %-35s  %s\n", e.app.Name, e.result.Version)
+			fmt.Printf("  [OK]   %-*s  %s\n", nameWidth, e.app.Name, e.result.Version)
 		}
 	}
 
 	if len(errors) > 0 {
 		fmt.Printf("\n=== ERRORS (%d) ===\n", len(errors))
 		for _, e := range errors {
-			fmt.Printf("  [ERR]  %-35s  %v\n", e.app.Name, e.err)
+			fmt.Printf("  [ERR]  %-*s  %v\n", nameWidth, e.app.Name, e.err)
 		}
 	}
 
