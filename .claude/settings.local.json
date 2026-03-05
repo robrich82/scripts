@@ -35,7 +35,11 @@
       "Bash(dist/sw-update.exe check DXVK)",
       "Bash(c:/Users/robri/code/scripts/dist/sw-update.exe check mpv)",
       "WebFetch(domain:sourceforge.net)",
-      "Bash(./dist/sw-update.exe check Munt)"
+      "Bash(./dist/sw-update.exe check Munt)",
+      "WebFetch(domain:www.foobar2000.org)",
+      "WebFetch(domain:www.gyan.dev)",
+      "Bash(gofmt config.go)",
+      "Bash(go install honnef.co/go/tools/cmd/staticcheck@latest)"
     ]
   }
 }
