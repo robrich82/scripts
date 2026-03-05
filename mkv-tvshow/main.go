@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -52,25 +53,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	cache, err := LoadCache("show_cache.json")
+	cfgDir, err := configDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving config dir: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating config dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	cache, err := LoadCache(filepath.Join(cfgDir, "show_cache.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading cache: %v\n", err)
 		os.Exit(1)
 	}
 
-	manualData, err := LoadManualData("manual_data.json")
+	manualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
 		os.Exit(1)
 	}
 
-	retryList, err := LoadRetryList("pending_dates.json")
+	retryList, err := LoadRetryList(filepath.Join(cfgDir, "pending_dates.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading pending_dates.json: %v\n", err)
 		os.Exit(1)
 	}
 
-	ratingCache, err := LoadRatingCache("rating_cache.json")
+	ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading rating_cache.json: %v\n", err)
 		os.Exit(1)

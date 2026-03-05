@@ -73,18 +73,40 @@ Scanned: 120  Fixed: 14  Failed: 0  LangFixes: 9  FlagFixes: 8
 - `mkvmerge` — reads track metadata
 - `mkvpropedit` — applies edits
 
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-library <name>` | Use a named library from config (overrides auto-detection) |
+
 ### Configuration
 
-#### `mkv-audit.json` (optional)
+Config and state files are stored in `%APPDATA%\mkv-audit\` (Windows) or
+`$XDG_CONFIG_HOME/mkv-audit/` (Linux/macOS).
 
-Place in the scan root to override IETF language tags per directory:
+#### `config.json` (optional)
+
+Define named libraries with their root paths and per-directory IETF overrides.
+The tool auto-detects which library to use based on the current working directory
+(longest matching path wins).
 
 ```json
 {
-  "overrides": [
+  "libraries": [
     {
-      "path": "Agatha Christie's Poirot (1989)",
-      "ietf": { "eng": "en-GB" }
+      "name": "TV",
+      "path": "G:\\TV",
+      "overrides": [
+        {
+          "path": "Agatha Christie's Poirot (1989)",
+          "ietf": { "eng": "en-GB" }
+        }
+      ]
+    },
+    {
+      "name": "Anime",
+      "path": "G:\\Anime",
+      "overrides": []
     }
   ]
 }
@@ -93,7 +115,9 @@ Place in the scan root to override IETF language tags per directory:
 Track names containing region keywords (e.g. `British`, `Australian`) also
 trigger automatic IETF overrides.
 
-#### Auto-generated files
+#### Auto-generated state files
+
+Stored per-library in `%APPDATA%\mkv-audit\<library-name>\`:
 
 - `failed_files.json` — files that could not be analyzed (skipped on re-runs)
 - `unknown_codecs.json` — codecs not present in the priority map
@@ -129,6 +153,11 @@ Updated: 8  OK: 42  Skipped: 3  Errors: 0
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` is available.
 
+### Configuration
+
+The rating cache is stored in `%APPDATA%\mkv-movie\movie_rating_cache.json`
+(Windows) or `$XDG_CONFIG_HOME/mkv-movie/movie_rating_cache.json` (Linux/macOS).
+
 ---
 
 ## mkv-musicvideo
@@ -151,15 +180,28 @@ The tool prompts for manual confirmation when a match is ambiguous.
 
 ### Configuration
 
-#### `ignore_patterns.txt` (optional)
+Config is stored in `%APPDATA%\mkv-musicvideo\` (Windows) or
+`$XDG_CONFIG_HOME/mkv-musicvideo/` (Linux/macOS).
 
-List substrings to strip from filenames before matching, one per line:
+#### `ignore_patterns.json` (optional)
 
+Substrings to strip from video filenames before fuzzy matching. Patterns can be
+**global** (applied to every file) or **file-specific** (applied only when
+matching a particular video filename).
+
+```json
+{
+  "global": ["2023", "1080p", "Remastered"],
+  "file_patterns": {
+    "Artist - Song (Stone Version).mp4": ["(Stone Version)"],
+    "Artist - Song (Live).mp4": ["(Live)"]
+  }
+}
 ```
-2023
-1080p
-Remastered
-```
+
+When you choose `(i)gnore pattern` interactively, the pattern is saved under
+`file_patterns` for the specific video file being matched — it does **not**
+become a global pattern.
 
 ---
 
@@ -202,6 +244,9 @@ Success: 12  Failed: 0  SkippedOld: 5
 - `mkvpropedit` — applies metadata edits
 
 ### Configuration
+
+Config and cache files are stored in `%APPDATA%\mkv-tvshow\` (Windows) or
+`$XDG_CONFIG_HOME/mkv-tvshow/` (Linux/macOS).
 
 #### `show_cache.json` (auto-generated)
 

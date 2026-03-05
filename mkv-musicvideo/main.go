@@ -3,7 +3,16 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
+
+func configDir() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "mkv-musicvideo"), nil
+}
 
 func main() {
 	root, err := os.Getwd()
@@ -12,8 +21,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	cfgDir, err := configDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving config dir: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating config dir: %v\n", err)
+		os.Exit(1)
+	}
+	ignoreFile := filepath.Join(cfgDir, "ignore_patterns.json")
+
 	prompter := newStdinPrompter()
-	processor := NewProcessor(root, prompter)
+	processor := NewProcessor(root, ignoreFile, prompter)
 
 	if err := processor.LoadIgnorePatterns(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not load ignore patterns: %v\n", err)

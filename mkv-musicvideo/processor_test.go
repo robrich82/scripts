@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,7 +107,7 @@ func TestCleanVideoBase_NoKnownSuffix(t *testing.T) {
 
 func TestProcessVideo_NoAudioData_NoAction(t *testing.T) {
 	dir := t.TempDir()
-	p := NewProcessor(dir, &fakePrompter{})
+	p := NewProcessor(dir, "", &fakePrompter{})
 	result := p.processVideo(dir, "Unknown - Song-video.mkv", map[string]string{}, nil)
 	if result != "" {
 		t.Errorf("got %q, want empty (no audio to match)", result)
@@ -115,7 +116,7 @@ func TestProcessVideo_NoAudioData_NoAction(t *testing.T) {
 
 func TestProcessVideo_AlreadyCorrect_NoAction(t *testing.T) {
 	dir := t.TempDir()
-	p := NewProcessor(dir, &fakePrompter{})
+	p := NewProcessor(dir, "", &fakePrompter{})
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
 	// Video is already named correctly.
 	result := p.processVideo(dir, "Artist - Song - Song-video.mkv", audioData, nil)
@@ -128,7 +129,7 @@ func TestProcessVideo_RenameChosen_RenamesFile(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644)
 
-	p := NewProcessor(dir, &fakePrompter{answers: []string{"r"}})
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
 
 	result := p.processVideo(dir, "Artist - Song-video.mkv", audioData, nil)
@@ -142,7 +143,7 @@ func TestProcessVideo_RenameChosen_RenamesFile(t *testing.T) {
 
 func TestProcessVideo_SkipChosen_ReturnsSkipped(t *testing.T) {
 	dir := t.TempDir()
-	p := NewProcessor(dir, &fakePrompter{answers: []string{"s"}})
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"s"}})
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
 
 	result := p.processVideo(dir, "Artist - Song-video.mkv", audioData, nil)
@@ -154,37 +155,36 @@ func TestProcessVideo_SkipChosen_ReturnsSkipped(t *testing.T) {
 func TestProcessVideo_IgnoreChosen_SavesPattern(t *testing.T) {
 	dir := t.TempDir()
 	// Video has " OFFICIAL" suffix beyond the audio match.
-	p := NewProcessor(dir, &fakePrompter{answers: []string{"i", " OFFICIAL"}})
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", " OFFICIAL"}})
 
-	var saved string
-	p.patternAppender = func(_, pattern string) error {
-		saved = pattern
+	var savedVideo, savedPattern string
+	p.patternAppender = func(_, videoFile, pattern string) error {
+		savedVideo = videoFile
+		savedPattern = pattern
 		return nil
 	}
 
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
 	p.processVideo(dir, "Artist - Song OFFICIAL-video.mkv", audioData, nil)
 
-	if saved != " OFFICIAL" {
-		t.Errorf("saved pattern %q, want ' OFFICIAL'", saved)
+	if savedPattern != " OFFICIAL" {
+		t.Errorf("saved pattern %q, want ' OFFICIAL'", savedPattern)
 	}
-	if len(p.ignorePatterns) != 1 || p.ignorePatterns[0] != " OFFICIAL" {
-		t.Errorf("ignorePatterns=%v", p.ignorePatterns)
+	if savedVideo != "Artist - Song OFFICIAL-video.mkv" {
+		t.Errorf("saved videoFile %q, want 'Artist - Song OFFICIAL-video.mkv'", savedVideo)
+	}
+	patterns := p.ignoreData.FilePatterns["Artist - Song OFFICIAL-video.mkv"]
+	if len(patterns) != 1 || patterns[0] != " OFFICIAL" {
+		t.Errorf("FilePatterns=%v", p.ignoreData.FilePatterns)
 	}
 }
 
 func TestProcessVideo_DefaultSuffix_WhenNoKnownSuffix(t *testing.T) {
 	dir := t.TempDir()
 	// Video has no known suffix → effective suffix defaults to "-video".
-	// Audio data key must match loosely.
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
-	// "Artist - Song - Song" is the target, and our current is
-	// cleanVideoIgnored ("Artist - Song") + "-video" = "Artist - Song-video".
-	// They differ, so a prompt fires.
-	p := NewProcessor(dir, &fakePrompter{answers: []string{"s"}})
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"s"}})
 	result := p.processVideo(dir, "Artist - Song.mkv", audioData, nil)
-	// The file has no known suffix, effective suffix is "-video".
-	// currentName = "Artist - Song-video", targetName = "Artist - Song - Song-video" → differ → skipped.
 	if result != "skipped" {
 		t.Errorf("got %q, want 'skipped'", result)
 	}
@@ -197,7 +197,7 @@ func TestRun_AlreadyCorrect_NoStats(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 	os.WriteFile(filepath.Join(dir, "Artist - Song - Song-video.mkv"), []byte{}, 0644)
 
-	p := NewProcessor(dir, &fakePrompter{})
+	p := NewProcessor(dir, "", &fakePrompter{})
 	stats, skipped := p.Run()
 	if stats.Renamed != 0 || stats.Skipped != 0 || len(skipped) != 0 {
 		t.Errorf("expected no actions, got %+v skipped=%v", stats, skipped)
@@ -209,7 +209,7 @@ func TestRun_SkipsNonVideoFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "readme.txt"), []byte{}, 0644)
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 
-	p := NewProcessor(dir, &fakePrompter{})
+	p := NewProcessor(dir, "", &fakePrompter{})
 	stats, _ := p.Run()
 	if stats.Renamed != 0 || stats.Skipped != 0 {
 		t.Errorf("non-video files should produce no stats, got %+v", stats)
@@ -222,7 +222,7 @@ func TestRun_CountsSkipped(t *testing.T) {
 	// Video name doesn't match the target name.
 	os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644)
 
-	p := NewProcessor(dir, &fakePrompter{answers: []string{"s"}})
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"s"}})
 	stats, skipped := p.Run()
 	if stats.Skipped != 1 {
 		t.Errorf("Skipped=%d, want 1", stats.Skipped)
@@ -234,35 +234,62 @@ func TestRun_CountsSkipped(t *testing.T) {
 
 // --- LoadIgnorePatterns tests ---
 
-func TestLoadIgnorePatterns_ReadsLines(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "ignore_patterns.txt"), []byte("pattern1\npattern2\n"), 0644)
+func writeIgnoreJSON(t *testing.T, path string, data IgnoreData) {
+	t.Helper()
+	b, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
 
-	p := NewProcessor(dir, &fakePrompter{})
+func TestLoadIgnorePatterns_ReadsGlobal(t *testing.T) {
+	dir := t.TempDir()
+	ignoreFile := filepath.Join(dir, "ignore_patterns.json")
+	writeIgnoreJSON(t, ignoreFile, IgnoreData{Global: []string{"pattern1", "pattern2"}})
+
+	p := NewProcessor(dir, ignoreFile, &fakePrompter{})
 	if err := p.LoadIgnorePatterns(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(p.ignorePatterns) != 2 || p.ignorePatterns[0] != "pattern1" || p.ignorePatterns[1] != "pattern2" {
-		t.Errorf("got %v", p.ignorePatterns)
+	if len(p.ignoreData.Global) != 2 || p.ignoreData.Global[0] != "pattern1" || p.ignoreData.Global[1] != "pattern2" {
+		t.Errorf("got %v", p.ignoreData.Global)
 	}
 }
 
 func TestLoadIgnorePatterns_MissingFile_OK(t *testing.T) {
 	dir := t.TempDir()
-	p := NewProcessor(dir, &fakePrompter{})
+	p := NewProcessor(dir, filepath.Join(dir, "ignore_patterns.json"), &fakePrompter{})
 	if err := p.LoadIgnorePatterns(); err != nil {
 		t.Errorf("expected nil for missing file, got %v", err)
 	}
 }
 
-func TestLoadIgnorePatterns_SkipsBlankLines(t *testing.T) {
+func TestLoadIgnorePatterns_FilePatterns(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "ignore_patterns.txt"), []byte("\npattern1\n\n"), 0644)
+	ignoreFile := filepath.Join(dir, "ignore_patterns.json")
+	writeIgnoreJSON(t, ignoreFile, IgnoreData{
+		Global:       []string{"1080p"},
+		FilePatterns: map[string][]string{"Song (Live).mkv": {"(Live)"}},
+	})
 
-	p := NewProcessor(dir, &fakePrompter{})
+	p := NewProcessor(dir, ignoreFile, &fakePrompter{})
 	p.LoadIgnorePatterns()
-	if len(p.ignorePatterns) != 1 {
-		t.Errorf("expected 1 pattern, got %v", p.ignorePatterns)
+	if len(p.ignoreData.Global) != 1 || p.ignoreData.Global[0] != "1080p" {
+		t.Errorf("global=%v", p.ignoreData.Global)
+	}
+	if fp := p.ignoreData.FilePatterns["Song (Live).mkv"]; len(fp) != 1 || fp[0] != "(Live)" {
+		t.Errorf("file_patterns=%v", p.ignoreData.FilePatterns)
+	}
+}
+
+func TestLoadIgnorePatterns_EmptyIgnoreFile_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	p := NewProcessor(dir, "", &fakePrompter{})
+	if err := p.LoadIgnorePatterns(); err != nil {
+		t.Errorf("expected nil when ignoreFile is empty, got %v", err)
 	}
 }
 
@@ -275,7 +302,7 @@ func TestProcessVideo_AlreadyCorrect_CopiesTags(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 
 	ft := &fakeTagger{}
-	p := NewProcessor(dir, &fakePrompter{})
+	p := NewProcessor(dir, "", &fakePrompter{})
 	p.tagger = ft
 
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
@@ -302,7 +329,7 @@ func TestProcessVideo_Renamed_CopiesTagsToNewPath(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 
 	ft := &fakeTagger{}
-	p := NewProcessor(dir, &fakePrompter{answers: []string{"r"}})
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
 	p.tagger = ft
 
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
@@ -325,7 +352,7 @@ func TestProcessVideo_Renamed_CopiesTagsToNewPath(t *testing.T) {
 func TestProcessVideo_Skipped_NoTagCopy(t *testing.T) {
 	dir := t.TempDir()
 	ft := &fakeTagger{}
-	p := NewProcessor(dir, &fakePrompter{answers: []string{"s"}})
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"s"}})
 	p.tagger = ft
 
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
@@ -341,26 +368,43 @@ func TestProcessVideo_Skipped_NoTagCopy(t *testing.T) {
 }
 
 func TestFindIgnoredPatterns_MatchingPattern(t *testing.T) {
-	p := &Processor{ignorePatterns: []string{" (Alternate Version)"}}
-	got := p.findIgnoredPatterns("09 - On My Way - On My Way (Alternate Version)")
+	p := &Processor{ignoreData: IgnoreData{Global: []string{" (Alternate Version)"}}}
+	got := p.findIgnoredPatterns("09 - On My Way - On My Way (Alternate Version)", "")
 	if got != "(Alternate Version)" {
 		t.Errorf("got %q, want '(Alternate Version)'", got)
 	}
 }
 
 func TestFindIgnoredPatterns_NoMatch(t *testing.T) {
-	p := &Processor{ignorePatterns: []string{" (Live)"}}
-	got := p.findIgnoredPatterns("01 - Song - Song")
+	p := &Processor{ignoreData: IgnoreData{Global: []string{" (Live)"}}}
+	got := p.findIgnoredPatterns("01 - Song - Song", "")
 	if got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
 }
 
 func TestFindIgnoredPatterns_MultipleMatches(t *testing.T) {
-	p := &Processor{ignorePatterns: []string{" (Live)", " (Acoustic)"}}
-	got := p.findIgnoredPatterns("01 - Song (Live) (Acoustic)")
+	p := &Processor{ignoreData: IgnoreData{Global: []string{" (Live)", " (Acoustic)"}}}
+	got := p.findIgnoredPatterns("01 - Song (Live) (Acoustic)", "")
 	if got != "(Live) (Acoustic)" {
 		t.Errorf("got %q, want '(Live) (Acoustic)'", got)
+	}
+}
+
+func TestFindIgnoredPatterns_FileSpecific(t *testing.T) {
+	p := &Processor{ignoreData: IgnoreData{
+		Global:       []string{"1080p"},
+		FilePatterns: map[string][]string{"Song (Stone Version).mkv": {"(Stone Version)"}},
+	}}
+	// File-specific pattern should appear for matching file (global first, then file-specific).
+	got := p.findIgnoredPatterns("Song (Stone Version) 1080p", "Song (Stone Version).mkv")
+	if got != "1080p (Stone Version)" {
+		t.Errorf("got %q, want '1080p (Stone Version)'", got)
+	}
+	// File-specific pattern should NOT appear for a different file.
+	got2 := p.findIgnoredPatterns("Song (Stone Version) 1080p", "Other Song.mkv")
+	if got2 != "1080p" {
+		t.Errorf("got %q, want '1080p'", got2)
 	}
 }
 
@@ -371,7 +415,7 @@ func TestProcessVideo_AlreadyCorrect_TagsUpToDate_SkipsCopy(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 
 	ft := &fakeTagger{tagsMatch: true}
-	p := NewProcessor(dir, &fakePrompter{})
+	p := NewProcessor(dir, "", &fakePrompter{})
 	p.tagger = ft
 
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
@@ -393,9 +437,9 @@ func TestProcessVideo_Ignore_MatchesAfterPattern_CopiesTags(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 
 	ft := &fakeTagger{}
-	p := NewProcessor(dir, &fakePrompter{answers: []string{"i", " OFFICIAL"}})
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", " OFFICIAL"}})
 	p.tagger = ft
-	p.patternAppender = func(_, _ string) error { return nil }
+	p.patternAppender = func(_, _, _ string) error { return nil }
 
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
 	audioPaths := map[string]string{"Artist - Song": "Artist - Song.flac"}
@@ -418,8 +462,8 @@ func TestProcessVideo_IgnorePatternInFilename_PassesTitleSuffix(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "09 - On My Way.flac"), []byte{}, 0644)
 
 	ft := &fakeTagger{}
-	p := NewProcessor(dir, &fakePrompter{})
-	p.ignorePatterns = []string{" (Alternate Version)"}
+	p := NewProcessor(dir, "", &fakePrompter{})
+	p.ignoreData.Global = []string{" (Alternate Version)"}
 	p.tagger = ft
 
 	audioData := map[string]string{"09 - On My Way": "09 - On My Way - On My Way"}

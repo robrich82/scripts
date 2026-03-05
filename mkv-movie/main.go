@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -29,6 +30,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	cfgDir, err := configDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving config dir: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating config dir: %v\n", err)
+		os.Exit(1)
+	}
+
 	timer := &win32FileTimer{}
 
 	// Rating pipeline (all optional).
@@ -36,7 +47,7 @@ func main() {
 	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
 
-	ratingCache, err := LoadMovieRatingCache("movie_rating_cache.json")
+	ratingCache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not load rating cache: %v\n", err)
 		ratingCache, _ = LoadMovieRatingCache("/dev/null") // empty fallback

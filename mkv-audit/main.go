@@ -1,11 +1,16 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 func main() {
+	libraryFlag := flag.String("library", "", "library name to use (overrides auto-detection)")
+	flag.Parse()
+
 	runner, err := newRealMKVRunner()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -18,9 +23,49 @@ func main() {
 		os.Exit(1)
 	}
 
+	cfg, err := loadGlobalConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	cfgDir, err := configDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving config dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	var lib *Library
+	if *libraryFlag != "" {
+		for i := range cfg.Libraries {
+			if cfg.Libraries[i].Name == *libraryFlag {
+				l := cfg.Libraries[i]
+				lib = &l
+				break
+			}
+		}
+		if lib == nil {
+			fmt.Fprintf(os.Stderr, "Library %q not found in config\n", *libraryFlag)
+			os.Exit(1)
+		}
+	} else {
+		lib = detectLibrary(dir, cfg)
+	}
+
+	var stateDir string
+	if lib != nil {
+		fmt.Printf("--- Library: %s ---\n", lib.Name)
+		stateDir = filepath.Join(cfgDir, lib.Name)
+	} else {
+		if len(cfg.Libraries) > 0 {
+			fmt.Fprintf(os.Stderr, "Warning: no library matched current directory; running without overrides\n")
+		}
+		stateDir = cfgDir
+	}
+
 	fmt.Println("--- Running Library Architect ---")
 
-	stats := RunAll(dir, runner, runner, newStdinPrompter())
+	stats := RunAll(dir, stateDir, lib, runner, runner, newStdinPrompter())
 
 	fmt.Println()
 	fmt.Println("========================================")

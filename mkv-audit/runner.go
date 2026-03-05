@@ -61,9 +61,9 @@ func (r *realMKVRunner) Apply(filePath string, edits []string) error {
 	return exec.Command(r.mkvpropedit, args...).Run()
 }
 
-// loadFailedCache reads a list of previously failed file paths from disk.
-func loadFailedCache() []string {
-	data, err := os.ReadFile(failedCacheFile)
+// loadFailedCache reads a list of previously failed file paths from stateDir.
+func loadFailedCache(stateDir string) []string {
+	data, err := os.ReadFile(filepath.Join(stateDir, failedCacheFile))
 	if err != nil {
 		return nil
 	}
@@ -72,22 +72,22 @@ func loadFailedCache() []string {
 	return paths
 }
 
-// saveFailedCache writes the list of failed paths to disk.
-func saveFailedCache(paths []string) {
+// saveFailedCache writes the list of failed paths to stateDir.
+func saveFailedCache(stateDir string, paths []string) {
 	data, _ := json.MarshalIndent(paths, "", "    ")
-	os.WriteFile(failedCacheFile, data, 0644)
+	os.WriteFile(filepath.Join(stateDir, failedCacheFile), data, 0644)
 }
 
 // RunAll scans root for MKV/MKA files and fixes each one.
-func RunAll(root string, ident MKVIdentifier, editor MKVEditor, prompter Prompter) Stats {
+// stateDir is where failed_files.json and unknown_codecs.json are stored.
+// lib is the active library config (may be nil for no overrides).
+func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter) Stats {
 	var stats Stats
 	unknownCodecs := map[string]bool{}
 
-	dirCfg := loadDirConfig(root)
-
 	// Check for a previous failure cache.
 	var filesToScan []string
-	oldFails := loadFailedCache()
+	oldFails := loadFailedCache(stateDir)
 	if len(oldFails) > 0 {
 		ans, _ := prompter.Ask(fmt.Sprintf("Found %d previously failed files. Run only these? (y/n): ", len(oldFails)))
 		if strings.ToLower(strings.TrimSpace(ans)) == "y" {
@@ -130,7 +130,7 @@ func RunAll(root string, ident MKVIdentifier, editor MKVEditor, prompter Prompte
 				local.Failed++
 				local.FailedPaths = append(local.FailedPaths, p)
 			} else {
-				res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: resolveIETFMap(p, root, dirCfg)})
+				res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: resolveIETFMap(p, root, lib)})
 				for _, c := range res.UnknownCodecs {
 					localCodecs = append(localCodecs, c)
 				}
@@ -175,9 +175,10 @@ func RunAll(root string, ident MKVIdentifier, editor MKVEditor, prompter Prompte
 
 	// Persist failure list and unknown codecs.
 	if len(stats.FailedPaths) > 0 {
-		saveFailedCache(stats.FailedPaths)
+		os.MkdirAll(stateDir, 0755)
+		saveFailedCache(stateDir, stats.FailedPaths)
 	} else {
-		os.Remove(failedCacheFile)
+		os.Remove(filepath.Join(stateDir, failedCacheFile))
 	}
 
 	if len(unknownCodecs) > 0 {
@@ -185,9 +186,11 @@ func RunAll(root string, ident MKVIdentifier, editor MKVEditor, prompter Prompte
 		for c := range unknownCodecs {
 			list = append(list, c)
 		}
+		os.MkdirAll(stateDir, 0755)
+		outPath := filepath.Join(stateDir, unknownCodecsFile)
 		data, _ := json.MarshalIndent(list, "", "    ")
-		os.WriteFile(unknownCodecsFile, data, 0644)
-		fmt.Printf("New formats found: %s\n", unknownCodecsFile)
+		os.WriteFile(outPath, data, 0644)
+		fmt.Printf("New formats found: %s\n", outPath)
 	}
 
 	return stats

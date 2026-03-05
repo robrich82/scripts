@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -21,57 +21,78 @@ type Stats struct {
 	Skipped int
 }
 
+// IgnoreData holds ignore patterns used when fuzzy-matching video filenames to
+// audio filenames. Global patterns are applied to every file; FilePatterns
+// entries are keyed by video filename and applied only to that file.
+type IgnoreData struct {
+	Global       []string            `json:"global,omitempty"`
+	FilePatterns map[string][]string `json:"file_patterns,omitempty"`
+}
+
 // Processor walks a music directory, matches video files to audio files, and
 // interactively prompts the user to rename mismatches.
 type Processor struct {
 	root            string
-	ignorePatterns  []string
+	ignoreData      IgnoreData
 	ignoreFile      string
 	prompter        Prompter
 	renamer         func(oldPath, newPath string) error
-	patternAppender func(filePath, pattern string) error
+	patternAppender func(ignoreFile, videoFile, pattern string) error
 	tagger          MusicVideoTagger // nil = tag copying disabled
 }
 
 // NewProcessor creates a Processor for the given root directory.
-func NewProcessor(root string, prompter Prompter) *Processor {
+// ignoreFile is the path to the JSON ignore-patterns file; pass "" to disable
+// pattern persistence.
+func NewProcessor(root, ignoreFile string, prompter Prompter) *Processor {
 	return &Processor{
 		root:            root,
-		ignoreFile:      filepath.Join(root, "ignore_patterns.txt"),
+		ignoreFile:      ignoreFile,
 		prompter:        prompter,
 		renamer:         os.Rename,
 		patternAppender: defaultPatternAppender,
 	}
 }
 
-func defaultPatternAppender(filePath, pattern string) error {
-	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+// defaultPatternAppender adds pattern to the file-specific section for
+// videoFile in the JSON ignore file at ignoreFile.
+func defaultPatternAppender(ignoreFile, videoFile, pattern string) error {
+	var data IgnoreData
+	if existing, err := os.ReadFile(ignoreFile); err == nil {
+		json.Unmarshal(existing, &data)
+	}
+	if data.FilePatterns == nil {
+		data.FilePatterns = make(map[string][]string)
+	}
+	data.FilePatterns[videoFile] = append(data.FilePatterns[videoFile], pattern)
+	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = fmt.Fprintln(f, pattern)
-	return err
+	return os.WriteFile(ignoreFile, b, 0644)
 }
 
-// LoadIgnorePatterns reads ignore patterns from ignore_patterns.txt in root.
+// LoadIgnorePatterns reads ignore patterns from the JSON ignore file.
 func (p *Processor) LoadIgnorePatterns() error {
-	f, err := os.Open(p.ignoreFile)
+	if p.ignoreFile == "" {
+		return nil
+	}
+	data, err := os.ReadFile(p.ignoreFile)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			p.ignorePatterns = append(p.ignorePatterns, line)
-		}
-	}
-	return scanner.Err()
+	return json.Unmarshal(data, &p.ignoreData)
+}
+
+// effectivePatterns returns the combined ignore patterns for videoFile:
+// global patterns plus any file-specific patterns for that filename.
+func (p *Processor) effectivePatterns(videoFile string) []string {
+	patterns := append([]string{}, p.ignoreData.Global...)
+	patterns = append(patterns, p.ignoreData.FilePatterns[videoFile]...)
+	return patterns
 }
 
 // buildAudioData returns a map of audio basename -> display name.
@@ -181,9 +202,10 @@ func containsStr(slice []string, s string) bool {
 // findIgnoredPatterns returns the trimmed, space-joined set of ignore patterns
 // that appear in cleanVideo. This is appended to the audio title when copying
 // tags so that e.g. " (Alternate Version)" survives in the MKV title tag.
-func (p *Processor) findIgnoredPatterns(cleanVideo string) string {
+// videoFile is the video filename used to look up file-specific patterns.
+func (p *Processor) findIgnoredPatterns(cleanVideo, videoFile string) string {
 	var found []string
-	for _, pat := range p.ignorePatterns {
+	for _, pat := range p.effectivePatterns(videoFile) {
 		if strings.Contains(cleanVideo, pat) {
 			if t := strings.TrimSpace(pat); t != "" {
 				found = append(found, t)
@@ -196,7 +218,7 @@ func (p *Processor) findIgnoredPatterns(cleanVideo string) string {
 // copyTagsIfConfigured copies tags from the matched audio file to mkvPath when
 // a tagger is configured. cleanVideo is the video base before ignore-pattern
 // stripping and is used to detect which patterns should be appended to the title.
-func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir string, audioPaths map[string]string) {
+func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir, videoFile string, audioPaths map[string]string) {
 	if p.tagger == nil || audioPaths == nil {
 		return
 	}
@@ -205,7 +227,7 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir
 		return
 	}
 	audioFullPath := filepath.Join(videoDir, audioFilename)
-	titleSuffix := p.findIgnoredPatterns(cleanVideo)
+	titleSuffix := p.findIgnoredPatterns(cleanVideo, videoFile)
 	if match, err := p.tagger.TagsMatchMKV(audioFullPath, mkvPath, titleSuffix); err == nil && match {
 		fmt.Printf("    [TAG] Already up to date: %s\n", filepath.Base(mkvPath))
 		return
@@ -224,7 +246,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 	ext := filepath.Ext(videoFile)
 	videoBase := strings.TrimSuffix(videoFile, ext)
 	cleanVideo, foundSuffix := cleanVideoBase(videoBase)
-	cleanVideoIgnored := removeIgnoredParts(cleanVideo, p.ignorePatterns)
+	cleanVideoIgnored := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoFile))
 
 	matchKey, ok := findMatch(cleanVideoIgnored, audioData)
 	if !ok {
@@ -241,7 +263,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 	fullPath := filepath.Join(videoDir, videoFile)
 	if targetName == currentName {
 		// Filename is already correct — just copy tags.
-		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, videoDir, audioPaths)
+		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, videoDir, videoFile, audioPaths)
 		return ""
 	}
 
@@ -264,7 +286,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		} else {
 			fmt.Printf("    [OK] Renamed to: %s%s\n", targetName, ext)
 			// Copy tags to the new path after a successful rename.
-			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, videoDir, audioPaths)
+			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, videoDir, videoFile, audioPaths)
 			return "renamed"
 		}
 	case "i":
@@ -277,16 +299,19 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			pattern = diff
 		}
 		if pattern != "" {
-			p.ignorePatterns = append(p.ignorePatterns, pattern)
-			if err := p.patternAppender(p.ignoreFile, pattern); err != nil {
+			if p.ignoreData.FilePatterns == nil {
+				p.ignoreData.FilePatterns = make(map[string][]string)
+			}
+			p.ignoreData.FilePatterns[videoFile] = append(p.ignoreData.FilePatterns[videoFile], pattern)
+			if err := p.patternAppender(p.ignoreFile, videoFile, pattern); err != nil {
 				fmt.Printf("    [ERROR] Could not save pattern: %v\n", err)
 			} else {
-				fmt.Printf("    [OK] Added '%s' to ignore list\n", pattern)
+				fmt.Printf("    [OK] Added '%s' to ignore list for %s\n", pattern, videoFile)
 			}
-			reChecked := removeIgnoredParts(cleanVideo, p.ignorePatterns)
+			reChecked := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoFile))
 			if reChecked == matchedBase {
 				fmt.Println("    [OK] File now matches after ignoring pattern!")
-				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, videoDir, audioPaths)
+				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, videoDir, videoFile, audioPaths)
 			} else {
 				fmt.Println("    Still doesn't match after ignoring")
 			}
