@@ -115,14 +115,24 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 	return nil, fmt.Errorf("no suitable release found for %s", app.Checker.Repo)
 }
 
+// matchAssetPattern matches an asset name against a pattern.
+// If the pattern is a valid regular expression, it is used as a full-string regex match.
+// Otherwise, it falls back to filepath.Match glob syntax.
+func matchAssetPattern(pat, name string) bool {
+	if re, err := regexp.Compile("^(?:" + pat + ")$"); err == nil {
+		return re.MatchString(name)
+	}
+	matched, _ := filepath.Match(pat, name)
+	return matched
+}
+
 // selectAssets matches release assets against patterns (or auto-selects for Windows).
 func selectAssets(ghAssets []ghAsset, patterns []string) []Asset {
 	if len(patterns) > 0 {
 		var out []Asset
 		for _, pat := range patterns {
 			for _, a := range ghAssets {
-				matched, _ := filepath.Match(pat, a.Name)
-				if matched {
+				if matchAssetPattern(pat, a.Name) {
 					out = append(out, Asset{Name: a.Name, URL: a.BrowserDownloadURL})
 				}
 			}
