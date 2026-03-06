@@ -76,6 +76,8 @@ func main() {
 	fmt.Printf("Total Failed/Skipped:   %d\n", stats.Failed)
 	fmt.Println("----------------------------------------")
 	fmt.Printf("Langs Normalized:       %d\n", stats.LangFixes)
+	fmt.Printf("Video Lang Inherited:   %d\n", stats.VideoInherit)
 	fmt.Printf("Flag Rules Applied:     %d\n", stats.FlagFixes)
+	fmt.Printf("Names Added:            %d\n", stats.NamesAdded)
 	fmt.Println("========================================")
 }
