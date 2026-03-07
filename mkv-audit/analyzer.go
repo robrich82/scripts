@@ -220,10 +220,27 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 	}
 	if len(videoTracks) > 0 && len(audioTracks) > 0 {
 		firstAudioLang := tracks[audioTracks[0]].Properties.Language
+		firstAudioIETF := effectiveIETFTag(firstAudioLang, opts)
+		// effectiveIETFTag returns the input unchanged when no mapping exists,
+		// so firstAudioIETF != firstAudioLang iff there is a known IETF mapping.
+		firstAudioHasIETF := firstAudioIETF != firstAudioLang
 		for _, vi := range videoTracks {
-			if tracks[vi].Properties.Language != firstAudioLang && firstAudioLang != "und" {
-				res.Edits = append(res.Edits, trackEdit(tracks[vi].ID, "language", firstAudioLang)...)
-				tracks[vi].Properties.Language = firstAudioLang
+			vp := &tracks[vi].Properties
+			needsLang := vp.Language != firstAudioLang && firstAudioLang != "und"
+			needsIETF := firstAudioHasIETF && vp.LanguageIETF != firstAudioIETF
+			if needsLang || needsIETF {
+				var pairs []string
+				if needsLang {
+					pairs = append(pairs, "language", firstAudioLang)
+				}
+				if firstAudioHasIETF {
+					pairs = append(pairs, "language-ietf", firstAudioIETF)
+				}
+				res.Edits = append(res.Edits, trackEdit(tracks[vi].ID, pairs...)...)
+				vp.Language = firstAudioLang
+				if firstAudioHasIETF {
+					vp.LanguageIETF = firstAudioIETF
+				}
 				res.LocalFixes.Video++
 			}
 		}

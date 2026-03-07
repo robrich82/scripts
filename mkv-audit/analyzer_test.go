@@ -106,6 +106,25 @@ func TestAnalyzeFile_VideoInheritsAudioLanguage(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFile_VideoInheritsAudioLanguage_SetsIETF(t *testing.T) {
+	// When a video track inherits language from audio, language-ietf must also
+	// be set in the same edit so a second run does not re-trigger a fix.
+	info := MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "video", Properties: TrackProperties{Language: "und", LanguageIETF: ""}},
+		audioTrack(1, "eng", "A_FLAC", 2, true),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if res.LocalFixes.Video != 1 {
+		t.Errorf("expected 1 video inherit, got %d", res.LocalFixes.Video)
+	}
+	if !hasEdit(res.Edits, "language=eng") {
+		t.Errorf("expected language=eng in edits: %v", res.Edits)
+	}
+	if !hasEdit(res.Edits, "language-ietf=en-US") {
+		t.Errorf("expected language-ietf=en-US in edits: %v", res.Edits)
+	}
+}
+
 func TestAnalyzeFile_VideoAlreadyHasLanguage_NoInherit(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
 		videoTrack(0, "jpn"),
