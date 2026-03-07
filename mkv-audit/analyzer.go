@@ -22,6 +22,7 @@ type AnalysisResult struct {
 // LocalFixes counts individual fix types within one file analysis.
 type LocalFixes struct {
 	Lang  int
+	IETF  int
 	Video int
 	Flags int
 	Names int
@@ -204,6 +205,8 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 			}
 			if needsLang {
 				res.LocalFixes.Lang++
+			} else if needsIETF {
+				res.LocalFixes.IETF++
 			}
 		}
 	}

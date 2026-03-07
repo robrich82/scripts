@@ -146,6 +146,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 					fmt.Fprintf(&buf, "[FIXED]  %s\n", basename)
 					local.Fixed++
 					local.LangFixes += res.LocalFixes.Lang
+					local.IETFFixes += res.LocalFixes.IETF
 					local.VideoInherit += res.LocalFixes.Video
 					local.FlagFixes += res.LocalFixes.Flags
 					local.NamesAdded += res.LocalFixes.Names
@@ -159,6 +160,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			stats.FailedPaths = append(stats.FailedPaths, local.FailedPaths...)
 			stats.Fixed += local.Fixed
 			stats.LangFixes += local.LangFixes
+			stats.IETFFixes += local.IETFFixes
 			stats.VideoInherit += local.VideoInherit
 			stats.FlagFixes += local.FlagFixes
 			stats.NamesAdded += local.NamesAdded

@@ -74,7 +74,7 @@ func TestAnalyzeFile_AlreadyNormalised_NoLangFix(t *testing.T) {
 
 func TestAnalyzeFile_NormalisedLang_MissingIETF_SetsIETFOnly(t *testing.T) {
 	// When language is already normalised but language_ietf is missing, we
-	// should set language-ietf without counting it as a Lang fix.
+	// should set language-ietf and count it as an IETF fix (not a Lang fix).
 	info := MKVInfo{Tracks: []Track{
 		{ID: 0, Type: "audio", Properties: TrackProperties{
 			Language: "eng", LanguageIETF: "", DefaultTrack: true,
@@ -84,6 +84,9 @@ func TestAnalyzeFile_NormalisedLang_MissingIETF_SetsIETFOnly(t *testing.T) {
 	res := AnalyzeFile(info, AnalyzeOptions{})
 	if res.LocalFixes.Lang != 0 {
 		t.Errorf("expected 0 lang fixes, got %d", res.LocalFixes.Lang)
+	}
+	if res.LocalFixes.IETF != 1 {
+		t.Errorf("expected 1 IETF fix, got %d", res.LocalFixes.IETF)
 	}
 	if !hasEdit(res.Edits, "language-ietf=en-US") {
 		t.Errorf("expected a language-ietf edit, got %v", res.Edits)

@@ -29,6 +29,7 @@ type Stats struct {
 	Fixed        int
 	Failed       int
 	LangFixes    int
+	IETFFixes    int
 	VideoInherit int
 	FlagFixes    int
 	NamesAdded   int
