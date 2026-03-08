@@ -112,6 +112,14 @@ func main() {
 	processor := NewProcessor(cfg, cache, manualData, tmdb, mkv, prompter, timer, retryList, ratingCache, sources, plexClient)
 	stats := processor.Run()
 
+	if plexClient != nil {
+		if err := plexClient.RefreshLibraries(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Plex library refresh failed: %v\n", err)
+		} else {
+			fmt.Println("Plex libraries refreshed.")
+		}
+	}
+
 	fmt.Printf("\nDone. Success: %d  Failed: %d  Skipped (old): %d\n",
 		stats.Success, stats.Failed, stats.SkippedOld)
 }

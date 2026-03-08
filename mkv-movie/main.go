@@ -67,6 +67,14 @@ func main() {
 	fmt.Printf("Scanning %s...\n", dir)
 	stats := walkAndProcess(dir, mi, syncer, timer, rr)
 
+	if plex != nil {
+		if err := plex.RefreshLibraries(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Plex library refresh failed: %v\n", err)
+		} else {
+			fmt.Println("Plex libraries refreshed.")
+		}
+	}
+
 	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Errors: %d\n",
 		stats.Updated, stats.OK, stats.Skipped, stats.Errors)
 }

@@ -67,6 +67,8 @@ func (f *fakePlexClient) SetContentRating(ratingKey string, t PlexItemType, rati
 	return f.setRatingErr
 }
 
+func (f *fakePlexClient) RefreshLibraries() error { return nil }
+
 // --- httpPlexClient unit tests ---
 
 func plexSectionsJSON(sectionKey, sectionType string) string {
@@ -518,6 +520,31 @@ func TestHTTPPlexClient_FindShowByFilePath_SkipsMovieSections(t *testing.T) {
 	_, err := c.FindShowByFilePath(`G:\TV\Something\S01E01.mkv`)
 	if err != ErrPlexNotFound {
 		t.Errorf("expected ErrPlexNotFound, got %v", err)
+	}
+}
+
+// --- RefreshLibraries tests ---
+
+func TestHTTPPlexClient_RefreshLibraries_RefreshesShowSections(t *testing.T) {
+	var refreshPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			// One show section and one movie section — only the show section should be refreshed.
+			w.Write([]byte(`{"MediaContainer":{"Directory":[{"key":"1","type":"show"},{"key":"2","type":"movie"}]}}`))
+		} else {
+			refreshPaths = append(refreshPaths, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	if err := c.RefreshLibraries(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(refreshPaths) != 1 || refreshPaths[0] != "/library/sections/1/refresh" {
+		t.Errorf("refreshPaths = %v; want [/library/sections/1/refresh]", refreshPaths)
 	}
 }
 

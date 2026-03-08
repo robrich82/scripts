@@ -66,6 +66,10 @@ type PlexClient interface {
 	// SetContentRating updates the contentRating field on a Plex item and
 	// locks it to prevent automatic overwriting.
 	SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error
+	// RefreshLibraries triggers a metadata scan of all Plex TV show library
+	// sections so that newly processed files are picked up without manual
+	// intervention.
+	RefreshLibraries() error
 }
 
 // httpPlexClient is the production PlexClient that communicates with a real
@@ -462,6 +466,41 @@ func (c *httpPlexClient) GetContentRating(ratingKey string) (NZRating, error) {
 	raw := strings.TrimPrefix(metaResp.MediaContainer.Metadata[0].ContentRating, "nz/")
 	rating, _ := ParseNZRating(raw)
 	return rating, nil
+}
+
+// RefreshLibraries implements PlexClient. It scans all "show" library
+// sections, triggering a metadata refresh so Plex picks up any new or changed
+// files without requiring a manual library scan.
+func (c *httpPlexClient) RefreshLibraries() error {
+	resp, err := c.plexGet("/library/sections")
+	if err != nil {
+		return fmt.Errorf("plex: list sections: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var sectionsResp struct {
+		MediaContainer struct {
+			Directory []struct {
+				Key  string `json:"key"`
+				Type string `json:"type"`
+			} `json:"Directory"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
+		return fmt.Errorf("plex: decode sections: %w", err)
+	}
+
+	for _, section := range sectionsResp.MediaContainer.Directory {
+		if section.Type != "show" {
+			continue
+		}
+		refreshResp, err := c.plexGet("/library/sections/" + section.Key + "/refresh")
+		if err != nil {
+			return fmt.Errorf("plex: refresh section %s: %w", section.Key, err)
+		}
+		refreshResp.Body.Close()
+	}
+	return nil
 }
 
 // SetContentRating implements PlexClient. It sends a PUT to the metadata

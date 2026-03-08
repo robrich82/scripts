@@ -249,6 +249,29 @@ func TestHTTPPlexMovieClient_FindMovieByTitle_NormalisedMatch(t *testing.T) {
 	}
 }
 
+func TestHTTPPlexMovieClient_RefreshLibraries_RefreshesMovieSections(t *testing.T) {
+	var refreshPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			// One movie section and one show section — only the movie section should be refreshed.
+			w.Write([]byte(`{"MediaContainer":{"Directory":[{"key":"1","type":"movie"},{"key":"2","type":"show"}]}}`))
+		} else {
+			refreshPaths = append(refreshPaths, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	if err := c.RefreshLibraries(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(refreshPaths) != 1 || refreshPaths[0] != "/library/sections/1/refresh" {
+		t.Errorf("refreshPaths = %v; want [/library/sections/1/refresh]", refreshPaths)
+	}
+}
+
 func TestHTTPPlexMovieClient_FindMovieByTitle_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
