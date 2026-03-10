@@ -211,7 +211,26 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
-	// --- 2. Video language inheritance ---
+	// --- 2. Hearing-impaired and commentary flag detection ---
+	// Set flag-hearing-impaired / flag-commentary on tracks whose name signals
+	// their purpose but whose MKV flag is not yet set. Tracks that already
+	// carry these flags are left unchanged but are also captured in-memory so
+	// the default-selection logic can exclude them.
+	for i := range tracks {
+		props := &tracks[i].Properties
+		if !props.HearingImpaired && containsAny(props.TrackName, sdhKeywords) {
+			res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-hearing-impaired", "1")...)
+			props.HearingImpaired = true
+			res.LocalFixes.Flags++
+		}
+		if !props.Commentary && containsAny(props.TrackName, commentaryKeywords) {
+			res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-commentary", "1")...)
+			props.Commentary = true
+			res.LocalFixes.Flags++
+		}
+	}
+
+	// --- 3. Video language inheritance ---
 	var videoTracks, audioTracks []int
 	for i, t := range tracks {
 		switch t.Type {
@@ -249,7 +268,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
-	// --- 3. Flag & naming logic per target language ---
+	// --- 4. Flag & naming logic per target language ---
 	for _, lang := range targetLangs {
 		// Collect audio tracks for this language.
 		var langAudios []int
@@ -268,7 +287,8 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 			// Exclude commentary/SDH tracks to find the clean candidates.
 			var cleanAudio []int
 			for _, i := range langAudios {
-				if !containsAny(tracks[i].Properties.TrackName, forbiddenKeywords) {
+				p := tracks[i].Properties
+				if !containsAny(p.TrackName, forbiddenKeywords) && !p.HearingImpaired && !p.Commentary {
 					cleanAudio = append(cleanAudio, i)
 				}
 			}
@@ -321,10 +341,10 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 
 		var mainCands, forcedCands []int
 		for _, i := range subTracks {
-			name := tracks[i].Properties.TrackName
-			if containsAny(name, forcedKeywords) {
+			p := tracks[i].Properties
+			if containsAny(p.TrackName, forcedKeywords) {
 				forcedCands = append(forcedCands, i)
-			} else if !containsAny(name, forbiddenKeywords) {
+			} else if !containsAny(p.TrackName, forbiddenKeywords) && !p.HearingImpaired && !p.Commentary {
 				mainCands = append(mainCands, i)
 			}
 		}

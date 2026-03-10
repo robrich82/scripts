@@ -11,6 +11,16 @@ var forbiddenKeywords = []string{
 	"commentary", "sdh", "description", "cc", "regional",
 }
 
+// sdhKeywords identify tracks intended for viewers with hearing impairments
+// (SDH, closed captions, etc.). Tracks whose names contain these keywords will
+// have flag-hearing-impaired set and will never be selected as the default.
+var sdhKeywords = []string{"sdh", "hearing impaired"}
+
+// commentaryKeywords identify director/cast commentary tracks. Tracks whose
+// names contain these keywords will have flag-commentary set and will never be
+// selected as the default.
+var commentaryKeywords = []string{"commentary"}
+
 // forcedKeywords identify Signs/Songs/Forced subtitle tracks.
 var forcedKeywords = []string{"signs", "songs", "forced"}
 

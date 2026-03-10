@@ -336,7 +336,8 @@ func TestAnalyzeFile_UnknownCodecRecorded(t *testing.T) {
 func TestAnalyzeFile_AllForbiddenSubs_FallsBackToAlreadyDefault(t *testing.T) {
 	// When every non-forced subtitle matches a forbidden keyword (e.g. "commentary"),
 	// the fallback treats them as ordinary candidates. The one already marked
-	// default stays default — no edits and no failure.
+	// default stays default — no default-flag changes. The commentary flag is set
+	// on both tracks (that is the only expected change).
 	info := MKVInfo{Tracks: []Track{
 		audioTrack(0, "eng", "A_AC3", 2, true),
 		subTrack(1, "eng", "S_UNKNOWN_A", "Commentary A", true, false),
@@ -346,8 +347,13 @@ func TestAnalyzeFile_AllForbiddenSubs_FallsBackToAlreadyDefault(t *testing.T) {
 	if res.Failed {
 		t.Errorf("unexpected failure: %v", res.FailReasons)
 	}
-	if res.LocalFixes.Flags != 0 {
-		t.Errorf("expected no flag edits (already correct); edits: %v", res.Edits)
+	// Both commentary subs should receive flag-commentary=1.
+	if !hasEdit(res.Edits, "flag-commentary=1") {
+		t.Errorf("expected flag-commentary=1 edits; edits: %v", res.Edits)
+	}
+	// The default flag on track 1 should not change.
+	if hasEdit(res.Edits, "flag-default=0") {
+		t.Errorf("default flag should not be cleared on already-default commentary track; edits: %v", res.Edits)
 	}
 }
 
@@ -458,5 +464,132 @@ func TestAnalyzeFile_IETFMapOverride_EnGB(t *testing.T) {
 	res := AnalyzeFile(info, AnalyzeOptions{IETFMap: customMap})
 	if !hasEdit(res.Edits, "language-ietf=en-GB") {
 		t.Errorf("expected language-ietf=en-GB from custom IETFMap; edits: %v", res.Edits)
+	}
+}
+
+// --- Hearing-impaired and commentary flag detection ---
+
+func TestAnalyzeFile_SDHSubGetsHearingImpairedFlag(t *testing.T) {
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 2, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "English", true, false),
+		subTrack(2, "eng", "S_TEXT/ASS", "English SDH", false, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if !hasEdit(res.Edits, "flag-hearing-impaired=1") {
+		t.Errorf("SDH subtitle should get flag-hearing-impaired=1; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_SDHSubNotDefault(t *testing.T) {
+	// An SDH subtitle should never become the default track.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 2, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "English SDH", true, false), // currently default
+		subTrack(2, "eng", "S_TEXT/ASS", "English", false, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	// SDH track should lose its default flag.
+	if !hasEdit(res.Edits, "flag-default=0") {
+		t.Errorf("SDH subtitle should lose its default flag; edits: %v", res.Edits)
+	}
+	// Non-SDH track should become default.
+	if !hasEdit(res.Edits, "flag-default=1") {
+		t.Errorf("non-SDH subtitle should become default; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_CommentaryAudioGetsFlag(t *testing.T) {
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 6, true),
+		{ID: 1, Type: "audio", Properties: TrackProperties{
+			Language: "eng", CodecID: "A_AC3", AudioChannels: 2,
+			TrackName: "Director's Commentary", DefaultTrack: false,
+		}},
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if !hasEdit(res.Edits, "flag-commentary=1") {
+		t.Errorf("commentary audio should get flag-commentary=1; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_CommentaryAudioNotDefault(t *testing.T) {
+	// A commentary audio track should never win default selection.
+	info := MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "audio", Properties: TrackProperties{
+			Language: "eng", CodecID: "A_TRUEHD", AudioChannels: 8,
+			TrackName: "Commentary", DefaultTrack: true,
+		}},
+		audioTrack(1, "eng", "A_AC3", 6, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	// Commentary track should lose default, non-commentary should gain it.
+	if !hasEdit(res.Edits, "flag-default=1") {
+		t.Errorf("non-commentary track should become default; edits: %v", res.Edits)
+	}
+	if !hasEdit(res.Edits, "flag-default=0") {
+		t.Errorf("commentary track should lose its default flag; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_PreExistingHearingImpairedFlag_NotDefault(t *testing.T) {
+	// A track already carrying flag-hearing-impaired=1 (but no keyword in name)
+	// should still be excluded from default selection.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 2, true),
+		{ID: 1, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", CodecID: "S_TEXT/ASS", TrackName: "English",
+			DefaultTrack: true, HearingImpaired: true,
+		}},
+		subTrack(2, "eng", "S_TEXT/ASS", "English Full", false, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	// HI track (already flagged) should not become (or stay) default.
+	if !hasEdit(res.Edits, "flag-default=0") {
+		t.Errorf("pre-existing HI track should lose default; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_PreExistingHearingImpairedFlag_NoFlagEdit(t *testing.T) {
+	// A track already carrying flag-hearing-impaired=1 should not get a
+	// redundant flag-hearing-impaired=1 edit.
+	info := MKVInfo{Tracks: []Track{
+		subTrack(0, "eng", "S_TEXT/ASS", "English SDH", false, false),
+	}}
+	// Pre-set the flag as if mkvmerge already returned it.
+	info.Tracks[0].Properties.HearingImpaired = true
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	// Count occurrences of flag-hearing-impaired=1 — should be zero (already set).
+	count := 0
+	for _, e := range res.Edits {
+		if e == "flag-hearing-impaired=1" {
+			count++
+		}
+	}
+	if count != 0 {
+		t.Errorf("expected no flag-hearing-impaired=1 edit when flag already set; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_HearingImpairedSub_IsStable(t *testing.T) {
+	// A correctly configured file: one normal default sub + one HI sub with
+	// flag already set. A second analysis pass should produce no edits.
+	info := MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "audio", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "A_AC3",
+			AudioChannels: 2, DefaultTrack: true,
+		}},
+		{ID: 1, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "S_TEXT/ASS",
+			TrackName: "English", DefaultTrack: true, ForcedTrack: false,
+		}},
+		{ID: 2, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "S_TEXT/ASS",
+			TrackName: "English SDH", DefaultTrack: false, HearingImpaired: true,
+		}},
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if len(res.Edits) != 0 {
+		t.Errorf("expected no edits on already-correct file; edits: %v", res.Edits)
 	}
 }
