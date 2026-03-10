@@ -63,9 +63,6 @@ func main() {
 	}
 	rr := newMovieRatingResolver(sources, cache, *overwriteRatings, plex, stdinPrompter)
 
-	fmt.Printf("Scanning %s...\n", dir)
-	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache)
-
 	if plex != nil {
 		if err := plex.RefreshLibraries(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Plex library refresh failed: %v\n", err)
@@ -73,6 +70,9 @@ func main() {
 			fmt.Println("Plex libraries refreshed.")
 		}
 	}
+
+	fmt.Printf("Scanning %s...\n", dir)
+	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache)
 
 	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Errors: %d\n",
 		stats.Updated, stats.OK, stats.Skipped, stats.Errors)
