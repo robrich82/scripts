@@ -234,6 +234,20 @@ func isNumeric(s string) bool {
 // spaces, or parentheses.
 var yearRe = regexp.MustCompile(`[\s._(\[]((?:19|20)\d{2})[\s._)\]]`)
 
+// reverseChars maps Unicode lookalike characters back to their ASCII originals.
+// These are used as filesystem-safe substitutes for characters illegal in filenames.
+var reverseChars = []struct{ from, to string }{
+	{"꞉", ":"},
+	{"╱", "/"},
+	{"╲", `\`},
+	{"│", "|"},
+	{"＊", "*"},
+	{"？", "?"},
+	{"''", `"`},
+	{"＜", "<"},
+	{"＞", ">"},
+}
+
 // titleFromFilename derives a human-readable movie title from a filename.
 // It strips the extension, removes the year and everything after it, then
 // replaces dots and underscores with spaces.
@@ -275,5 +289,10 @@ func titleFromFilename(filename, year string) string {
 	// Replace separators with spaces.
 	filename = strings.ReplaceAll(filename, ".", " ")
 	filename = strings.ReplaceAll(filename, "_", " ")
+
+	// Restore Unicode lookalike characters to their ASCII originals.
+	for _, r := range reverseChars {
+		filename = strings.ReplaceAll(filename, r.from, r.to)
+	}
 	return strings.TrimSpace(filename)
 }
