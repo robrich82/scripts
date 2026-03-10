@@ -283,15 +283,25 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	ctimeNeedsUpdate := timer.CreationTimeNeedsUpdate(filePath, ts)
 	needsApply := !cache.IsMetaApplied(filePath, tmdbID) || (rr != nil && rr.overwrite)
 
-	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate {
-		fmt.Printf("[OK]      %s (no changes needed)\n", basename)
-		return ResultOK
+	// Determine whether the Plex rating needs updating independently of needsApply,
+	// so that a manually corrected cache entry is always pushed to Plex.
+	plexRatingNeedsUpdate := func(rating NZRating) bool {
+		if rr == nil || rr.plex == nil || rating == RatingNone {
+			return false
+		}
+		last, ok := cache.GetPlexRating(tmdbID)
+		return !ok || last != rating
 	}
 
-	// 5. Resolve NZ rating.
+	// 5. Resolve NZ rating early so we can include it in the needs-update check.
 	var rating NZRating
 	if rr != nil {
 		rating = rr.ResolveMovieRating(tmdbID, details.Title)
+	}
+
+	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) {
+		fmt.Printf("[OK]      %s (no changes needed)\n", basename)
+		return ResultOK
 	}
 
 	// 6. Build tags XML and download poster (only when applying metadata).
@@ -317,17 +327,22 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		} else {
 			mkvRan = true
 			cache.MarkMetaApplied(filePath, tmdbID)
-			// Push rating to Plex if configured.
-			if rr != nil && rr.plex != nil && rating != RatingNone {
-				rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
-				if plexErr != nil {
-					rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
-				}
-				if plexErr == nil {
-					if err := rr.plex.SetContentRating(rk, rating); err != nil {
-						fmt.Printf("  [!] Plex rating update failed: %v\n", err)
-					}
-				}
+		}
+	}
+
+	// Push rating to Plex whenever it differs from what was last pushed — this
+	// is independent of needsApply so that a manually corrected cache entry is
+	// always propagated to Plex on the next run.
+	if plexRatingNeedsUpdate(rating) {
+		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
+		if plexErr != nil {
+			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
+		}
+		if plexErr == nil {
+			if err := rr.plex.SetContentRating(rk, rating); err != nil {
+				fmt.Printf("  [!] Plex rating update failed: %v\n", err)
+			} else {
+				cache.SetPlexRating(tmdbID, rating)
 			}
 		}
 	}

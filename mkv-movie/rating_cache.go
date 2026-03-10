@@ -20,6 +20,7 @@ type movieRatingCacheData struct {
 	Applied     map[string]string `json:"applied,omitempty"`      // absFilePath → rating already written
 	TMDBIDs     map[string]string `json:"tmdb_ids,omitempty"`     // "title:YEAR" → tmdbID
 	MetaApplied map[string]string `json:"meta_applied,omitempty"` // absFilePath → tmdbID (full metadata written)
+	PlexRatings map[string]string `json:"plex_ratings,omitempty"` // tmdbID → rating last pushed to Plex
 }
 
 // LoadMovieRatingCache loads the cache from path. If the file does not exist an
@@ -32,6 +33,7 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 			Applied:     make(map[string]string),
 			TMDBIDs:     make(map[string]string),
 			MetaApplied: make(map[string]string),
+			PlexRatings: make(map[string]string),
 		},
 	}
 	b, err := os.ReadFile(path)
@@ -55,6 +57,9 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	}
 	if c.data.MetaApplied == nil {
 		c.data.MetaApplied = make(map[string]string)
+	}
+	if c.data.PlexRatings == nil {
+		c.data.PlexRatings = make(map[string]string)
 	}
 	return c, nil
 }
@@ -102,6 +107,21 @@ func (c *MovieRatingCache) IsMetaApplied(filePath, tmdbID string) bool {
 // MarkMetaApplied records that filePath has had its full metadata written from tmdbID.
 func (c *MovieRatingCache) MarkMetaApplied(filePath, tmdbID string) {
 	c.data.MetaApplied[filePath] = tmdbID
+}
+
+// GetPlexRating returns the rating that was last successfully pushed to Plex
+// for the given key (TMDB ID), or ("", false) if never pushed.
+func (c *MovieRatingCache) GetPlexRating(key string) (NZRating, bool) {
+	s, ok := c.data.PlexRatings[key]
+	if !ok || s == "" {
+		return RatingNone, false
+	}
+	return NZRating(s), true
+}
+
+// SetPlexRating records the rating that was successfully pushed to Plex for key.
+func (c *MovieRatingCache) SetPlexRating(key string, r NZRating) {
+	c.data.PlexRatings[key] = string(r)
 }
 
 // Save writes the cache to disk.
