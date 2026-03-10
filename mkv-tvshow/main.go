@@ -107,11 +107,6 @@ func main() {
 		plexClient = newHTTPPlexClient(plexURL, plexToken)
 	}
 
-	fmt.Printf("Scanning %s...\n", mediaDir)
-
-	processor := NewProcessor(cfg, cache, manualData, tmdb, mkv, prompter, timer, retryList, ratingCache, sources, plexClient)
-	stats := processor.Run()
-
 	if plexClient != nil {
 		if err := plexClient.RefreshLibraries(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Plex library refresh failed: %v\n", err)
@@ -119,6 +114,11 @@ func main() {
 			fmt.Println("Plex libraries refreshed.")
 		}
 	}
+
+	fmt.Printf("Scanning %s...\n", mediaDir)
+
+	processor := NewProcessor(cfg, cache, manualData, tmdb, mkv, prompter, timer, retryList, ratingCache, sources, plexClient)
+	stats := processor.Run()
 
 	fmt.Printf("\nDone. Success: %d  Failed: %d  Skipped (old): %d\n",
 		stats.Success, stats.Failed, stats.SkippedOld)
