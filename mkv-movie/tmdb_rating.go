@@ -10,6 +10,24 @@ import (
 )
 
 const tmdbAPIBase = "https://api.themoviedb.org/3"
+const tmdbImageBase = "https://image.tmdb.org/t/p/w500"
+
+// MovieDetails holds the full metadata fetched from TMDB for a movie.
+type MovieDetails struct {
+	TMDBID      string
+	Title       string
+	Overview    string
+	ReleaseDate string // "YYYY-MM-DD" or ""
+	PosterPath  string // e.g. "/abc123.jpg"
+}
+
+// PosterURL returns the full image URL for the poster, or "" if none.
+func (d MovieDetails) PosterURL() string {
+	if d.PosterPath == "" {
+		return ""
+	}
+	return tmdbImageBase + d.PosterPath
+}
 
 // tmdbMovieSource implements RatingSource using the TMDB API.
 // It searches for a movie by title+year, then fetches the NZ certification
@@ -148,6 +166,55 @@ func (t *tmdbMovieSource) nzCertification(tmdbID string) (NZRating, error) {
 		}
 	}
 	return RatingNone, nil
+}
+
+// GetMovieDetails fetches title, overview, release_date, and poster_path from TMDB.
+func (t *tmdbMovieSource) GetMovieDetails(tmdbID string) (MovieDetails, error) {
+	u := fmt.Sprintf("%s/movie/%s?api_key=%s&language=en-US",
+		tmdbAPIBase, tmdbID, url.QueryEscape(t.apiKey))
+
+	resp, err := t.httpClient.Get(u)
+	if err != nil {
+		return MovieDetails{}, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Title       string `json:"title"`
+		Overview    string `json:"overview"`
+		ReleaseDate string `json:"release_date"`
+		PosterPath  string `json:"poster_path"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return MovieDetails{}, fmt.Errorf("decode movie details: %w", err)
+	}
+	return MovieDetails{
+		TMDBID:      tmdbID,
+		Title:       result.Title,
+		Overview:    result.Overview,
+		ReleaseDate: result.ReleaseDate,
+		PosterPath:  result.PosterPath,
+	}, nil
+}
+
+// SearchAndFetch searches TMDB for title+year, then fetches full movie details.
+// Returns ("", MovieDetails{}, nil) if no match is found.
+func (t *tmdbMovieSource) SearchAndFetch(title, year string) (string, MovieDetails, error) {
+	if t.apiKey == "" {
+		return "", MovieDetails{}, nil
+	}
+	tmdbID, err := t.searchMovie(title, year)
+	if err != nil {
+		return "", MovieDetails{}, fmt.Errorf("search %q: %w", title, err)
+	}
+	if tmdbID == "" {
+		return "", MovieDetails{}, nil
+	}
+	details, err := t.GetMovieDetails(tmdbID)
+	if err != nil {
+		return tmdbID, MovieDetails{}, err
+	}
+	return tmdbID, details, nil
 }
 
 // isNumeric returns true when s contains only digits.

@@ -8,31 +8,36 @@ import (
 	"time"
 )
 
-// fakeMediaInfoReader returns pre-set dates and title.
-type fakeMediaInfoReader struct {
-	best   string
-	header string
-	title  string
-	err    error
+// fakeTMDBMovieClient returns pre-set TMDB ID and details.
+type fakeTMDBMovieClient struct {
+	tmdbID  string
+	details MovieDetails
+	err     error
 }
 
-func (f *fakeMediaInfoReader) Query(_ string) (string, string, string, error) {
-	return f.best, f.header, f.title, f.err
+func (f *fakeTMDBMovieClient) SearchAndFetch(_, _ string) (string, MovieDetails, error) {
+	return f.tmdbID, f.details, f.err
 }
 
-// fakeMKVSyncer records SyncHeader calls.
-type fakeMKVSyncer struct {
-	calls []fakeSyncCall
+func (f *fakeTMDBMovieClient) GetMovieDetails(_ string) (MovieDetails, error) {
+	return f.details, f.err
+}
+
+// fakeApplier records Apply calls.
+type fakeApplier struct {
+	calls []fakeApplyCall
 	err   error
 }
 
-type fakeSyncCall struct {
-	dateStr  string
-	tagsPath string
+type fakeApplyCall struct {
+	title      string
+	dateStr    string
+	tagsPath   string
+	posterPath string
 }
 
-func (f *fakeMKVSyncer) SyncHeader(_ string, dateStr, tagsPath string) error {
-	f.calls = append(f.calls, fakeSyncCall{dateStr, tagsPath})
+func (f *fakeApplier) Apply(_ string, title, dateStr, tagsPath, posterPath string) error {
+	f.calls = append(f.calls, fakeApplyCall{title, dateStr, tagsPath, posterPath})
 	return f.err
 }
 
@@ -57,14 +62,33 @@ func (f *fakeFileTimer) SetCreationTime(_ string, t time.Time) error {
 	return nil
 }
 
-func makeTempMKV(t *testing.T) string {
+// makeTempMKVNamed creates a temp .mkv file with a specific name.
+func makeTempMKVNamed(t *testing.T, name string) string {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "test-*.mkv")
-	if err != nil {
-		t.Fatalf("creating temp mkv: %v", err)
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte{}, 0644); err != nil {
+		t.Fatalf("creating temp mkv %s: %v", name, err)
 	}
-	f.Close()
-	return f.Name()
+	return path
+}
+
+func makeCache(t *testing.T) *MovieRatingCache {
+	t.Helper()
+	c, err := LoadMovieRatingCache(filepath.Join(t.TempDir(), "cache.json"))
+	if err != nil {
+		t.Fatalf("LoadMovieRatingCache: %v", err)
+	}
+	return c
+}
+
+func testDetails(releaseDate string) MovieDetails {
+	return MovieDetails{
+		TMDBID:      "12345",
+		Title:       "Avengers Endgame",
+		Overview:    "Heroes assemble.",
+		ReleaseDate: releaseDate,
+		PosterPath:  "",
+	}
 }
 
 // --- parseDate tests ---
@@ -108,153 +132,181 @@ func TestParseDate_InvalidYear(t *testing.T) {
 
 // --- processFile tests ---
 
-func TestProcessFile_NoDate_Skipped(t *testing.T) {
-	path := makeTempMKV(t)
-	mi := &fakeMediaInfoReader{best: "", header: ""}
-	result := processFile(path, mi, nil, &fakeFileTimer{}, nil)
-	if result != ResultSkipped {
-		t.Errorf("got %v, want ResultSkipped", result)
-	}
-}
-
-func TestProcessFile_MediaInfoError_Error(t *testing.T) {
-	path := makeTempMKV(t)
-	mi := &fakeMediaInfoReader{err: fmt.Errorf("mediainfo not found")}
-	result := processFile(path, mi, nil, &fakeFileTimer{}, nil)
+func TestProcessFile_TMDBSearchError_Error(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{err: fmt.Errorf("network error")}
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t))
 	if result != ResultError {
 		t.Errorf("got %v, want ResultError", result)
 	}
 }
 
-func TestProcessFile_HeaderDiffers_SyncsAndUpdates(t *testing.T) {
-	path := makeTempMKV(t)
-	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, past, past)
-
-	mi := &fakeMediaInfoReader{best: "2021-04-10", header: ""}
-	syncer := &fakeMKVSyncer{}
-	timer := &fakeFileTimer{}
-
-	result := processFile(path, mi, syncer, timer, nil)
-	if result != ResultUpdated {
-		t.Errorf("got %v, want ResultUpdated", result)
-	}
-	if len(syncer.calls) != 1 || syncer.calls[0].dateStr != "2021-04-10" {
-		t.Errorf("SyncHeader calls: %v", syncer.calls)
+func TestProcessFile_TMDBNotFound_Skipped(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "", details: MovieDetails{}}
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t))
+	if result != ResultSkipped {
+		t.Errorf("got %v, want ResultSkipped", result)
 	}
 }
 
-func TestProcessFile_AlreadyCurrent_OK(t *testing.T) {
-	path := makeTempMKV(t)
-	target := time.Date(2021, 4, 10, 0, 0, 0, 0, time.Local)
+func TestProcessFile_NoReleaseDate_Skipped(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: MovieDetails{TMDBID: "12345", Title: "Avengers Endgame"}}
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t))
+	if result != ResultSkipped {
+		t.Errorf("got %v, want ResultSkipped", result)
+	}
+}
+
+func TestProcessFile_AlreadyApplied_MtimeCurrent_OK(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, target, target)
 
-	mi := &fakeMediaInfoReader{best: "2021-04-10", header: "2021-04-10"}
-	syncer := &fakeMKVSyncer{}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
+	cache := makeCache(t)
+	// Simulate file already fully processed.
+	cache.SetTMDBID("Avengers Endgame:2019", "12345")
+	cache.MarkMetaApplied(path, "12345")
 
-	result := processFile(path, mi, syncer, timer, nil)
+	result := processFile(path, tmdb, applier, timer, nil, cache)
 	if result != ResultOK {
 		t.Errorf("got %v, want ResultOK", result)
 	}
-	if len(syncer.calls) != 0 {
-		t.Error("SyncHeader should not be called when header is current")
+	if len(applier.calls) != 0 {
+		t.Error("Apply should not be called when already applied and mtime current")
 	}
 	if len(timer.setTimesCalls) != 0 {
-		t.Error("SetTimes should not be called when mtime is current")
+		t.Error("SetTimes should not be called when mtime is already correct")
 	}
 }
 
-func TestProcessFile_YearOnly_ParsedAndUpdated(t *testing.T) {
-	path := makeTempMKV(t)
+func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, past, past)
 
-	mi := &fakeMediaInfoReader{best: "2018", header: ""}
-	syncer := &fakeMKVSyncer{}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
+	cache := makeCache(t)
 
-	result := processFile(path, mi, syncer, timer, nil)
+	result := processFile(path, tmdb, applier, timer, nil, cache)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated", result)
 	}
-	if len(syncer.calls) == 0 {
-		t.Error("expected SyncHeader to be called")
+	if len(applier.calls) != 1 {
+		t.Errorf("expected 1 Apply call, got %d", len(applier.calls))
+	}
+	if applier.calls[0].title != "Avengers Endgame" {
+		t.Errorf("Apply title = %q, want %q", applier.calls[0].title, "Avengers Endgame")
+	}
+	if applier.calls[0].dateStr != "2019-04-26" {
+		t.Errorf("Apply dateStr = %q, want %q", applier.calls[0].dateStr, "2019-04-26")
+	}
+	if len(timer.setTimesCalls) == 0 {
+		t.Error("SetTimes should be called after apply")
+	}
+	// TMDB ID and meta-applied should be persisted.
+	if cache.GetTMDBID("Avengers Endgame:2019") != "12345" {
+		t.Error("TMDB ID should be cached after search")
+	}
+	if !cache.IsMetaApplied(path, "12345") {
+		t.Error("meta should be marked applied after successful apply")
+	}
+}
+
+func TestProcessFile_AppliedButMtimeWrong_FixesTimestamps(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	// mtime is wrong even though metadata was already applied.
+	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
+	os.Chtimes(path, past, past)
+
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	applier := &fakeApplier{}
+	timer := &fakeFileTimer{}
+	cache := makeCache(t)
+	cache.SetTMDBID("Avengers Endgame:2019", "12345")
+	cache.MarkMetaApplied(path, "12345")
+
+	result := processFile(path, tmdb, applier, timer, nil, cache)
+	if result != ResultUpdated {
+		t.Errorf("got %v, want ResultUpdated (mtime wrong)", result)
+	}
+	// No Apply call needed (meta already applied).
+	if len(applier.calls) != 0 {
+		t.Error("Apply should not be called when only mtime needs fixing")
+	}
+	if len(timer.setTimesCalls) == 0 {
+		t.Error("SetTimes should be called to correct mtime")
+	}
+}
+
+func TestProcessFile_Overwrite_ReappliesEvenIfApplied(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
+	os.Chtimes(path, target, target)
+
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	applier := &fakeApplier{}
+	timer := &fakeFileTimer{}
+	cache := makeCache(t)
+	cache.SetTMDBID("Avengers Endgame:2019", "12345")
+	cache.MarkMetaApplied(path, "12345")
+
+	prompter := func(string) (string, error) { return "", nil }
+	rr := newMovieRatingResolver(nil, cache, true /* overwrite */, nil, prompter)
+
+	result := processFile(path, tmdb, applier, timer, rr, cache)
+	if result != ResultUpdated {
+		t.Errorf("got %v, want ResultUpdated (overwrite forces re-apply)", result)
+	}
+	if len(applier.calls) != 1 {
+		t.Errorf("expected 1 Apply call under overwrite, got %d", len(applier.calls))
 	}
 }
 
 func TestProcessFile_MkvpropeditRuns_AlwaysRestoresMtime(t *testing.T) {
-	// mtime is already at the target date, but header differs → mkvpropedit runs.
-	// After mkvpropedit the mtime would silently be "now" without the fix.
-	// Verify SetTimes is still called.
-	path := makeTempMKV(t)
-	target := time.Date(2021, 4, 10, 0, 0, 0, 0, time.Local)
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, target, target) // mtime already correct
 
-	mi := &fakeMediaInfoReader{best: "2021-04-10", header: ""} // header wrong
-	syncer := &fakeMKVSyncer{}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
+	cache := makeCache(t)
+	// Not yet applied — mkvpropedit will run.
 
-	processFile(path, mi, syncer, timer, nil)
+	processFile(path, tmdb, applier, timer, nil, cache)
 
 	if len(timer.setTimesCalls) == 0 {
 		t.Error("SetTimes must be called after mkvpropedit even when mtime was already correct")
 	}
 }
 
-func TestProcessFile_WithRating_TagsWrittenAndTimestampRestored(t *testing.T) {
-	path := makeTempMKV(t)
-	target := time.Date(2020, 6, 15, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, target, target)
+func TestProcessFile_WithRating_TagsPathSet(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
+	os.Chtimes(path, past, past)
 
-	mi := &fakeMediaInfoReader{best: "2020-06-15", header: "2020-06-15", title: "My Film"}
-	syncer := &fakeMKVSyncer{}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
+	cache := makeCache(t)
+	cache.Set("12345", RatingM)
 
-	dir := t.TempDir()
-	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
 	prompter := func(string) (string, error) { return "", nil }
 	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
-	// Pre-load cache so no prompt is needed.
-	cache.Set("My Film:2020", RatingM)
 
-	result := processFile(path, mi, syncer, timer, rr)
+	result := processFile(path, tmdb, applier, timer, rr, cache)
 	if result != ResultUpdated {
-		t.Errorf("got %v, want ResultUpdated (rating tag written first time)", result)
+		t.Errorf("got %v, want ResultUpdated", result)
 	}
-	// SyncHeader should have been called with a non-empty tagsPath.
-	if len(syncer.calls) == 0 || syncer.calls[0].tagsPath == "" {
-		t.Error("expected SyncHeader to be called with tagsPath for rating tag")
-	}
-	// Timestamps must be restored after mkvpropedit.
-	if len(timer.setTimesCalls) == 0 {
-		t.Error("SetTimes must be called to restore timestamp after rating tag write")
-	}
-}
-
-func TestProcessFile_WithRating_AlreadyApplied_ShowsOK(t *testing.T) {
-	path := makeTempMKV(t)
-	target := time.Date(2020, 6, 15, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, target, target)
-
-	mi := &fakeMediaInfoReader{best: "2020-06-15", header: "2020-06-15", title: "My Film"}
-	syncer := &fakeMKVSyncer{}
-	timer := &fakeFileTimer{}
-
-	dir := t.TempDir()
-	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
-	prompter := func(string) (string, error) { return "", nil }
-	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
-	cache.Set("My Film:2020", RatingM)
-	// Mark as already applied — simulates a second run.
-	cache.MarkApplied(path, RatingM)
-
-	result := processFile(path, mi, syncer, timer, rr)
-	if result != ResultOK {
-		t.Errorf("got %v, want ResultOK (tags already applied, date current)", result)
-	}
-	if len(syncer.calls) != 0 {
-		t.Error("SyncHeader must not be called when tags are already applied and date is current")
+	if len(applier.calls) == 0 || applier.calls[0].tagsPath == "" {
+		t.Error("Apply should be called with a non-empty tagsPath when rating is set")
 	}
 }
 
@@ -282,11 +334,8 @@ func (f *fakePlexMovieClient) SetContentRating(_ string, _ NZRating) error { ret
 func (f *fakePlexMovieClient) RefreshLibraries() error                     { return nil }
 
 func TestResolveMovieRating_BlankAcceptsPlexDefault(t *testing.T) {
-	dir := t.TempDir()
-	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
-
+	cache := makeCache(t)
 	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingR16}
-	// Prompter immediately hits Enter (blank).
 	prompter := func(string) (string, error) { return "", nil }
 	rr := newMovieRatingResolver(nil, cache, false, plex, prompter)
 
@@ -294,7 +343,6 @@ func TestResolveMovieRating_BlankAcceptsPlexDefault(t *testing.T) {
 	if rating != RatingR16 {
 		t.Errorf("got %q, want R16 (Plex default)", rating)
 	}
-	// Rating must be cached.
 	cached, ok := cache.Get("Some Film:2022")
 	if !ok || cached != RatingR16 {
 		t.Errorf("cache has %q ok=%v, want R16", cached, ok)
@@ -302,9 +350,7 @@ func TestResolveMovieRating_BlankAcceptsPlexDefault(t *testing.T) {
 }
 
 func TestResolveMovieRating_BlankWithNoPlexDefault_Skips(t *testing.T) {
-	dir := t.TempDir()
-	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
-
+	cache := makeCache(t)
 	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingNone}
 	prompter := func(string) (string, error) { return "", nil }
 	rr := newMovieRatingResolver(nil, cache, false, plex, prompter)
@@ -316,16 +362,14 @@ func TestResolveMovieRating_BlankWithNoPlexDefault_Skips(t *testing.T) {
 }
 
 func TestResolveMovieRating_InvalidInput_RePrompts(t *testing.T) {
-	dir := t.TempDir()
-	cache, _ := LoadMovieRatingCache(filepath.Join(dir, "cache.json"))
-
+	cache := makeCache(t)
 	calls := 0
 	prompter := func(string) (string, error) {
 		calls++
 		if calls == 1 {
 			return "PG-13", nil // US rating, not valid NZ
 		}
-		return "R16", nil // valid on second try
+		return "R16", nil
 	}
 	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
 
@@ -336,7 +380,6 @@ func TestResolveMovieRating_InvalidInput_RePrompts(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("prompter called %d times, want 2", calls)
 	}
-	// Rating must be cached after valid entry.
 	cached, ok := cache.Get("title:2020")
 	if !ok || cached != RatingR16 {
 		t.Errorf("cache has %q ok=%v, want R16", cached, ok)
@@ -349,8 +392,9 @@ func TestWalkAndProcess_SkipsNonMKV(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "subtitle.srt"), []byte{}, 0644)
 
-	mi := &fakeMediaInfoReader{best: ""}
-	stats := walkAndProcess(dir, mi, nil, &fakeFileTimer{}, nil)
+	tmdb := &fakeTMDBMovieClient{}
+	cache := makeCache(t)
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache)
 	if stats.Skipped != 0 || stats.Updated != 0 || stats.Errors != 0 {
 		t.Errorf("unexpected stats for non-mkv file: %+v", stats)
 	}
@@ -360,8 +404,10 @@ func TestWalkAndProcess_CountsSkipped(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "movie.mkv"), []byte{}, 0644)
 
-	mi := &fakeMediaInfoReader{best: ""}
-	stats := walkAndProcess(dir, mi, nil, &fakeFileTimer{}, nil)
+	// TMDB finds nothing → skipped.
+	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
+	cache := makeCache(t)
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache)
 	if stats.Skipped != 1 {
 		t.Errorf("got Skipped=%d, want 1", stats.Skipped)
 	}

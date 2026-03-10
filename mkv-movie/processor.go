@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,43 +14,75 @@ import (
 	"time"
 )
 
-// MKVSyncer updates the internal MKV header and/or writes tags via mkvpropedit.
-type MKVSyncer interface {
-	// SyncHeader updates the MKV date header and/or writes tags from tagsPath.
-	// Pass an empty string for dateStr to skip the date update, or an empty
-	// string for tagsPath to skip tag writing.
-	// Both operations are combined into a single mkvpropedit invocation.
-	SyncHeader(filePath, dateStr, tagsPath string) error
+// TMDBMovieClient fetches movie details from TMDB.
+type TMDBMovieClient interface {
+	// SearchAndFetch searches for title+year and returns the TMDB ID and full
+	// details. Returns ("", MovieDetails{}, nil) when no match is found.
+	SearchAndFetch(title, year string) (tmdbID string, details MovieDetails, err error)
+	// GetMovieDetails fetches full details for a known TMDB ID.
+	GetMovieDetails(tmdbID string) (MovieDetails, error)
 }
 
-type realMKVSyncer struct {
+// MKVApplier applies metadata to an MKV file via mkvpropedit in a single call.
+type MKVApplier interface {
+	// Apply sets the title, date header, tags, and poster on filePath.
+	// Pass empty strings to skip individual fields.
+	// posterPath causes existing jpeg/png attachments to be deleted and
+	// posterPath to be attached in their place.
+	Apply(filePath, title, dateStr, tagsPath, posterPath string) error
+}
+
+type realMKVApplier struct {
 	path string
 }
 
-func newRealMKVSyncer() (*realMKVSyncer, error) {
+func newRealMKVApplier() (*realMKVApplier, error) {
 	path, err := exec.LookPath("mkvpropedit")
 	if err != nil {
 		return nil, err
 	}
-	return &realMKVSyncer{path: path}, nil
+	return &realMKVApplier{path: path}, nil
 }
 
-func (s *realMKVSyncer) SyncHeader(filePath, dateStr, tagsPath string) error {
+func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath string) error {
 	args := []string{filePath}
-	if dateStr != "" {
-		formatted := dateStr
-		if len(dateStr) == 4 {
-			formatted = dateStr + "-01-01"
+
+	if title != "" || dateStr != "" {
+		args = append(args, "--edit", "info")
+		if title != "" {
+			args = append(args, "--set", "title="+title)
 		}
-		args = append(args, "--edit", "info", "--set", "date="+formatted+"T00:00:00Z")
+		if dateStr != "" {
+			formatted := dateStr
+			if len(formatted) == 4 {
+				formatted = formatted + "-01-01"
+			}
+			args = append(args, "--set", "date="+formatted+"T00:00:00Z")
+		}
 	}
 	if tagsPath != "" {
 		args = append(args, "--tags", "all:"+tagsPath)
 	}
+	if posterPath != "" {
+		args = append(args,
+			"--delete-attachment", "mime-type:image/jpeg",
+			"--delete-attachment", "mime-type:image/png",
+			"--add-attachment", posterPath)
+	}
 	if len(args) == 1 {
 		return nil // nothing to do
 	}
-	return exec.Command(s.path, args...).Run()
+
+	cmd := exec.Command(a.path, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Exit code 1 = warnings only (e.g. no attachment found to delete).
+		if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 1 {
+			return nil
+		}
+		return fmt.Errorf("%w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // Stats counts processing outcomes.
@@ -97,9 +131,9 @@ func newMovieRatingResolver(
 	}
 }
 
-// ResolveMovieRating returns the best NZ rating for the given movie. key is
-// the cache key (TMDB ID when known, "title:YEAR" otherwise). title is the
-// human-readable movie name used for Classification Office and user prompts.
+// ResolveMovieRating returns the best NZ rating for the given movie.
+// key is the TMDB numeric ID (preferred) or a "title:YEAR" fallback.
+// title is the human-readable name used for Classification Office lookups and prompts.
 func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 	if r.cache == nil {
 		return RatingNone
@@ -139,7 +173,6 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 	// Check Plex for an existing rating to use as the default on blank input.
 	var plexDefault NZRating
 	if r.plex != nil {
-		// Extract year from "title:YEAR" key.
 		year := ""
 		if idx := strings.LastIndex(key, ":"); idx >= 0 {
 			year = key[idx+1:]
@@ -147,10 +180,8 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 		if rk, err := r.plex.FindMovieByTitle(title, year); err == nil {
 			plexDefault, _ = r.plex.GetContentRating(rk)
 		}
-		// Silently ignore errors (Plex unavailable or movie not found).
 	}
 
-	// Build the initial prompt message.
 	const validRatings = "G/PG/M/13/RP13/R13/15/RP15/R15/16/RP16/R16/R/18/RP18/R18"
 	var promptMsg string
 	if plexDefault != RatingNone {
@@ -173,7 +204,7 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 				rating = plexDefault
 				r.cache.Set(key, rating)
 			}
-			break // user skipped (or accepted Plex default)
+			break
 		}
 		parsed, ok := ParseNZRating(ans)
 		if ok {
@@ -187,48 +218,62 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 	return rating
 }
 
-// IsTagsApplied reports whether filePath already has rating r written as Matroska tags.
-// Returns false when --overwrite-ratings is active so tags are always rewritten.
-func (r *MovieRatingResolver) IsTagsApplied(filePath string, rating NZRating) bool {
-	if r.overwrite || r.cache == nil {
-		return false
-	}
-	return r.cache.IsApplied(filePath, rating)
-}
-
-// MarkTagsApplied records that filePath has had its rating tags successfully written.
-func (r *MovieRatingResolver) MarkTagsApplied(filePath string, rating NZRating) {
-	if r.cache != nil {
-		r.cache.MarkApplied(filePath, rating)
-	}
-}
-
-// processFile reads the mediainfo date for filePath, compares it to the
-// current MKV header and filesystem timestamps, and updates whatever differs.
-// If rr is non-nil the NZ rating is also resolved and written as a tag.
-// Returns the processing outcome.
-func processFile(filePath string, mi MediaInfoReader, syncer MKVSyncer, timer FileTimer, rr *MovieRatingResolver) FileResult {
+// processFile looks up the movie on TMDB by filename, fetches full metadata,
+// and applies it to the MKV file (title, date header, tags, poster, timestamps).
+func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache) FileResult {
 	basename := filepath.Base(filePath)
 
-	bestDate, headerDate, miTitle, err := mi.Query(filePath)
-	if err != nil {
-		fmt.Printf("[ERR]     %s: mediainfo: %v\n", basename, err)
-		return ResultError
-	}
-	if bestDate == "" {
-		fmt.Printf("[SKIP]    %s (no date found in metadata)\n", basename)
+	// 1. Derive title and year from filename.
+	year := extractYear(basename)
+	title := titleFromFilename(basename, year)
+	if title == "" {
+		fmt.Printf("[SKIP]    %s (cannot derive title from filename)\n", basename)
 		return ResultSkipped
 	}
 
-	dt, err := parseDate(bestDate)
+	// 2. Resolve TMDB ID — cached or searched.
+	cacheKey := title + ":" + year
+	tmdbID := cache.GetTMDBID(cacheKey)
+	var details MovieDetails
+	var err error
+	if tmdbID == "" {
+		tmdbID, details, err = tmdb.SearchAndFetch(title, year)
+		if err != nil {
+			fmt.Printf("[ERR]     %s: TMDB search: %v\n", basename, err)
+			return ResultError
+		}
+		if tmdbID == "" {
+			fmt.Printf("[SKIP]    %s (not found on TMDB)\n", basename)
+			return ResultSkipped
+		}
+		cache.SetTMDBID(cacheKey, tmdbID)
+		// Migrate any existing title:YEAR rating to the numeric TMDB ID key.
+		if r, ok := cache.Get(cacheKey); ok && r != RatingNone {
+			if _, ok2 := cache.Get(tmdbID); !ok2 {
+				cache.Set(tmdbID, r)
+			}
+		}
+	} else {
+		details, err = tmdb.GetMovieDetails(tmdbID)
+		if err != nil {
+			fmt.Printf("[ERR]     %s: TMDB details: %v\n", basename, err)
+			return ResultError
+		}
+	}
+
+	// 3. Parse release date.
+	if details.ReleaseDate == "" {
+		fmt.Printf("[SKIP]    %s (no release date on TMDB)\n", basename)
+		return ResultSkipped
+	}
+	dt, err := parseDate(details.ReleaseDate)
 	if err != nil {
-		fmt.Printf("[ERR]     %s: parse date %q: %v\n", basename, bestDate, err)
+		fmt.Printf("[ERR]     %s: parse date %q: %v\n", basename, details.ReleaseDate, err)
 		return ResultError
 	}
 	ts := dt.Unix()
 
-	headerNeedsUpdate := bestDate != headerDate
-
+	// 4. Check what needs doing.
 	info, err := os.Stat(filePath)
 	if err != nil {
 		fmt.Printf("[ERR]     %s: stat: %v\n", basename, err)
@@ -236,53 +281,65 @@ func processFile(filePath string, mi MediaInfoReader, syncer MKVSyncer, timer Fi
 	}
 	mtimeNeedsUpdate := math.Abs(float64(info.ModTime().Unix()-ts)) > 1
 	ctimeNeedsUpdate := timer.CreationTimeNeedsUpdate(filePath, ts)
+	needsApply := !cache.IsMetaApplied(filePath, tmdbID) || (rr != nil && rr.overwrite)
 
-	// Resolve NZ rating if a resolver is configured.
+	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate {
+		fmt.Printf("[OK]      %s (no changes needed)\n", basename)
+		return ResultOK
+	}
+
+	// 5. Resolve NZ rating.
 	var rating NZRating
-	var tagsPath string
 	if rr != nil {
-		year := bestDate
-		if len(year) > 4 {
-			year = year[:4]
-		}
-		title := miTitle
-		if title == "" {
-			title = titleFromFilename(basename, year)
-		}
-		// Use "title:YEAR" as the cache key (TMDB source may upgrade to numeric ID).
-		cacheKey := title + ":" + year
-		rating = rr.ResolveMovieRating(cacheKey, title)
-		if rating != RatingNone && !rr.IsTagsApplied(filePath, rating) {
-			tagsPath, err = writeTempTagsXML(rating)
+		rating = rr.ResolveMovieRating(tmdbID, details.Title)
+	}
+
+	// 6. Build tags XML and download poster (only when applying metadata).
+	var tagsPath, posterPath string
+	if needsApply && applier != nil {
+		xml := buildMovieTagXML(details.Title, details.Overview, tmdbID, details.ReleaseDate, rating)
+		if xml != "" {
+			tagsPath, err = writeTempTagFile(xml)
 			if err != nil {
 				fmt.Printf("[ERR]     %s: write tags: %v\n", basename, err)
 			}
 		}
+		if url := details.PosterURL(); url != "" {
+			posterPath = downloadPoster(url)
+		}
 	}
 
-	// Run mkvpropedit once for both date and tags (avoids double mtime churn).
+	// 7. Apply metadata via mkvpropedit.
 	mkvRan := false
-	if (headerNeedsUpdate || tagsPath != "") && syncer != nil {
-		dateArg := ""
-		if headerNeedsUpdate {
-			dateArg = bestDate
-		}
-		if err := syncer.SyncHeader(filePath, dateArg, tagsPath); err != nil {
-			fmt.Printf("[ERR]     %s: sync header: %v\n", basename, err)
+	if needsApply && applier != nil {
+		if err := applier.Apply(filePath, details.Title, details.ReleaseDate, tagsPath, posterPath); err != nil {
+			fmt.Printf("[ERR]     %s: apply metadata: %v\n", basename, err)
 		} else {
 			mkvRan = true
-			if rr != nil && rating != RatingNone && tagsPath != "" {
-				rr.MarkTagsApplied(filePath, rating)
+			cache.MarkMetaApplied(filePath, tmdbID)
+			// Push rating to Plex if configured.
+			if rr != nil && rr.plex != nil && rating != RatingNone {
+				rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
+				if plexErr != nil {
+					rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
+				}
+				if plexErr == nil {
+					if err := rr.plex.SetContentRating(rk, rating); err != nil {
+						fmt.Printf("  [!] Plex rating update failed: %v\n", err)
+					}
+				}
 			}
 		}
 	}
+
 	if tagsPath != "" {
 		os.Remove(tagsPath)
 	}
+	if posterPath != "" {
+		os.Remove(posterPath)
+	}
 
-	// ALWAYS restore timestamps after any mkvpropedit call — it updates mtime as
-	// a side effect. This also fixes a pre-existing bug: if the header needed an
-	// update but mtime was already correct, mtime would get silently corrupted.
+	// 8. Restore timestamps — mkvpropedit updates mtime as a side effect.
 	if mkvRan || mtimeNeedsUpdate {
 		if err := timer.SetTimes(filePath, dt); err != nil {
 			fmt.Printf("[ERR]     %s: set mtime: %v\n", basename, err)
@@ -294,39 +351,102 @@ func processFile(filePath string, mi MediaInfoReader, syncer MKVSyncer, timer Fi
 		}
 	}
 
-	if headerNeedsUpdate || mtimeNeedsUpdate || ctimeNeedsUpdate || tagsPath != "" {
-		fmt.Printf("[UPDATED] %s -> %s", basename, bestDate)
-		if rating != RatingNone {
-			fmt.Printf(" (rating: %s)", rating)
-		}
-		fmt.Println()
-		return ResultUpdated
+	fmt.Printf("[UPDATED] %s -> %s", basename, details.ReleaseDate)
+	if rating != RatingNone {
+		fmt.Printf(" (rating: %s)", rating)
 	}
-	fmt.Printf("[OK]      %s (no changes needed)\n", basename)
-	return ResultOK
+	fmt.Println()
+	return ResultUpdated
 }
 
-// writeTempTagsXML writes a Matroska tags XML file for the given NZ rating and
-// returns its path. The caller is responsible for deleting the file.
-func writeTempTagsXML(rating NZRating) (string, error) {
+// buildMovieTagXML constructs the Matroska tags XML for the given movie metadata.
+// Returns an empty string when there is nothing to tag.
+func buildMovieTagXML(title, overview, tmdbID, dateStr string, rating NZRating) string {
+	var elements []string
+
+	if dateStr != "" {
+		datePart := dateStr
+		if len(datePart) > 10 {
+			datePart = datePart[:10]
+		}
+		yearPart := datePart[:4]
+		elements = append(elements,
+			fmt.Sprintf("<Simple><Name>DATE</Name><String>%s</String></Simple>", datePart),
+			fmt.Sprintf("<Simple><Name>YEAR</Name><String>%s</String></Simple>", yearPart),
+		)
+	}
+	if overview != "" {
+		elements = append(elements,
+			fmt.Sprintf("<Simple><Name>SUMMARY</Name><String>%s</String></Simple>", xmlEscape(overview)),
+		)
+	}
+	if tmdbID != "" {
+		elements = append(elements,
+			fmt.Sprintf("<Simple><Name>TMDB_ID</Name><String>%s</String></Simple>", tmdbID),
+		)
+	}
+	if rating != RatingNone {
+		elements = append(elements, fmt.Sprintf(
+			"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
+				"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>",
+			rating))
+	}
+
+	if len(elements) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>%s</Tag></Tags>",
+		strings.Join(elements, ""),
+	)
+}
+
+// writeTempTagFile writes an XML string to a temp file and returns its path.
+// The caller is responsible for deleting the file.
+func writeTempTagFile(xml string) (string, error) {
 	f, err := os.CreateTemp("", "mkv-movie-tags-*.xml")
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	// COUNTRY is a nesting tag; LAW_RATING must be nested inside it.
-	xml := fmt.Sprintf(
-		"<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>"+
-			"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
-			"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>"+
-			"</Tag></Tags>",
-		rating,
-	)
 	if _, err := f.WriteString(xml); err != nil {
 		os.Remove(f.Name())
 		return "", err
 	}
 	return f.Name(), nil
+}
+
+// downloadPoster fetches a poster image to a temp file and returns its path.
+// Returns "" on any failure.
+func downloadPoster(posterURL string) string {
+	resp, err := http.Get(posterURL)
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return ""
+	}
+	defer resp.Body.Close()
+
+	f, err := os.CreateTemp("", "mkv-movie-poster-*.jpg")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		os.Remove(f.Name())
+		return ""
+	}
+	return f.Name()
+}
+
+// xmlEscape replaces XML special characters so they are safe inside tag values.
+func xmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	return s
 }
 
 // parseDate parses a date string that is either "YYYY" or "YYYY-MM-DD".
@@ -345,8 +465,18 @@ func parseDate(s string) (time.Time, error) {
 	return time.ParseInLocation("2006-01-02", s, time.Local)
 }
 
+// extractYear returns the first 4-digit year found in filename (1900–2099),
+// or "" if none.
+func extractYear(filename string) string {
+	m := yearRe.FindStringSubmatch(" " + filename + " ")
+	if m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // walkAndProcess walks root for .mkv files and processes each one.
-func walkAndProcess(root string, mi MediaInfoReader, syncer MKVSyncer, timer FileTimer, rr *MovieRatingResolver) Stats {
+func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache) Stats {
 	var stats Stats
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -355,7 +485,7 @@ func walkAndProcess(root string, mi MediaInfoReader, syncer MKVSyncer, timer Fil
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
 			return nil
 		}
-		switch processFile(path, mi, syncer, timer, rr) {
+		switch processFile(path, tmdb, applier, timer, rr, cache) {
 		case ResultUpdated:
 			stats.Updated++
 		case ResultOK:
@@ -368,8 +498,8 @@ func walkAndProcess(root string, mi MediaInfoReader, syncer MKVSyncer, timer Fil
 		fmt.Println()
 		return nil
 	})
-	if rr != nil && rr.cache != nil {
-		if err := rr.cache.Save(); err != nil {
+	if cache != nil {
+		if err := cache.Save(); err != nil {
 			fmt.Printf("[!] Failed to save rating cache: %v\n", err)
 		}
 	}

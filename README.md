@@ -7,7 +7,7 @@ A collection of Go command-line utilities for managing MKV media files and softw
 | Tool | Purpose |
 |------|---------|
 | [mkv-audit](#mkv-audit) | Normalize MKV track language codes and default/forced flags |
-| [mkv-movie](#mkv-movie) | Sync MKV date headers and file timestamps from mediainfo |
+| [mkv-movie](#mkv-movie) | Tag movie MKVs with full metadata from TMDB and sync timestamps |
 | [mkv-musicvideo](#mkv-musicvideo) | Fuzzy-match video files to audio files for renaming |
 | [mkv-tvshow](#mkv-tvshow) | Tag TV episode MKVs with metadata from TMDB |
 | [sw-update](#sw-update) | Track and install software updates from GitHub releases or web pages |
@@ -16,8 +16,7 @@ A collection of Go command-line utilities for managing MKV media files and softw
 
 - Go 1.22+
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
-- [MediaInfo](https://mediaarea.net/en/MediaInfo) — required by mkv-movie
-- TMDB API key — required by mkv-tvshow
+- TMDB API key — required by mkv-movie, mkv-tvshow
 
 ## Building
 
@@ -126,18 +125,26 @@ Stored per-library in `%APPDATA%\mkv-audit\<library-name>\`:
 
 ## mkv-movie
 
-Syncs each MKV file's filesystem timestamps and internal header date to the
-date recorded in its own metadata tags.
+Fetches full movie metadata from TMDB by filename and writes it to each MKV
+file: title, release date, plot summary, TMDB ID, poster attachment, and NZ
+content rating. Sets filesystem timestamps to the TMDB release date.
 
-**Date priority:** `DATE` tag → `YEAR` tag → `Encoded_Date` header
+Movie identity is derived from the filename (title + year) and resolved via
+TMDB search on first run, then cached.
 
 ### Usage
 
-Run from the directory containing your MKV files:
+Set `TMDB_API_KEY` and run from the directory containing your MKV files:
 
 ```sh
-mkv-movie
+TMDB_API_KEY=your_key mkv-movie
 ```
+
+Flags:
+
+| Flag | Description |
+|------|-------------|
+| `-overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values |
 
 Output:
 
@@ -147,16 +154,19 @@ Updated: 8  OK: 42  Skipped: 3  Errors: 0
 
 ### Dependencies
 
-- `mediainfo` — reads date tags (required)
-- `mkvpropedit` — updates internal header date (optional; a warning is shown if missing)
+- `TMDB_API_KEY` — TMDB v3 API key (required)
+- `mkvpropedit` — writes metadata to MKV files (optional; a warning is shown if missing)
+- `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` is available.
 
 ### Configuration
 
-The rating cache is stored in `%APPDATA%\mkv-movie\movie_rating_cache.json`
+The cache is stored in `%APPDATA%\mkv-movie\movie_rating_cache.json`
 (Windows) or `$XDG_CONFIG_HOME/mkv-movie/movie_rating_cache.json` (Linux/macOS).
+It persists TMDB IDs (keyed by `title:YEAR`), NZ ratings, and which files have
+already had their full metadata written.
 
 ---
 

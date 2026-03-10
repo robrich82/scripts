@@ -143,6 +143,104 @@ func TestTitleFromFilename(t *testing.T) {
 	}
 }
 
+func tmdbMovieDetailJSON(title, overview, releaseDate, posterPath string) string {
+	b, _ := json.Marshal(map[string]interface{}{
+		"title":        title,
+		"overview":     overview,
+		"release_date": releaseDate,
+		"poster_path":  posterPath,
+	})
+	return string(b)
+}
+
+func TestTMDBMovieSource_GetMovieDetails_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(tmdbMovieDetailJSON("Avengers Endgame", "Heroes assemble.", "2019-04-26", "/poster.jpg")))
+	}))
+	defer srv.Close()
+
+	src := &tmdbMovieSource{apiKey: "key", httpClient: &http.Client{
+		Transport: &redirectTransport{target: srv.URL},
+	}}
+	details, err := src.GetMovieDetails("12345")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if details.Title != "Avengers Endgame" {
+		t.Errorf("Title = %q, want %q", details.Title, "Avengers Endgame")
+	}
+	if details.ReleaseDate != "2019-04-26" {
+		t.Errorf("ReleaseDate = %q, want %q", details.ReleaseDate, "2019-04-26")
+	}
+	if details.PosterURL() != tmdbImageBase+"/poster.jpg" {
+		t.Errorf("PosterURL = %q", details.PosterURL())
+	}
+	if details.TMDBID != "12345" {
+		t.Errorf("TMDBID = %q, want 12345", details.TMDBID)
+	}
+}
+
+func TestTMDBMovieSource_SearchAndFetch_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/search/movie") {
+			w.Write([]byte(tmdbSearchJSON(12345, "2019-04-26")))
+		} else {
+			w.Write([]byte(tmdbMovieDetailJSON("Avengers Endgame", "Heroes assemble.", "2019-04-26", "/poster.jpg")))
+		}
+	}))
+	defer srv.Close()
+
+	src := &tmdbMovieSource{apiKey: "key", httpClient: &http.Client{
+		Transport: &redirectTransport{target: srv.URL},
+	}}
+	id, details, err := src.SearchAndFetch("Avengers Endgame", "2019")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "12345" {
+		t.Errorf("id = %q, want 12345", id)
+	}
+	if details.Title != "Avengers Endgame" {
+		t.Errorf("Title = %q", details.Title)
+	}
+	if details.ReleaseDate != "2019-04-26" {
+		t.Errorf("ReleaseDate = %q", details.ReleaseDate)
+	}
+}
+
+func TestTMDBMovieSource_SearchAndFetch_NoMatch_ReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Empty results list.
+		w.Write([]byte(`{"results":[]}`))
+	}))
+	defer srv.Close()
+
+	src := &tmdbMovieSource{apiKey: "key", httpClient: &http.Client{
+		Transport: &redirectTransport{target: srv.URL},
+	}}
+	id, details, err := src.SearchAndFetch("Unknown Movie", "2099")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "" || details.Title != "" {
+		t.Errorf("expected empty result, got id=%q details=%+v", id, details)
+	}
+}
+
+func TestTMDBMovieSource_SearchAndFetch_NoAPIKey_ReturnsEmpty(t *testing.T) {
+	src := newTMDBMovieSource("")
+	id, details, err := src.SearchAndFetch("Some Movie", "2020")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "" || details.Title != "" {
+		t.Errorf("expected empty result with no API key, got id=%q details=%+v", id, details)
+	}
+}
+
 // redirectTransport rewrites all requests to target (for httptest servers).
 type redirectTransport struct {
 	target string

@@ -16,8 +16,10 @@ type MovieRatingCache struct {
 }
 
 type movieRatingCacheData struct {
-	Movies  map[string]string `json:"movies"`
-	Applied map[string]string `json:"applied,omitempty"` // absFilePath → rating already written
+	Movies      map[string]string `json:"movies"`
+	Applied     map[string]string `json:"applied,omitempty"`      // absFilePath → rating already written
+	TMDBIDs     map[string]string `json:"tmdb_ids,omitempty"`     // "title:YEAR" → tmdbID
+	MetaApplied map[string]string `json:"meta_applied,omitempty"` // absFilePath → tmdbID (full metadata written)
 }
 
 // LoadMovieRatingCache loads the cache from path. If the file does not exist an
@@ -26,8 +28,10 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	c := &MovieRatingCache{
 		path: path,
 		data: movieRatingCacheData{
-			Movies:  make(map[string]string),
-			Applied: make(map[string]string),
+			Movies:      make(map[string]string),
+			Applied:     make(map[string]string),
+			TMDBIDs:     make(map[string]string),
+			MetaApplied: make(map[string]string),
 		},
 	}
 	b, err := os.ReadFile(path)
@@ -45,6 +49,12 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	}
 	if c.data.Applied == nil {
 		c.data.Applied = make(map[string]string)
+	}
+	if c.data.TMDBIDs == nil {
+		c.data.TMDBIDs = make(map[string]string)
+	}
+	if c.data.MetaApplied == nil {
+		c.data.MetaApplied = make(map[string]string)
 	}
 	return c, nil
 }
@@ -71,6 +81,27 @@ func (c *MovieRatingCache) Get(key string) (NZRating, bool) {
 // Set stores a rating for key.
 func (c *MovieRatingCache) Set(key string, r NZRating) {
 	c.data.Movies[key] = string(r)
+}
+
+// GetTMDBID returns the cached TMDB ID for the given "title:YEAR" key, or "".
+func (c *MovieRatingCache) GetTMDBID(key string) string {
+	return c.data.TMDBIDs[key]
+}
+
+// SetTMDBID stores a TMDB ID for the given "title:YEAR" key.
+func (c *MovieRatingCache) SetTMDBID(key, id string) {
+	c.data.TMDBIDs[key] = id
+}
+
+// IsMetaApplied returns true if the file at filePath already has full metadata
+// from the given TMDB ID written to it.
+func (c *MovieRatingCache) IsMetaApplied(filePath, tmdbID string) bool {
+	return c.data.MetaApplied[filePath] == tmdbID && tmdbID != ""
+}
+
+// MarkMetaApplied records that filePath has had its full metadata written from tmdbID.
+func (c *MovieRatingCache) MarkMetaApplied(filePath, tmdbID string) {
+	c.data.MetaApplied[filePath] = tmdbID
 }
 
 // Save writes the cache to disk.

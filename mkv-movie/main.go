@@ -11,17 +11,18 @@ func main() {
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
 	flag.Parse()
 
-	mi, err := newRealMediaInfoReader()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: 'mediainfo' CLI not found. Please install it and add to PATH.")
+	tmdbKey := os.Getenv("TMDB_API_KEY")
+	if tmdbKey == "" {
+		fmt.Fprintln(os.Stderr, "Error: TMDB_API_KEY environment variable is not set.")
 		os.Exit(1)
 	}
+	tmdb := newTMDBMovieSource(tmdbKey)
 
-	syncer, err := newRealMKVSyncer()
+	applier, err := newRealMKVApplier()
 	if err != nil {
-		// mkvpropedit is optional — header sync will be skipped.
-		fmt.Fprintln(os.Stderr, "Warning: 'mkvpropedit' not found. Internal header will not be updated.")
-		syncer = nil
+		// mkvpropedit is optional — metadata will not be written.
+		fmt.Fprintln(os.Stderr, "Warning: 'mkvpropedit' not found. MKV metadata will not be updated.")
+		applier = nil
 	}
 
 	dir, err := os.Getwd()
@@ -42,15 +43,13 @@ func main() {
 
 	timer := &win32FileTimer{}
 
-	// Rating pipeline (all optional).
-	tmdbKey := os.Getenv("TMDB_API_KEY")
 	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
 
-	ratingCache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
+	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not load rating cache: %v\n", err)
-		ratingCache, _ = LoadMovieRatingCache("/dev/null") // empty fallback
+		cache, _ = LoadMovieRatingCache("/dev/null") // empty fallback
 	}
 
 	var plex PlexMovieClient
@@ -59,10 +58,13 @@ func main() {
 	}
 
 	sources := []RatingSource{
-		newTMDBMovieSource(tmdbKey),
+		tmdb,
 		newClassificationSource(),
 	}
-	rr := newMovieRatingResolver(sources, ratingCache, *overwriteRatings, plex, stdinPrompter)
+	rr := newMovieRatingResolver(sources, cache, *overwriteRatings, plex, stdinPrompter)
+
+	fmt.Printf("Scanning %s...\n", dir)
+	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache)
 
 	if plex != nil {
 		if err := plex.RefreshLibraries(); err != nil {
@@ -71,9 +73,6 @@ func main() {
 			fmt.Println("Plex libraries refreshed.")
 		}
 	}
-
-	fmt.Printf("Scanning %s...\n", dir)
-	stats := walkAndProcess(dir, mi, syncer, timer, rr)
 
 	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Errors: %d\n",
 		stats.Updated, stats.OK, stats.Skipped, stats.Errors)
