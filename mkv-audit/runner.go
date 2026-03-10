@@ -82,11 +82,18 @@ func saveFailedCache(stateDir string, paths []string) {
 // in filesToScan. Results are keyed by the content-root directory name
 // (first path component relative to libraryRoot). TMDB calls are sequential to
 // respect rate limits. Entries that produce no match are absent from the map.
+//
+// Before doing a title-search, fetchOrigins checks the sibling tool caches
+// (mkv-tvshow's show_cache.json / mkv-movie's rating_cache.json) for a
+// previously resolved TMDB ID and uses the direct /tv/{id} or /movie/{id}
+// endpoint when one is found, avoiding a redundant search call.
 func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOriginClient) map[string]OriginInfo {
 	origins := make(map[string]OriginInfo)
 	if tmdb == nil || libraryRoot == "" || (libType != "tv" && libType != "movie") {
 		return origins
 	}
+
+	sibling := loadSiblingCaches()
 
 	seen := map[string]bool{}
 	for _, path := range filesToScan {
@@ -104,11 +111,20 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		var info OriginInfo
 		var found bool
 		var err error
+
 		switch libType {
 		case "tv":
-			info, found, err = tmdb.GetTVOrigin(title, year)
+			if id := sibling.lookupTV(dir); id != "" {
+				info, found, err = tmdb.GetTVOriginByID(id)
+			} else {
+				info, found, err = tmdb.GetTVOrigin(title, year)
+			}
 		case "movie":
-			info, found, err = tmdb.GetMovieOrigin(title, year)
+			if id := sibling.lookupMovie(title, year); id != "" {
+				info, found, err = tmdb.GetMovieOriginByID(id)
+			} else {
+				info, found, err = tmdb.GetMovieOrigin(title, year)
+			}
 		}
 		if err != nil {
 			fmt.Printf("[TMDB]   %s: %v\n", dir, err)

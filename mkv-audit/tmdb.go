@@ -41,6 +41,11 @@ type TMDBOriginClient interface {
 	GetTVOrigin(title, year string) (OriginInfo, bool, error)
 	// GetMovieOrigin does the same for movies.
 	GetMovieOrigin(title, year string) (OriginInfo, bool, error)
+	// GetTVOriginByID fetches origin info directly via a known TMDB show ID,
+	// skipping the search step.
+	GetTVOriginByID(id string) (OriginInfo, bool, error)
+	// GetMovieOriginByID fetches origin info directly via a known TMDB movie ID.
+	GetMovieOriginByID(id string) (OriginInfo, bool, error)
 }
 
 // httpTMDBOriginClient is the production TMDBOriginClient.
@@ -112,10 +117,38 @@ func (c *httpTMDBOriginClient) GetMovieOrigin(title, year string) (OriginInfo, b
 		return OriginInfo{}, false, nil
 	}
 	hit := searchResult.Results[0]
+	return c.GetMovieOriginByID(fmt.Sprintf("%d", hit.ID))
+}
 
-	// Fetch movie details to get production_countries.
-	detURL := fmt.Sprintf("%s/movie/%d?api_key=%s",
-		tmdbOriginBase, hit.ID, url.QueryEscape(c.apiKey))
+// GetTVOriginByID fetches origin data from /tv/{id} using a known TMDB show ID.
+func (c *httpTMDBOriginClient) GetTVOriginByID(id string) (OriginInfo, bool, error) {
+	detURL := fmt.Sprintf("%s/tv/%s?api_key=%s", tmdbOriginBase, id, url.QueryEscape(c.apiKey))
+	resp, err := c.client.Get(detURL)
+	if err != nil {
+		return OriginInfo{}, false, err
+	}
+	defer resp.Body.Close()
+
+	var det struct {
+		OriginalLanguage string   `json:"original_language"`
+		OriginCountry    []string `json:"origin_country"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&det); err != nil {
+		return OriginInfo{}, false, fmt.Errorf("decode TV details: %w", err)
+	}
+	if det.OriginalLanguage == "" {
+		return OriginInfo{}, false, nil
+	}
+	country := ""
+	if len(det.OriginCountry) > 0 {
+		country = det.OriginCountry[0]
+	}
+	return OriginInfo{OrigLang: det.OriginalLanguage, OriginCountry: country}, true, nil
+}
+
+// GetMovieOriginByID fetches origin data from /movie/{id} using a known TMDB movie ID.
+func (c *httpTMDBOriginClient) GetMovieOriginByID(id string) (OriginInfo, bool, error) {
+	detURL := fmt.Sprintf("%s/movie/%s?api_key=%s", tmdbOriginBase, id, url.QueryEscape(c.apiKey))
 	detResp, err := c.client.Get(detURL)
 	if err != nil {
 		return OriginInfo{}, false, err
@@ -123,6 +156,7 @@ func (c *httpTMDBOriginClient) GetMovieOrigin(title, year string) (OriginInfo, b
 	defer detResp.Body.Close()
 
 	var det struct {
+		OriginalLanguage    string `json:"original_language"`
 		ProductionCountries []struct {
 			ISO31661 string `json:"iso_3166_1"`
 		} `json:"production_countries"`
@@ -130,11 +164,14 @@ func (c *httpTMDBOriginClient) GetMovieOrigin(title, year string) (OriginInfo, b
 	if err := json.NewDecoder(detResp.Body).Decode(&det); err != nil {
 		return OriginInfo{}, false, fmt.Errorf("decode movie details: %w", err)
 	}
+	if det.OriginalLanguage == "" {
+		return OriginInfo{}, false, nil
+	}
 	country := ""
 	if len(det.ProductionCountries) > 0 {
 		country = det.ProductionCountries[0].ISO31661
 	}
-	return OriginInfo{OrigLang: hit.OriginalLanguage, OriginCountry: country}, true, nil
+	return OriginInfo{OrigLang: det.OriginalLanguage, OriginCountry: country}, true, nil
 }
 
 // dirYearRe matches a " (YYYY)" suffix at the end of a directory name.
