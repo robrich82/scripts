@@ -297,7 +297,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	// 6. Build tags XML and download poster (only when applying metadata).
 	var tagsPath, posterPath string
 	if needsApply && applier != nil {
-		xml := buildMovieTagXML(details.Title, details.Overview, tmdbID, details.ReleaseDate, rating)
+		xml := buildMovieTagXML(details.Overview, tmdbID, details.ReleaseDate, rating)
 		if xml != "" {
 			tagsPath, err = writeTempTagFile(xml)
 			if err != nil {
@@ -361,7 +361,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 
 // buildMovieTagXML constructs the Matroska tags XML for the given movie metadata.
 // Returns an empty string when there is nothing to tag.
-func buildMovieTagXML(title, overview, tmdbID, dateStr string, rating NZRating) string {
+func buildMovieTagXML(overview, tmdbID, dateStr string, rating NZRating) string {
 	var elements []string
 
 	if dateStr != "" {
