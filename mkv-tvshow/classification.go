@@ -75,7 +75,7 @@ func (c *classificationSource) scrapeResults(showName string) ([]classificationR
 	}
 	defer resp.Body.Close()
 
-	return parseClassificationHTML(resp.Body)
+	return parseClassificationHTML(resp.Body), nil
 }
 
 // parseClassificationHTML walks the HTML token stream looking for text nodes
@@ -87,7 +87,7 @@ func (c *classificationSource) scrapeResults(showName string) ([]classificationR
 // can change, we use a heuristic: any text-node value that ParseNZRating
 // accepts is treated as a rating; the most recent non-empty, non-rating text
 // sibling (or near-sibling) is treated as the title.
-func parseClassificationHTML(r io.Reader) ([]classificationResult, error) {
+func parseClassificationHTML(r io.Reader) []classificationResult {
 	tokenizer := html.NewTokenizer(r)
 
 	var results []classificationResult
@@ -98,7 +98,7 @@ func parseClassificationHTML(r io.Reader) ([]classificationResult, error) {
 		switch tt {
 		case html.ErrorToken:
 			// End of document or read error — return whatever we have.
-			return results, nil
+			return results
 
 		case html.TextToken:
 			text := strings.TrimSpace(string(tokenizer.Text()))

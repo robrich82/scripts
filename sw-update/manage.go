@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func cmdAdd(args []string) error {
+func cmdAdd(_ []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	prompt := func(msg string) string {

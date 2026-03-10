@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func cmdList(args []string) error {
+func cmdList(_ []string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)

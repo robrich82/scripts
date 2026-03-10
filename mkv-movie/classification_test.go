@@ -65,10 +65,7 @@ func TestParseClassificationHTML_ExtractsRatings(t *testing.T) {
 		<h3>Another Film</h3><span>PG</span>
 	</body></html>`)
 
-	results, err := parseClassificationHTML(body)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	results := parseClassificationHTML(body)
 	if len(results) != 2 {
 		t.Fatalf("got %d results; want 2", len(results))
 	}

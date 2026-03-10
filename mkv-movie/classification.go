@@ -68,13 +68,13 @@ func (c *classificationSource) scrapeResults(title string) ([]classificationResu
 	}
 	defer resp.Body.Close()
 
-	return parseClassificationHTML(resp.Body)
+	return parseClassificationHTML(resp.Body), nil
 }
 
 // parseClassificationHTML walks the HTML token stream looking for text nodes
 // that are valid NZ ratings, then associates each with the nearest preceding
 // title-like text within the same result block.
-func parseClassificationHTML(r io.Reader) ([]classificationResult, error) {
+func parseClassificationHTML(r io.Reader) []classificationResult {
 	tokenizer := html.NewTokenizer(r)
 
 	var results []classificationResult
@@ -84,7 +84,7 @@ func parseClassificationHTML(r io.Reader) ([]classificationResult, error) {
 		tt := tokenizer.Next()
 		switch tt {
 		case html.ErrorToken:
-			return results, nil
+			return results
 
 		case html.TextToken:
 			text := strings.TrimSpace(string(tokenizer.Text()))
