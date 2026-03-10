@@ -40,6 +40,7 @@ type GlobalConfig struct {
 //	}
 type Library struct {
 	Name      string        `json:"name"`
+	Type      string        `json:"type,omitempty"` // "tv" or "movie"; controls TMDB lookup strategy
 	Path      string        `json:"path"`
 	Overrides []DirOverride `json:"overrides,omitempty"`
 }
@@ -96,14 +97,28 @@ func detectLibrary(cwd string, cfg *GlobalConfig) *Library {
 	return best
 }
 
-// resolveIETFMap returns a copy of the global ietfMap with any applicable
-// Library overrides merged in. Overrides are applied in order; a later
-// (more deeply nested) match can refine an earlier one.
-func resolveIETFMap(filePath, root string, lib *Library) map[string]string {
+// resolveIETFMap returns a copy of the global ietfMap with TMDB-derived origin
+// info and any applicable Library overrides merged in, in that priority order:
+//
+//	global defaults < TMDB origin < manual library overrides
+//
+// origin is applied only for languages present in the global ietfMap, so
+// unknown languages are never affected. Manual overrides win over TMDB.
+func resolveIETFMap(filePath, root string, lib *Library, origin OriginInfo) map[string]string {
 	result := make(map[string]string, len(ietfMap))
 	for k, v := range ietfMap {
 		result[k] = v
 	}
+
+	// TMDB-derived layer: override the original language's IETF tag with the
+	// country-specific variant (e.g. "eng" → "en-CA" for a Canadian show).
+	if tag := origin.IETFTag(); tag != "" {
+		isoKey := origin.OrigLangISO()
+		if _, ok := ietfMap[isoKey]; ok { // only for languages we already map
+			result[isoKey] = tag
+		}
+	}
+
 	if lib == nil {
 		return result
 	}
@@ -128,4 +143,16 @@ func resolveIETFMap(filePath, root string, lib *Library) map[string]string {
 		}
 	}
 	return result
+}
+
+// contentRootDir returns the first path component of filePath relative to
+// libraryRoot. This is the per-show or per-movie directory name used as the
+// TMDB search key. Returns "" when filePath is not under libraryRoot.
+func contentRootDir(filePath, libraryRoot string) string {
+	rel, err := filepath.Rel(filepath.Clean(libraryRoot), filepath.Clean(filePath))
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	parts := strings.SplitN(filepath.ToSlash(rel), "/", 2)
+	return parts[0]
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -63,9 +64,19 @@ func main() {
 		stateDir = cfgDir
 	}
 
+	// Wire up TMDB client when an API key is available. The library type
+	// ("tv" or "movie") controls which TMDB search endpoint is used.
+	var tmdb TMDBOriginClient
+	if apiKey := strings.TrimSpace(os.Getenv("TMDB_API_KEY")); apiKey != "" {
+		if lib != nil && (lib.Type == "tv" || lib.Type == "movie") {
+			tmdb = newHTTPTMDBOriginClient(apiKey)
+			fmt.Printf("--- TMDB origin lookup: enabled (%s) ---\n", lib.Type)
+		}
+	}
+
 	fmt.Println("--- Running Library Architect ---")
 
-	stats := RunAll(dir, stateDir, lib, runner, runner, newStdinPrompter())
+	stats := RunAll(dir, stateDir, lib, runner, runner, newStdinPrompter(), tmdb)
 
 	fmt.Println()
 	fmt.Println("========================================")

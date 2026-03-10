@@ -16,7 +16,7 @@ A collection of Go command-line utilities for managing MKV media files and softw
 
 - Go 1.22+
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
-- TMDB API key — required by mkv-movie, mkv-tvshow
+- TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
 
 ## Building
 
@@ -49,8 +49,10 @@ make test
 Normalizes MKV/MKA track metadata in bulk:
 
 - Language codes to ISO 639-2/B (e.g. `fre`, `jpn`, `kor`)
-- IETF/BCP-47 language tags (e.g. `en-US`, `ja-JP`)
+- IETF/BCP-47 language tags (e.g. `en-US`, `ja-JP`), optionally derived from TMDB
 - Default and forced flags based on language and codec
+- `flag-hearing-impaired` on SDH/CC tracks; `flag-commentary` on commentary tracks
+- `flag-original` on tracks whose language matches the content's original language (requires TMDB)
 - Track ordering by codec quality (e.g. TrueHD before AC3)
 
 ### Usage
@@ -94,6 +96,7 @@ The tool auto-detects which library to use based on the current working director
   "libraries": [
     {
       "name": "TV",
+      "type": "tv",
       "path": "G:\\TV",
       "overrides": [
         {
@@ -103,16 +106,31 @@ The tool auto-detects which library to use based on the current working director
       ]
     },
     {
+      "name": "Movies",
+      "type": "movie",
+      "path": "G:\\Movies"
+    },
+    {
       "name": "Anime",
-      "path": "G:\\Anime",
-      "overrides": []
+      "path": "G:\\Anime"
     }
   ]
 }
 ```
 
+**`type`** (optional) — `"tv"` or `"movie"`. When set and `TMDB_API_KEY` is in the
+environment, mkv-audit looks up each show/movie on TMDB to determine its
+`original_language` and `origin_country`. This drives two things:
+
+1. The IETF tag for the original language is set to the country-specific variant
+   (e.g. a Canadian show with `original_language: "en"` and `origin_country: ["CA"]`
+   gets `eng → en-CA`).
+2. `flag-original=1` is set on all tracks whose language matches the original language.
+
+Manual `overrides` entries always take precedence over TMDB-derived values.
+
 Track names containing region keywords (e.g. `British`, `Australian`) also
-trigger automatic IETF overrides.
+trigger automatic IETF overrides and always win over TMDB.
 
 #### Auto-generated state files
 

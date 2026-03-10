@@ -64,6 +64,11 @@ func getIETFLanguage(iso string) string {
 type AnalyzeOptions struct {
 	// IETFMap overrides the global ietfMap for this file. nil = use global.
 	IETFMap map[string]string
+	// OriginLang is the ISO 639-2/B code of the content's original language
+	// as reported by TMDB (e.g. "eng", "jpn"). When set, flag-original is
+	// normalised on all tracks: 1 for tracks in that language, 0 for others.
+	// "" disables flag-original processing.
+	OriginLang string
 }
 
 // effectiveIETFTag resolves the IETF tag for an ISO 639-2 code using either
@@ -230,7 +235,29 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
-	// --- 3. Video language inheritance ---
+	// --- 3. flag-original normalisation ---
+	// Set flag-original=1 on tracks whose language matches the content's
+	// original language (as supplied by TMDB via opts.OriginLang), and
+	// flag-original=0 on any track that incorrectly carries the flag.
+	// Skipped when OriginLang is empty or "und".
+	if opts.OriginLang != "" && opts.OriginLang != "und" {
+		for i := range tracks {
+			props := &tracks[i].Properties
+			trackLang := normalizeLanguage(props.Language)
+			wantOriginal := trackLang == opts.OriginLang
+			if wantOriginal && !props.OriginalLanguage {
+				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-original", "1")...)
+				props.OriginalLanguage = true
+				res.LocalFixes.Flags++
+			} else if !wantOriginal && props.OriginalLanguage {
+				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-original", "0")...)
+				props.OriginalLanguage = false
+				res.LocalFixes.Flags++
+			}
+		}
+	}
+
+	// --- 4. Video language inheritance ---
 	var videoTracks, audioTracks []int
 	for i, t := range tracks {
 		switch t.Type {
@@ -268,7 +295,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
-	// --- 4. Flag & naming logic per target language ---
+	// --- 5. Flag & naming logic per target language ---
 	for _, lang := range targetLangs {
 		// Collect audio tracks for this language.
 		var langAudios []int

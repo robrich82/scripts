@@ -467,6 +467,89 @@ func TestAnalyzeFile_IETFMapOverride_EnGB(t *testing.T) {
 	}
 }
 
+// --- flag-original ---
+
+func TestAnalyzeFile_OriginalLang_SetsFlag(t *testing.T) {
+	// English audio in an English show should get flag-original=1.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 2, true),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{OriginLang: "eng"})
+	if !hasEdit(res.Edits, "flag-original=1") {
+		t.Errorf("English track should get flag-original=1; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_OriginalLang_NonOriginalCleared(t *testing.T) {
+	// An English dub in a Japanese anime should get flag-original=0 if it
+	// currently has flag-original=1 set incorrectly.
+	info := MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "audio", Properties: TrackProperties{
+			Language: "eng", CodecID: "A_AC3", AudioChannels: 2,
+			DefaultTrack: true, OriginalLanguage: true, // incorrectly set
+		}},
+		{ID: 1, Type: "audio", Properties: TrackProperties{
+			Language: "jpn", CodecID: "A_FLAC", AudioChannels: 2,
+			DefaultTrack: false, OriginalLanguage: false,
+		}},
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{OriginLang: "jpn"})
+	if !hasEdit(res.Edits, "flag-original=0") {
+		t.Errorf("English dub should lose flag-original; edits: %v", res.Edits)
+	}
+	if !hasEdit(res.Edits, "flag-original=1") {
+		t.Errorf("Japanese audio should gain flag-original=1; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_OriginalLang_AlreadyCorrect_Stable(t *testing.T) {
+	// When flag-original is already correctly set, no related edits generated.
+	info := MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "audio", Properties: TrackProperties{
+			Language: "jpn", LanguageIETF: "ja-JP", CodecID: "A_FLAC",
+			AudioChannels: 2, DefaultTrack: true, OriginalLanguage: true,
+		}},
+		{ID: 1, Type: "audio", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "A_AC3",
+			AudioChannels: 2, DefaultTrack: false, OriginalLanguage: false,
+		}},
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{OriginLang: "jpn"})
+	for _, e := range res.Edits {
+		if e == "flag-original=1" || e == "flag-original=0" {
+			t.Errorf("flag-original already correct; unexpected edit: %v", res.Edits)
+			break
+		}
+	}
+}
+
+func TestAnalyzeFile_OriginalLang_SubtitleMarked(t *testing.T) {
+	// Subtitle tracks in the original language should also get flag-original=1.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "jpn", "A_FLAC", 2, true),
+		subTrack(1, "jpn", "S_TEXT/ASS", "Japanese", true, false),
+		subTrack(2, "eng", "S_TEXT/ASS", "English", false, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{OriginLang: "jpn"})
+	if !hasEdit(res.Edits, "flag-original=1") {
+		t.Errorf("Japanese subtitle should get flag-original=1; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_NoOriginLang_NoOriginalFlags(t *testing.T) {
+	// When OriginLang is empty, flag-original should never be touched.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AC3", 2, true),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	for _, e := range res.Edits {
+		if e == "flag-original=1" || e == "flag-original=0" {
+			t.Errorf("flag-original should not be set when OriginLang is empty; edits: %v", res.Edits)
+			break
+		}
+	}
+}
+
 // --- Hearing-impaired and commentary flag detection ---
 
 func TestAnalyzeFile_SDHSubGetsHearingImpairedFlag(t *testing.T) {

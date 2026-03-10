@@ -78,10 +78,55 @@ func saveFailedCache(stateDir string, paths []string) {
 	os.WriteFile(filepath.Join(stateDir, failedCacheFile), data, 0644)
 }
 
+// fetchOrigins pre-computes OriginInfo for every unique content-root directory
+// in filesToScan. Results are keyed by the content-root directory name
+// (first path component relative to libraryRoot). TMDB calls are sequential to
+// respect rate limits. Entries that produce no match are absent from the map.
+func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOriginClient) map[string]OriginInfo {
+	origins := make(map[string]OriginInfo)
+	if tmdb == nil || libraryRoot == "" || (libType != "tv" && libType != "movie") {
+		return origins
+	}
+
+	seen := map[string]bool{}
+	for _, path := range filesToScan {
+		dir := contentRootDir(path, libraryRoot)
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+
+		title, year := dirTitleYear(dir)
+		if title == "" {
+			continue
+		}
+
+		var info OriginInfo
+		var found bool
+		var err error
+		switch libType {
+		case "tv":
+			info, found, err = tmdb.GetTVOrigin(title, year)
+		case "movie":
+			info, found, err = tmdb.GetMovieOrigin(title, year)
+		}
+		if err != nil {
+			fmt.Printf("[TMDB]   %s: %v\n", dir, err)
+			continue
+		}
+		if found {
+			origins[dir] = info
+		}
+	}
+	return origins
+}
+
 // RunAll scans root for MKV/MKA files and fixes each one.
 // stateDir is where failed_files.json and unknown_codecs.json are stored.
 // lib is the active library config (may be nil for no overrides).
-func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter) Stats {
+// tmdb is used to look up the original language per content-root directory;
+// pass nil to skip TMDB lookups (e.g. no API key configured).
+func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter, tmdb TMDBOriginClient) Stats {
 	var stats Stats
 	unknownCodecs := map[string]bool{}
 
@@ -108,6 +153,15 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 		})
 	}
 
+	// Pre-compute TMDB origin info sequentially before the concurrent phase.
+	libRoot := ""
+	libType := ""
+	if lib != nil {
+		libRoot = lib.Path
+		libType = lib.Type
+	}
+	origins := fetchOrigins(filesToScan, libRoot, libType, tmdb)
+
 	sem := make(chan struct{}, runtime.NumCPU())
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -124,13 +178,18 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			var local Stats
 			var localCodecs []string
 
+			// Resolve per-file IETF map and original language.
+			origin := origins[contentRootDir(p, libRoot)]
+			ietfMap := resolveIETFMap(p, root, lib, origin)
+			originLang := origin.OrigLangISO()
+
 			info, err := ident.Identify(p)
 			if err != nil {
 				fmt.Fprintf(&buf, "[ERR]    %s: %v\n", basename, err)
 				local.Failed++
 				local.FailedPaths = append(local.FailedPaths, p)
 			} else {
-				res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: resolveIETFMap(p, root, lib)})
+				res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: ietfMap, OriginLang: originLang})
 				localCodecs = append(localCodecs, res.UnknownCodecs...)
 				if res.Failed {
 					fmt.Fprintf(&buf, "[FAILED] %s: %s\n", basename, strings.Join(res.FailReasons, ", "))
