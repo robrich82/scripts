@@ -54,6 +54,7 @@ Normalizes MKV/MKA track metadata in bulk:
 - `flag-hearing-impaired` on SDH/CC tracks; `flag-commentary` on commentary tracks
 - `flag-original` on tracks whose language matches the content's original language (requires TMDB)
 - Track ordering by codec quality (e.g. TrueHD before AC3)
+- **Track trimming** (with prompt): removes audio tracks not in the original or English language, removes non-English subtitles, and reorders audio so original-language tracks come first
 
 ### Usage
 
@@ -71,14 +72,39 @@ Scanned: 120  Fixed: 14  Failed: 0  LangFixes: 9  FlagFixes: 8
 
 ### Dependencies
 
-- `mkvmerge` — reads track metadata
-- `mkvpropedit` — applies edits
+- `mkvmerge` — reads track metadata; also used for track trimming remux
+- `mkvpropedit` — applies property edits (language codes, flags)
 
 #### Flags
 
 | Flag | Description |
 |------|-------------|
 | `-library <name>` | Use a named library from config (overrides auto-detection) |
+| `-verbose` | Print planned mkvpropedit edits before applying |
+
+### Track trimming
+
+After applying property fixes, the tool identifies files where tracks should be
+removed or reordered. For each such file it prints what will change and prompts:
+
+```
+[TRIM]   Movie.mkv
+  Remove audio:  ger (A_AC3 6ch), fre (A_AC3 6ch)
+  Remove subs:   ger (S_TEXT/UTF8), fre (S_TEXT/UTF8)
+  Reorder audio: jpn (A_FLAC 6ch), eng (A_AC3 2ch)
+  Proceed? (y/n/a=all):
+```
+
+- **`y`** — remux this file
+- **`n`** — skip this file
+- **`a`** — remux this and all remaining files without further prompting
+
+Keep rules:
+- **Audio**: retain tracks in the original language and English; all others are removed. If the original language is unknown (no TMDB lookup), all audio is kept.
+- **Subtitles**: retain English and undetermined (`und`) tracks only.
+- **Audio order**: original-language tracks first, then English.
+
+Tracks with undetermined (`und`) language are always kept.
 
 ### Configuration
 
