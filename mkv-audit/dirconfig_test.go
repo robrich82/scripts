@@ -190,6 +190,23 @@ func TestDirTitleYear_FlatMovieFilename(t *testing.T) {
 	}
 }
 
+func TestDirTitleYear_FSSubstituteChars(t *testing.T) {
+	// Filesystem-safe substitute characters must be converted back for TMDB.
+	title, year := dirTitleYear("The Testament of Sister New Devil꞉ Departures (2018).mkv")
+	wantTitle := "The Testament of Sister New Devil: Departures"
+	if title != wantTitle || year != "2018" {
+		t.Errorf("got title=%q year=%q, want %q %q", title, year, wantTitle, "2018")
+	}
+}
+
+func TestDirTitleYear_FullwidthQuestionMark(t *testing.T) {
+	title, year := dirTitleYear("Is It Wrong to Try to Pick Up Girls in a Dungeon？꞉ Arrow of the Orion (2019).mkv")
+	wantTitle := "Is It Wrong to Try to Pick Up Girls in a Dungeon?: Arrow of the Orion"
+	if title != wantTitle || year != "2019" {
+		t.Errorf("got title=%q year=%q, want %q %q", title, year, wantTitle, "2019")
+	}
+}
+
 func TestResolveIETFMap_CaseInsensitive(t *testing.T) {
 	root := t.TempDir()
 	lib := &Library{

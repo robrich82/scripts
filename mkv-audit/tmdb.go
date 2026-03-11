@@ -177,14 +177,39 @@ func (c *httpTMDBOriginClient) GetMovieOriginByID(id string) (OriginInfo, bool, 
 // dirYearRe matches a " (YYYY)" suffix at the end of a directory name.
 var dirYearRe = regexp.MustCompile(`\s+\((\d{4})\)\s*$`)
 
+// fsCharReplacements maps filesystem-safe substitute characters (used by
+// mkv-tvshow / mkv-movie when naming files on Windows) back to their real
+// equivalents for use in TMDB search queries.
+var fsCharReplacements = []struct{ from, to string }{
+	{"꞉", ":"},  // U+A789 modifier letter colon → colon
+	{"？", "?"}, // U+FF1F fullwidth question mark → question mark
+	{"╱", "/"},  // U+2571 box drawings light diagonal → slash
+	{"│", "|"},  // U+2502 box drawings light vertical → pipe
+	{"＊", "*"}, // U+FF0A fullwidth asterisk → asterisk
+	{"＜", "<"}, // U+FF1C fullwidth less-than → less-than
+	{"＞", ">"}, // U+FF1E fullwidth greater-than → greater-than
+	{"''", `"`}, // two single quotes → double quote
+}
+
+// normalizeTitleChars converts filesystem-safe substitute characters in a
+// directory or filename back to the real punctuation expected by TMDB.
+func normalizeTitleChars(s string) string {
+	for _, r := range fsCharReplacements {
+		s = strings.ReplaceAll(s, r.from, r.to)
+	}
+	return s
+}
+
 // dirTitleYear parses a content-root directory name (e.g. "Show Name (2023)")
 // into a search title and year. Strips any file extension first so flat movie
-// filenames work too.
+// filenames work too. Filesystem-safe substitute characters (e.g. ꞉ for :)
+// are converted back to their real equivalents before returning.
 func dirTitleYear(dirName string) (title, year string) {
 	// Strip file extension if present (flat movie libraries use filenames as roots).
 	if idx := strings.LastIndex(dirName, "."); idx > 0 {
 		dirName = dirName[:idx]
 	}
+	dirName = normalizeTitleChars(dirName)
 	m := dirYearRe.FindStringSubmatchIndex(dirName)
 	if m == nil {
 		return strings.TrimSpace(dirName), ""
