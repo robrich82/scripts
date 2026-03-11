@@ -67,6 +67,8 @@ func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath st
 		args = append(args,
 			"--delete-attachment", "mime-type:image/jpeg",
 			"--delete-attachment", "mime-type:image/png",
+			"--attachment-name", "cover.jpg",
+			"--attachment-mime-type", "image/jpeg",
 			"--add-attachment", posterPath)
 	}
 	if len(args) == 1 {
