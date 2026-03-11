@@ -9,6 +9,7 @@ import (
 
 func main() {
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
+	force := flag.Bool("force", false, "Re-apply all metadata even if already cached.")
 	flag.Parse()
 
 	tmdbKey := os.Getenv("TMDB_API_KEY")
@@ -72,7 +73,7 @@ func main() {
 	}
 
 	fmt.Printf("Scanning %s...\n", dir)
-	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache)
+	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, *force)
 
 	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Errors: %d\n",
 		stats.Updated, stats.OK, stats.Skipped, stats.Errors)

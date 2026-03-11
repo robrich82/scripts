@@ -222,7 +222,7 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 
 // processFile looks up the movie on TMDB by filename, fetches full metadata,
 // and applies it to the MKV file (title, date header, tags, poster, timestamps).
-func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache) FileResult {
+func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, force bool) FileResult {
 	basename := filepath.Base(filePath)
 
 	// 1. Derive title and year from filename.
@@ -283,7 +283,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 	mtimeNeedsUpdate := math.Abs(float64(info.ModTime().Unix()-ts)) > 1
 	ctimeNeedsUpdate := timer.CreationTimeNeedsUpdate(filePath, ts)
-	needsApply := !cache.IsMetaApplied(filePath, tmdbID) || (rr != nil && rr.overwrite)
+	needsApply := !cache.IsMetaApplied(filePath, tmdbID) || (rr != nil && rr.overwrite) || force
 
 	// Determine whether the Plex rating needs updating independently of needsApply,
 	// so that a manually corrected cache entry is always pushed to Plex.
@@ -493,7 +493,7 @@ func extractYear(filename string) string {
 }
 
 // walkAndProcess walks root for .mkv files and processes each one.
-func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache) Stats {
+func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, force bool) Stats {
 	var stats Stats
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -502,7 +502,7 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
 			return nil
 		}
-		switch processFile(path, tmdb, applier, timer, rr, cache) {
+		switch processFile(path, tmdb, applier, timer, rr, cache, force) {
 		case ResultUpdated:
 			stats.Updated++
 		case ResultOK:
