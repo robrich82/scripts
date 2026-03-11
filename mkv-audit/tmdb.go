@@ -182,12 +182,12 @@ var dirYearRe = regexp.MustCompile(`\s+\((\d{4})\)\s*$`)
 // equivalents for use in TMDB search queries.
 var fsCharReplacements = []struct{ from, to string }{
 	{"꞉", ":"},  // U+A789 modifier letter colon → colon
-	{"？", "?"}, // U+FF1F fullwidth question mark → question mark
+	{"？", "?"},  // U+FF1F fullwidth question mark → question mark
 	{"╱", "/"},  // U+2571 box drawings light diagonal → slash
 	{"│", "|"},  // U+2502 box drawings light vertical → pipe
-	{"＊", "*"}, // U+FF0A fullwidth asterisk → asterisk
-	{"＜", "<"}, // U+FF1C fullwidth less-than → less-than
-	{"＞", ">"}, // U+FF1E fullwidth greater-than → greater-than
+	{"＊", "*"},  // U+FF0A fullwidth asterisk → asterisk
+	{"＜", "<"},  // U+FF1C fullwidth less-than → less-than
+	{"＞", ">"},  // U+FF1E fullwidth greater-than → greater-than
 	{"''", `"`}, // two single quotes → double quote
 }
 
