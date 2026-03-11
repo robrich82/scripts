@@ -61,6 +61,16 @@ func (r *realMKVRunner) Apply(filePath string, edits []string) error {
 	return exec.Command(r.mkvpropedit, args...).Run()
 }
 
+// loggingEditor wraps an MKVEditor and prints the planned edits before applying.
+type loggingEditor struct {
+	inner MKVEditor
+}
+
+func (l *loggingEditor) Apply(filePath string, edits []string) error {
+	fmt.Printf("  edits: mkvpropedit %q %s\n", filepath.Base(filePath), strings.Join(edits, " "))
+	return l.inner.Apply(filePath, edits)
+}
+
 // loadFailedCache reads a list of previously failed file paths from stateDir.
 func loadFailedCache(stateDir string) []string {
 	data, err := os.ReadFile(filepath.Join(stateDir, failedCacheFile))

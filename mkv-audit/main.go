@@ -10,6 +10,7 @@ import (
 
 func main() {
 	libraryFlag := flag.String("library", "", "library name to use (overrides auto-detection)")
+	verboseFlag := flag.Bool("verbose", false, "print planned mkvpropedit edits before applying")
 	flag.Parse()
 
 	runner, err := newRealMKVRunner()
@@ -76,7 +77,11 @@ func main() {
 
 	fmt.Println("--- Running Library Architect ---")
 
-	stats := RunAll(dir, stateDir, lib, runner, runner, newStdinPrompter(), tmdb)
+	var ed MKVEditor = runner
+	if *verboseFlag {
+		ed = &loggingEditor{inner: runner}
+	}
+	stats := RunAll(dir, stateDir, lib, runner, ed, newStdinPrompter(), tmdb)
 
 	fmt.Println()
 	fmt.Println("========================================")
