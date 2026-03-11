@@ -31,6 +31,7 @@ type Stats struct {
 	Scanned      int
 	Fixed        int
 	Failed       int
+	Trimmed      int
 	LangFixes    int
 	IETFFixes    int
 	VideoInherit int

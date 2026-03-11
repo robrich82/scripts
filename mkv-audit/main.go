@@ -81,7 +81,7 @@ func main() {
 	if *verboseFlag {
 		ed = &loggingEditor{inner: runner}
 	}
-	stats := RunAll(dir, stateDir, lib, runner, ed, newStdinPrompter(), tmdb)
+	stats := RunAll(dir, stateDir, lib, runner, ed, newStdinPrompter(), tmdb, runner)
 
 	fmt.Println()
 	fmt.Println("========================================")
@@ -89,6 +89,7 @@ func main() {
 	fmt.Println("========================================")
 	fmt.Printf("Total Scanned:          %d\n", stats.Scanned)
 	fmt.Printf("Total Fixed:            %d\n", stats.Fixed)
+	fmt.Printf("Total Trimmed:          %d\n", stats.Trimmed)
 	fmt.Printf("Total Failed/Skipped:   %d\n", stats.Failed)
 	fmt.Println("----------------------------------------")
 	fmt.Printf("Langs Normalized:       %d\n", stats.LangFixes)

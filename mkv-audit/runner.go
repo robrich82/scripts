@@ -147,13 +147,23 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 	return origins
 }
 
+// trimCandidate holds the data needed for the sequential trim phase.
+type trimCandidate struct {
+	path       string
+	info       MKVInfo
+	originLang string
+}
+
 // RunAll scans root for MKV/MKA files and fixes each one.
 // stateDir is where failed_files.json and unknown_codecs.json are stored.
 // lib is the active library config (may be nil for no overrides).
 // tmdb is used to look up the original language per content-root directory;
 // pass nil to skip TMDB lookups (e.g. no API key configured).
-func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter, tmdb TMDBOriginClient) Stats {
+// remuxer is used to remove/reorder tracks after property edits; pass nil to
+// skip track trimming entirely.
+func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter, tmdb TMDBOriginClient, remuxer MKVRemuxer) Stats {
 	var stats Stats
+	var trimCandidates []trimCandidate
 	unknownCodecs := map[string]bool{}
 
 	// Check for a previous failure cache.
@@ -210,12 +220,13 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			originLang := origin.OrigLangISO()
 
 			info, err := ident.Identify(p)
+			var res AnalysisResult
 			if err != nil {
 				fmt.Fprintf(&buf, "[ERR]    %s: %v\n", basename, err)
 				local.Failed++
 				local.FailedPaths = append(local.FailedPaths, p)
 			} else {
-				res := AnalyzeFile(*info, AnalyzeOptions{IETFMap: ietfMap, OriginLang: originLang})
+				res = AnalyzeFile(*info, AnalyzeOptions{IETFMap: ietfMap, OriginLang: originLang})
 				localCodecs = append(localCodecs, res.UnknownCodecs...)
 				if res.Failed {
 					fmt.Fprintf(&buf, "[FAILED] %s: %s\n", basename, strings.Join(res.FailReasons, ", "))
@@ -252,11 +263,53 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			for _, c := range localCodecs {
 				unknownCodecs[c] = true
 			}
+			if remuxer != nil && info != nil && !res.Failed {
+				trimCandidates = append(trimCandidates, trimCandidate{
+					path:       p,
+					info:       *info,
+					originLang: originLang,
+				})
+			}
 			mu.Unlock()
 		}(path)
 	}
 
 	wg.Wait()
+
+	// Sequential trim phase: prompt per file, then remux.
+	if remuxer != nil {
+		autoAll := false
+		for _, tc := range trimCandidates {
+			plan := PlanTrim(tc.info, tc.originLang)
+			if !plan.NeedsChange {
+				continue
+			}
+			basename := filepath.Base(tc.path)
+			if !autoAll {
+				summary := TrimSummary(plan)
+				ans, _ := prompter.Ask(fmt.Sprintf("[TRIM]   %s\n%s  Proceed? (y/n/a=all): ", basename, summary))
+				ans = strings.ToLower(strings.TrimSpace(ans))
+				switch ans {
+				case "a":
+					autoAll = true
+				case "y":
+					// proceed
+				default:
+					fmt.Printf("[SKIP]   %s (trim skipped)\n", basename)
+					continue
+				}
+			}
+			fmt.Printf("[TRIMMING] %s...\n", basename)
+			if err := remuxer.Remux(tc.path, plan, tc.info); err != nil {
+				fmt.Printf("[ERR]    %s: remux: %v\n", basename, err)
+				stats.Failed++
+				stats.FailedPaths = append(stats.FailedPaths, tc.path)
+			} else {
+				fmt.Printf("[TRIMMED] %s\n", basename)
+				stats.Trimmed++
+			}
+		}
+	}
 
 	// Persist failure list and unknown codecs.
 	if len(stats.FailedPaths) > 0 {
