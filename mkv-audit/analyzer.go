@@ -235,29 +235,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
-	// --- 3. flag-original normalisation ---
-	// Set flag-original=1 on tracks whose language matches the content's
-	// original language (as supplied by TMDB via opts.OriginLang), and
-	// flag-original=0 on any track that incorrectly carries the flag.
-	// Skipped when OriginLang is empty or "und".
-	if opts.OriginLang != "" && opts.OriginLang != "und" {
-		for i := range tracks {
-			props := &tracks[i].Properties
-			trackLang := normalizeLanguage(props.Language)
-			wantOriginal := trackLang == opts.OriginLang
-			if wantOriginal && !props.OriginalLanguage {
-				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-original", "1")...)
-				props.OriginalLanguage = true
-				res.LocalFixes.Flags++
-			} else if !wantOriginal && props.OriginalLanguage {
-				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-original", "0")...)
-				props.OriginalLanguage = false
-				res.LocalFixes.Flags++
-			}
-		}
-	}
-
-	// --- 4. Video language inheritance ---
+	// --- 3. Video language inheritance ---
 	var videoTracks, audioTracks []int
 	for i, t := range tracks {
 		switch t.Type {
@@ -291,6 +269,28 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 					vp.LanguageIETF = firstAudioIETF
 				}
 				res.LocalFixes.Video++
+			}
+		}
+	}
+
+	// --- 4. flag-original normalisation ---
+	// Runs after video language inheritance so video tracks already carry the
+	// inherited audio language when we evaluate flag-original. This prevents a
+	// two-pass loop where run 1 inherits the language and run 2 then sets the flag.
+	// Skipped when OriginLang is empty or "und".
+	if opts.OriginLang != "" && opts.OriginLang != "und" {
+		for i := range tracks {
+			props := &tracks[i].Properties
+			trackLang := normalizeLanguage(props.Language)
+			wantOriginal := trackLang == opts.OriginLang
+			if wantOriginal && !props.OriginalLanguage {
+				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-original", "1")...)
+				props.OriginalLanguage = true
+				res.LocalFixes.Flags++
+			} else if !wantOriginal && props.OriginalLanguage {
+				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-original", "0")...)
+				props.OriginalLanguage = false
+				res.LocalFixes.Flags++
 			}
 		}
 	}
