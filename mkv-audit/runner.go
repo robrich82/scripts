@@ -142,6 +142,8 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		}
 		if found {
 			origins[dir] = info
+		} else {
+			fmt.Printf("[TMDB]   %s: no match found\n", dir)
 		}
 	}
 	return origins
