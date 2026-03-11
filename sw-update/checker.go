@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -309,5 +310,49 @@ func (h *htmlChecker) check(app App) (*CheckResult, error) {
 	if len(m) > 1 {
 		version = string(m[1])
 	}
-	return &CheckResult{Version: version}, nil
+
+	assets := extractHTMLAssets(body, app.Checker.URL, app.Checker.AssetPatterns)
+	return &CheckResult{Version: version, Assets: assets}, nil
+}
+
+var reHref = regexp.MustCompile(`(?i)href="([^"]+)"`)
+
+// extractHTMLAssets finds all href links in body whose filename matches any of
+// the given patterns, resolving relative URLs against pageURL.
+func extractHTMLAssets(body []byte, pageURL string, patterns []string) []Asset {
+	if len(patterns) == 0 {
+		return nil
+	}
+	base, err := url.Parse(pageURL)
+	if err != nil {
+		base = nil
+	}
+	var out []Asset
+	seen := map[string]bool{}
+	for _, m := range reHref.FindAllSubmatch(body, -1) {
+		href := string(m[1])
+		name := filepath.Base(href)
+		matched := false
+		for _, pat := range patterns {
+			if matchAssetPattern(pat, name) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		assetURL := href
+		if base != nil {
+			if ref, err := url.Parse(href); err == nil {
+				assetURL = base.ResolveReference(ref).String()
+			}
+		}
+		if seen[assetURL] {
+			continue
+		}
+		seen[assetURL] = true
+		out = append(out, Asset{Name: name, URL: assetURL})
+	}
+	return out
 }
