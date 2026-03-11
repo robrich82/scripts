@@ -18,6 +18,7 @@ type CheckerConfig struct {
 	SFPath         string   `json:"sf_path,omitempty"`         // path filter for RSS, e.g. "/munt" (sourceforge)
 	Header         string   `json:"header,omitempty"`          // HTTP header to use as version (http-header, default: Last-Modified)
 	VersionRewrite []string `json:"version_rewrite,omitempty"` // [regex, replacement] applied after version extraction
+	RequireAsset   bool     `json:"require_asset,omitempty"`   // skip releases with no matching asset_patterns (github)
 }
 
 // LocalConfig describes how to detect the locally installed version.
