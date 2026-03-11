@@ -6,9 +6,9 @@ type TrackProperties struct {
 	LanguageIETF     string `json:"language_ietf"`
 	DefaultTrack     bool   `json:"default_track"`
 	ForcedTrack      bool   `json:"forced_track"`
-	HearingImpaired  bool   `json:"hearing_impaired"`
-	Commentary       bool   `json:"commentary"`
-	OriginalLanguage bool   `json:"original"`
+	HearingImpaired  bool   `json:"flag_hearing_impaired"`
+	Commentary       bool   `json:"flag_commentary"`
+	OriginalLanguage bool   `json:"flag_original"`
 	TrackName        string `json:"track_name"`
 	CodecID          string `json:"codec_id"`
 	AudioChannels    int    `json:"audio_channels"`
