@@ -311,6 +311,11 @@ func (h *htmlChecker) check(app App) (*CheckResult, error) {
 		version = string(m[1])
 	}
 
+	version, err = applyVersionRewrite(version, app.Checker.VersionRewrite)
+	if err != nil {
+		return nil, err
+	}
+
 	assets := extractHTMLAssets(body, app.Checker.URL, app.Checker.AssetPatterns)
 	return &CheckResult{Version: version, Assets: assets}, nil
 }

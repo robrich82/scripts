@@ -93,6 +93,11 @@ func (s *sfChecker) check(app App) (*CheckResult, error) {
 		return nil, fmt.Errorf("no release matching version_regex found in SourceForge RSS for %s", app.Checker.Project)
 	}
 
+	bestVer, err = applyVersionRewrite(bestVer, app.Checker.VersionRewrite)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build asset list from matched items.
 	patterns := app.Checker.AssetPatterns
 	var assets []Asset
