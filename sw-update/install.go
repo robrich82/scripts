@@ -92,16 +92,18 @@ func cmdInstall(args []string) error {
 		}
 	}
 
-	fmt.Print("\nMark version as installed/seen? [Y/n]: ")
-	line, _ = reader.ReadString('\n')
-	if !strings.EqualFold(strings.TrimSpace(line), "n") {
-		state, err := LoadState()
-		if err == nil {
-			st := state.Get(name)
-			st.LastSeenVersion = result.Version
-			st.LatestVersion = result.Version
-			_ = SaveState(state)
-			fmt.Printf("Marked %q as version %s\n", name, result.Version)
+	if app.Local.Type == "" || app.Local.Type == "none" {
+		fmt.Print("\nMark version as installed/seen? [Y/n]: ")
+		line, _ = reader.ReadString('\n')
+		if !strings.EqualFold(strings.TrimSpace(line), "n") {
+			state, err := LoadState()
+			if err == nil {
+				st := state.Get(name)
+				st.LastSeenVersion = result.Version
+				st.LatestVersion = result.Version
+				_ = SaveState(state)
+				fmt.Printf("Marked %q as version %s\n", name, result.Version)
+			}
 		}
 	}
 
