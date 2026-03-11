@@ -110,6 +110,9 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 			continue
 		}
 		assets := selectAssets(rel.Assets, app.Checker.AssetPatterns)
+		if len(app.Checker.AssetPatterns) > 0 && len(assets) == 0 {
+			continue
+		}
 		return &CheckResult{
 			Version: strings.TrimPrefix(rel.TagName, "v"),
 			Assets:  assets,
