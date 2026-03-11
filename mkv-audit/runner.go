@@ -218,7 +218,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 
 			// Resolve per-file IETF map and original language.
 			origin := origins[contentRootDir(p, libRoot)]
-			ietfMap := resolveIETFMap(p, root, lib, origin)
+			ietfMap := resolveIETFMap(p, libRoot, lib, origin)
 			originLang := origin.OrigLangISO()
 
 			info, err := ident.Identify(p)
