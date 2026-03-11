@@ -24,7 +24,7 @@ func movieRatingCachePath() string {
 	if appData == "" {
 		return ""
 	}
-	return filepath.Join(appData, "mkv-movie", "rating_cache.json")
+	return filepath.Join(appData, "mkv-movie", "movie_rating_cache.json")
 }
 
 // loadTVShowCache reads mkv-tvshow's show_cache.json and returns the map.
