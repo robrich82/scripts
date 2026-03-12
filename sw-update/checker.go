@@ -93,8 +93,12 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitHub API %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 120))
+		msg := strings.TrimSpace(string(body))
+		if i := strings.IndexAny(msg, "\r\n"); i >= 0 {
+			msg = msg[:i]
+		}
+		return nil, fmt.Errorf("GitHub API %d: %s", resp.StatusCode, msg)
 	}
 
 	var releases []ghRelease
