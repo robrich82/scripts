@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // fakeIdentifier returns a pre-set MKVInfo (or error) for any file.
@@ -57,7 +58,7 @@ func TestRunAll_NoEditsNeeded_OK(t *testing.T) {
 	}}
 
 	editor := &fakeEditor{}
-	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, nil, nil)
+	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
 
 	if stats.Scanned != 1 {
 		t.Errorf("Scanned=%d, want 1", stats.Scanned)
@@ -72,7 +73,7 @@ func TestRunAll_IdentifyError_CountsFailed(t *testing.T) {
 	makeMKVFile(t, dir, "bad.mkv")
 
 	ident := &fakeIdentifier{err: fmt.Errorf("mkvmerge failed")}
-	stats := RunAll(dir, t.TempDir(), nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil)
+	stats := RunAll(dir, t.TempDir(), nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
 
 	if stats.Failed != 1 {
 		t.Errorf("Failed=%d, want 1", stats.Failed)
@@ -95,7 +96,7 @@ func TestRunAll_EditsApplied_CountsFixed(t *testing.T) {
 	}}
 
 	editor := &fakeEditor{}
-	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, nil, nil)
+	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
 
 	if stats.Fixed != 1 {
 		t.Errorf("Fixed=%d, want 1", stats.Fixed)
@@ -109,7 +110,7 @@ func TestRunAll_SkipsNonMKV(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "subtitle.srt"), []byte{}, 0644)
 
-	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{}, nil, nil)
+	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
 	if stats.Scanned != 0 {
 		t.Errorf("Scanned=%d, want 0 for non-MKV file", stats.Scanned)
 	}
@@ -126,7 +127,7 @@ func TestRunAll_MKAIncluded(t *testing.T) {
 		}},
 	}}
 
-	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil)
+	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
 	if stats.Scanned != 1 {
 		t.Errorf("Scanned=%d, want 1 for .mka file", stats.Scanned)
 	}

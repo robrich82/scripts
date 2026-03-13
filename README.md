@@ -81,6 +81,8 @@ Scanned: 120  Fixed: 14  Failed: 0  LangFixes: 9  FlagFixes: 8
 |------|-------------|
 | `-library <name>` | Use a named library from config (overrides auto-detection) |
 | `-verbose` | Print planned mkvpropedit edits before applying |
+| `-cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
+| `-all` | Process all files regardless of modification date |
 
 ### Track trimming
 

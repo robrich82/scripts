@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 const failedCacheFile = "failed_files.json"
@@ -163,7 +164,7 @@ type trimCandidate struct {
 // pass nil to skip TMDB lookups (e.g. no API key configured).
 // remuxer is used to remove/reorder tracks after property edits; pass nil to
 // skip track trimming entirely.
-func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter, tmdb TMDBOriginClient, remuxer MKVRemuxer) Stats {
+func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter, tmdb TMDBOriginClient, remuxer MKVRemuxer, cutoffDate time.Time) Stats {
 	var stats Stats
 	var trimCandidates []trimCandidate
 	unknownCodecs := map[string]bool{}
@@ -184,9 +185,17 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				return nil
 			}
 			lower := strings.ToLower(d.Name())
-			if strings.HasSuffix(lower, ".mkv") || strings.HasSuffix(lower, ".mka") {
-				filesToScan = append(filesToScan, path)
+			if !strings.HasSuffix(lower, ".mkv") && !strings.HasSuffix(lower, ".mka") {
+				return nil
 			}
+			if !cutoffDate.IsZero() {
+				info, err := d.Info()
+				if err == nil && info.ModTime().Before(cutoffDate) {
+					stats.SkippedOld++
+					return nil
+				}
+			}
+			filesToScan = append(filesToScan, path)
 			return nil
 		})
 	}

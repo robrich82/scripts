@@ -6,12 +6,30 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func main() {
 	libraryFlag := flag.String("library", "", "library name to use (overrides auto-detection)")
 	verboseFlag := flag.Bool("verbose", false, "print planned mkvpropedit edits before applying")
+	cutoffDateStr := flag.String("cutoff-date", "", "only process files modified on or after this date (YYYY-MM-DD); defaults to today")
+	allFlag := flag.Bool("all", false, "process all files regardless of modification date")
 	flag.Parse()
+
+	var cutoffDate time.Time
+	if !*allFlag {
+		if *cutoffDateStr != "" {
+			var err error
+			cutoffDate, err = time.Parse("2006-01-02", *cutoffDateStr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: invalid --cutoff-date %q, expected YYYY-MM-DD\n", *cutoffDateStr)
+				os.Exit(1)
+			}
+		} else {
+			now := time.Now()
+			cutoffDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+		}
+	}
 
 	runner, err := newRealMKVRunner()
 	if err != nil {
@@ -75,19 +93,25 @@ func main() {
 		}
 	}
 
+	if cutoffDate.IsZero() {
+		fmt.Println("--- Cutoff date: none (all files) ---")
+	} else {
+		fmt.Printf("--- Cutoff date: %s ---\n", cutoffDate.Format("2006-01-02"))
+	}
 	fmt.Println("--- Running Library Architect ---")
 
 	var ed MKVEditor = runner
 	if *verboseFlag {
 		ed = &loggingEditor{inner: runner}
 	}
-	stats := RunAll(dir, stateDir, lib, runner, ed, newStdinPrompter(), tmdb, runner)
+	stats := RunAll(dir, stateDir, lib, runner, ed, newStdinPrompter(), tmdb, runner, cutoffDate)
 
 	fmt.Println()
 	fmt.Println("========================================")
 	fmt.Printf("%-24s%s\n", "FINAL SUMMARY", "")
 	fmt.Println("========================================")
 	fmt.Printf("Total Scanned:          %d\n", stats.Scanned)
+	fmt.Printf("Total Skipped (old):    %d\n", stats.SkippedOld)
 	fmt.Printf("Total Fixed:            %d\n", stats.Fixed)
 	fmt.Printf("Total Trimmed:          %d\n", stats.Trimmed)
 	fmt.Printf("Total Failed/Skipped:   %d\n", stats.Failed)
