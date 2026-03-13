@@ -92,22 +92,57 @@ var (
 )
 
 // Run scans MediaDir and applies TMDB metadata to every qualifying MKV file.
+// Phase 1 does a single WalkDir over MediaDir to collect qualifying paths grouped
+// by show folder. Phase 2 iterates only the shows that have qualifying files,
+// avoiding TMDB calls for shows whose content is entirely before the cutoff date.
 func (p *Processor) Run() Stats {
 	var stats Stats
 
-	entries, err := os.ReadDir(p.cfg.MediaDir)
-	if err != nil {
-		fmt.Printf("Error reading directory: %v\n", err)
-		return stats
-	}
+	// Phase 1: single walk over the entire media directory.
+	// Qualifying paths are grouped by show folder in encounter order.
+	showFiles := map[string][]string{}
+	var showOrder []string
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	filepath.WalkDir(p.cfg.MediaDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
 		}
-		showFolder := entry.Name()
-		showPath := filepath.Join(p.cfg.MediaDir, showFolder)
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
+			return nil
+		}
 
+		rel, err := filepath.Rel(p.cfg.MediaDir, path)
+		if err != nil {
+			return nil
+		}
+		parts := strings.SplitN(rel, string(filepath.Separator), 2)
+		if len(parts) < 2 {
+			// File is directly under MediaDir with no show subfolder — skip.
+			return nil
+		}
+		showFolder := parts[0]
+
+		// In --ratings-only mode collect every MKV regardless of modification date.
+		if !p.cfg.RatingsOnly {
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			if info.ModTime().Before(p.cfg.CutoffDate) && !p.retryList.Has(path) {
+				stats.SkippedOld++
+				return nil
+			}
+		}
+
+		if _, seen := showFiles[showFolder]; !seen {
+			showOrder = append(showOrder, showFolder)
+		}
+		showFiles[showFolder] = append(showFiles[showFolder], path)
+		return nil
+	})
+
+	// Phase 2: process each show that has at least one qualifying file.
+	for _, showFolder := range showOrder {
 		showID := p.resolveShowID(showFolder)
 		if showID == "SKIP" {
 			continue
@@ -129,39 +164,21 @@ func (p *Processor) Run() Stats {
 			}
 		}
 
-		// seasonCache is reset for each directory in the walk (matching Python behaviour).
+		// seasonCache is reset per show and again whenever the directory changes.
 		seasonCache := map[string]SeasonResult{}
 		currentDir := ""
 
-		filepath.WalkDir(showPath, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
-				return nil
-			}
+		for _, path := range showFiles[showFolder] {
+			file := filepath.Base(path)
+			dir := filepath.Dir(path)
 
 			// Reset season cache when entering a new subdirectory.
-			dir := filepath.Dir(path)
 			if dir != currentDir {
 				seasonCache = map[string]SeasonResult{}
 				currentDir = dir
 			}
 
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-
-			// In --ratings-only mode, process all files regardless of modification date.
-			if !p.cfg.RatingsOnly {
-				if info.ModTime().Before(p.cfg.CutoffDate) && !p.retryList.Has(path) {
-					stats.SkippedOld++
-					return nil
-				}
-			}
-
-			file, filePath := p.normalizeFilename(dir, d.Name())
+			file, filePath := p.normalizeFilename(dir, file)
 			stem := strings.TrimSuffix(file, filepath.Ext(file))
 
 			// Check extras map first — an explicit entry overrides the S##E## episode
@@ -234,14 +251,14 @@ func (p *Processor) Run() Stats {
 							stats.Failed++
 						}
 						time.Sleep(50 * time.Millisecond)
-						return nil
+						continue
 					}
 				}
 			}
 
 			epMatch := epRe.FindStringSubmatch(file)
 			if epMatch == nil {
-				return nil
+				continue
 			}
 			sNum, _ := strconv.Atoi(epMatch[1])
 			eNum, _ := strconv.Atoi(epMatch[2])
@@ -261,7 +278,7 @@ func (p *Processor) Run() Stats {
 					stats.Failed++
 				}
 				time.Sleep(50 * time.Millisecond)
-				return nil
+				continue
 			}
 
 			// Full processing mode: fetch season data and apply all metadata.
@@ -321,8 +338,7 @@ func (p *Processor) Run() Stats {
 			}
 
 			time.Sleep(50 * time.Millisecond)
-			return nil
-		})
+		}
 
 		// After processing all episodes for this show, save rating cache and update Plex.
 		if p.ratingCache != nil {
