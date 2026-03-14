@@ -54,6 +54,9 @@ func matchMangaUpdates(mu *MUClient, title string) *muSeries {
 
 	best := results[0]
 	fmt.Printf("  Match: %s (%s, %s)\n", best.Title, best.Type, best.Year)
+	if best.URL != "" {
+		fmt.Printf("  Link:  %s\n", best.URL)
+	}
 	ans := ask("  Correct? [y/n] or enter MangaUpdates ID: ")
 	ans = strings.TrimSpace(ans)
 	switch strings.ToLower(ans) {

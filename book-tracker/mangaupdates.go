@@ -60,6 +60,7 @@ type muSearchResult struct {
 type muSeries struct {
 	SeriesID int64  `json:"series_id"`
 	Title    string `json:"title"`
+	URL      string `json:"url"`
 	Type     string `json:"type"` // "Manga", "Novel", etc.
 	Year     string `json:"year"`
 	// Description is omitted: the search endpoint returns it as a plain string
