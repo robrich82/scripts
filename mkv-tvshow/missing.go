@@ -287,12 +287,20 @@ func scanPresentEpisodes(showDir string) (map[string]bool, error) {
 			return nil
 		}
 		name := d.Name()
-		// Multi-episode file: expand each episode number individually.
+		// Multi-episode file with consecutive markers: S01E01E02E03
 		if m := multiEpRe.FindStringSubmatch(name); m != nil {
 			season := strings.ToUpper(m[1]) // e.g. "S01"
 			for _, em := range eNumRe.FindAllStringSubmatch(m[2], -1) {
 				epNum, _ := strconv.Atoi(em[1])
 				present[fmt.Sprintf("%sE%02d", season, epNum)] = true
+			}
+		} else if m := epRangeRe.FindStringSubmatch(name); m != nil {
+			// Plex-normalised range: S01E01-E03
+			sNum, _ := strconv.Atoi(m[1])
+			lo, _ := strconv.Atoi(m[2])
+			hi, _ := strconv.Atoi(m[3])
+			for ep := lo; ep <= hi; ep++ {
+				present[fmt.Sprintf("S%02dE%02d", sNum, ep)] = true
 			}
 		} else if m := epRe.FindStringSubmatch(name); m != nil {
 			sNum, _ := strconv.Atoi(m[1])

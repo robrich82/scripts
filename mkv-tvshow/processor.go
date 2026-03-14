@@ -89,6 +89,8 @@ var (
 	multiEpRe = regexp.MustCompile(`([Ss]\d+)((?:[Ee]\d+){2,})`)
 	eNumRe    = regexp.MustCompile(`[Ee](\d+)`)
 	epRe      = regexp.MustCompile(`(?i)S(\d+)E(\d+)`)
+	// epRangeRe matches Plex-normalised multi-episode range filenames, e.g. S01E01-E03.
+	epRangeRe = regexp.MustCompile(`(?i)S(\d+)E(\d+)-E(\d+)`)
 )
 
 // Run scans MediaDir and applies TMDB metadata to every qualifying MKV file.
