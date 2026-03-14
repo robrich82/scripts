@@ -117,18 +117,29 @@ func (c *MUClient) SearchSeries(title string, preferType string) ([]muSeries, er
 	}
 	if preferType != "" {
 		body["type"] = []string{preferType}
-		body["perpage"] = 8 // fetch more when filtering so the correct entry isn't cut off
+		body["perpage"] = 10
 	}
 	var res muSearchResult
 	err := c.post("/series/search", body, &res)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]muSeries, 0, len(res.Results))
+	const maxResults = 10
+	out := make([]muSeries, 0, min(len(res.Results), maxResults))
 	for _, r := range res.Results {
+		if len(out) >= maxResults {
+			break
+		}
 		out = append(out, r.Record)
 	}
 	return out, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // GetSeries fetches full series details by numeric ID.
