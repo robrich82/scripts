@@ -1,5 +1,8 @@
 # Project Instructions
 
+## Language
+All code in this project should be written in Go where possible.
+
 ## Git Commits
 After making any code changes, always create a git commit. Use a concise, descriptive commit message that reflects the change.
 
