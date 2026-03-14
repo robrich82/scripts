@@ -259,6 +259,15 @@ func isOfficialRelease(r muRelease) bool {
 	return false
 }
 
+// muPreferType converts a SeriesType to the MangaUpdates type string used
+// when picking the best search result.
+func muPreferType(t SeriesType) string {
+	if t == TypeLightNovel {
+		return "Novel"
+	}
+	return "Manga"
+}
+
 func parseVolume(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" {

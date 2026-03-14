@@ -200,7 +200,7 @@ func cmdCalibre(dir, dbPath string, mu *MUClient) error {
 			}
 			if mu != nil {
 				fmt.Printf("  Searching MangaUpdates for %q...\n", calName)
-				if ms := matchMangaUpdates(mu, calName); ms != nil {
+				if ms := matchMangaUpdates(mu, calName, muPreferType(typ)); ms != nil {
 					s.MangaUpdatesID = fmt.Sprintf("%d", ms.SeriesID)
 				}
 			}
@@ -240,7 +240,7 @@ func cmdCalibre(dir, dbPath string, mu *MUClient) error {
 			}
 			if mu != nil {
 				fmt.Printf("  Searching MangaUpdates for %q...\n", calName)
-				if ms := matchMangaUpdates(mu, calName); ms != nil {
+				if ms := matchMangaUpdates(mu, calName, muPreferType(typ)); ms != nil {
 					s.MangaUpdatesID = fmt.Sprintf("%d", ms.SeriesID)
 				}
 			}

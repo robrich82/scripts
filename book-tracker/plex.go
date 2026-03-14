@@ -164,7 +164,7 @@ func cmdPlex(dir string, plex *PlexClient, al *ALClient, mu *MUClient) error {
 		// Try MangaUpdates match.
 		if mu != nil {
 			fmt.Printf("  Searching MangaUpdates for %q...\n", sourceName)
-			if ms := matchMangaUpdates(mu, sourceName); ms != nil {
+			if ms := matchMangaUpdates(mu, sourceName, muPreferType(typ)); ms != nil {
 				newS.MangaUpdatesID = fmt.Sprintf("%d", ms.SeriesID)
 			}
 		}

@@ -57,7 +57,7 @@ func cmdSuggest(dir string, mu *MUClient, al *ALClient) error {
 				newS.MangaUpdatesID = sug.muID
 			} else if mu != nil {
 				fmt.Printf("  Searching MangaUpdates for %q...\n", sug.name)
-				if ms := matchMangaUpdates(mu, sug.name); ms != nil {
+				if ms := matchMangaUpdates(mu, sug.name, muPreferType(sug.typ)); ms != nil {
 					newS.MangaUpdatesID = fmt.Sprintf("%d", ms.SeriesID)
 				}
 			}

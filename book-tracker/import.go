@@ -96,13 +96,17 @@ func cmdImport(dir, xlsxPath string, mu *MUClient) error {
 
 		fmt.Printf("\n--- %s (%s) ---\n", name, typ)
 		if mu != nil {
-			if ms := matchMangaUpdates(mu, name); ms != nil {
+			if ms := matchMangaUpdates(mu, name, muPreferType(typ)); ms != nil {
 				s.MangaUpdatesID = fmt.Sprintf("%d", ms.SeriesID)
 			}
 		}
 
 		st.Series = append(st.Series, s)
 		imported++
+		// Save after each series so a re-run skips already-processed ones.
+		if err := SaveStore(dir, st); err != nil {
+			return fmt.Errorf("saving after %q: %w", name, err)
+		}
 	}
 
 	// ---- Japanese Only sheet -------------------------------------------------
@@ -133,17 +137,20 @@ func cmdImport(dir, xlsxPath string, mu *MUClient) error {
 
 		fmt.Printf("\n--- %s (%s) [JP Only] ---\n", name, typ)
 		if mu != nil {
-			if ms := matchMangaUpdates(mu, name); ms != nil {
+			if ms := matchMangaUpdates(mu, name, muPreferType(typ)); ms != nil {
 				s.MangaUpdatesID = fmt.Sprintf("%d", ms.SeriesID)
 			}
 		}
 
 		st.Series = append(st.Series, s)
 		imported++
+		if err := SaveStore(dir, st); err != nil {
+			return fmt.Errorf("saving after %q: %w", name, err)
+		}
 	}
 
-	if err := SaveStore(dir, st); err != nil {
-		return err
+	if imported == 0 {
+		fmt.Println("All series already tracked — nothing new to import.")
 	}
 
 	fmt.Printf("\nImported %d series.\n", imported)

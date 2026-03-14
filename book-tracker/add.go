@@ -74,7 +74,7 @@ func cmdAdd(dir string, mu *MUClient) error {
 	// MangaUpdates lookup.
 	if mu != nil {
 		fmt.Printf("Searching MangaUpdates for %q...\n", name)
-		if ms := matchMangaUpdates(mu, name); ms != nil {
+		if ms := matchMangaUpdates(mu, name, muPreferType(typ)); ms != nil {
 			s.MangaUpdatesID = fmt.Sprintf("%d", ms.SeriesID)
 		}
 	}
