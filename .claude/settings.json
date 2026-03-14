@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c \"fp=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c 'import sys,json; print(json.load(sys.stdin).get(\"file_path\",\"\"))' 2>/dev/null); if echo \"$fp\" | grep -qE '\\.go$'; then cd /c/Users/robri/code/scripts && make vet; fi\""
+            "command": "python3 -c \"import os,json,subprocess; fp=json.loads(os.environ.get('CLAUDE_TOOL_INPUT','{}')).get('file_path',''); [subprocess.run(['gofmt','-w',fp]),subprocess.run(['make','vet'],cwd='C:/Users/robri/code/scripts')] if fp.endswith('.go') else None\""
           }
         ]
       }
