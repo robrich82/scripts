@@ -58,13 +58,12 @@ type muSearchResult struct {
 }
 
 type muSeries struct {
-	SeriesID    int64  `json:"series_id"`
-	Title       string `json:"title"`
-	Type        string `json:"type"` // "Manga", "Novel", etc.
-	Year        string `json:"year"`
-	Description struct {
-		Body string `json:"body"`
-	} `json:"description"`
+	SeriesID int64  `json:"series_id"`
+	Title    string `json:"title"`
+	Type     string `json:"type"` // "Manga", "Novel", etc.
+	Year     string `json:"year"`
+	// Description is omitted: the search endpoint returns it as a plain string
+	// but the detail endpoint returns an object; we don't use it either way.
 	Status string `json:"status"` // "Ongoing", "Complete", "Hiatus"
 	// Licensed is a bool in the API.
 	Licensed            bool          `json:"licensed"`
