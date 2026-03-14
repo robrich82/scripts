@@ -1,6 +1,6 @@
-.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update test vet
+.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update book-tracker test vet
 
-all: mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update
+all: mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update book-tracker
 
 mkv-audit:
 	cd mkv-audit && go build -o ../dist/mkv-audit.exe .
@@ -17,6 +17,9 @@ mkv-tvshow:
 sw-update:
 	cd sw-update && go build -o ../dist/sw-update.exe .
 
+book-tracker:
+	cd book-tracker && go build -o ../dist/book-tracker.exe .
+
 test:
 	cd mkv-audit && go test ./...
 	cd mkv-movie && go test ./...
@@ -29,6 +32,7 @@ vet:
 	cd mkv-musicvideo && go vet ./... && gofmt -l . && staticcheck ./... && unparam ./...
 	cd mkv-tvshow && go vet ./... && gofmt -l . && staticcheck ./... && unparam ./...
 	cd sw-update && go vet ./... && gofmt -l . && staticcheck ./... && unparam ./...
+	cd book-tracker && go vet ./... && gofmt -l . && staticcheck ./... && unparam ./...
 
 clean:
 	rmdir /s /q dist 2>nul || true
