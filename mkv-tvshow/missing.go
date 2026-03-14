@@ -208,7 +208,7 @@ func (mc *MissingChecker) Run() error {
 
 		// Prompt the user to optionally ignore items.
 		ans, err := mc.prompter.Ask(
-			"\nIgnore items? Enter numbers (e.g. \"1,3\"), \"show\" to ignore the whole show, or press Enter to skip: ",
+			"\nIgnore items? Enter numbers (e.g. \"1,3\"), \"all\" to ignore all listed, \"show\" to ignore the whole show, or press Enter to skip: ",
 		)
 		if err != nil || strings.TrimSpace(ans) == "" {
 			continue
@@ -219,14 +219,21 @@ func (mc *MissingChecker) Run() error {
 			mc.ignoreList.AddShow(showID)
 			fmt.Printf("Added %q to the missing-episode ignore list.\n", showName)
 		} else {
-			for _, part := range strings.Split(ans, ",") {
-				part = strings.TrimSpace(part)
-				n, err := strconv.Atoi(part)
-				if err != nil || n < 1 || n > len(missing) {
-					fmt.Printf("  Skipping unrecognised entry %q\n", part)
-					continue
+			items := missing
+			if ans != "all" {
+				items = nil
+				for _, part := range strings.Split(ans, ",") {
+					part = strings.TrimSpace(part)
+					if lo, hi, ok := parseRange(part, len(missing)); ok {
+						for i := lo; i <= hi; i++ {
+							items = append(items, missing[i-1])
+						}
+					} else {
+						fmt.Printf("  Skipping unrecognised entry %q\n", part)
+					}
 				}
-				item := missing[n-1]
+			}
+			for _, item := range items {
 				if item.kind == "season" {
 					mc.ignoreList.AddSeason(showID, item.season)
 					fmt.Printf("  Ignoring Season %d of %s\n", item.season, showName)
@@ -247,6 +254,24 @@ func (mc *MissingChecker) Run() error {
 	}
 	fmt.Println("\nMissing episode check complete.")
 	return nil
+}
+
+// parseRange parses a single token that is either a plain number ("3") or a
+// range ("1-5") and returns (lo, hi, true) when valid and within [1, max].
+func parseRange(s string, max int) (lo, hi int, ok bool) {
+	if idx := strings.Index(s, "-"); idx > 0 {
+		l, err1 := strconv.Atoi(s[:idx])
+		h, err2 := strconv.Atoi(s[idx+1:])
+		if err1 != nil || err2 != nil || l < 1 || h > max || l > h {
+			return 0, 0, false
+		}
+		return l, h, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > max {
+		return 0, 0, false
+	}
+	return n, n, true
 }
 
 // scanPresentEpisodes walks showDir and returns a set of "S##E##" keys for
