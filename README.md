@@ -84,6 +84,38 @@ The `unofficial_in_calibre` flag marks series where only fan-translated copies e
 | `PLEX_URL` | Plex server base URL (e.g. `http://localhost:32400`) |
 | `PLEX_TOKEN` | Plex authentication token |
 
+### MangaUpdates matching
+
+When adding a series (via `import`, `add`, `calibre`, or `suggest`), the tool searches MangaUpdates by title and shows up to five numbered results, sorted so the expected type (Manga / Novel) appears first:
+
+```
+  Results:
+    1. Dungeon ni Deai o Motomeru no wa Machigatte Iru Darou ka (Novel, 2013)
+       https://www.mangaupdates.com/series/5t4m0lg/...
+    2. Dungeon ni Deai o Motomeru no wa Machigatte Iru Darou ka Gaiden - Sword Oratoria (Novel, 2014)
+       ...
+  Enter number, URL/ID, or press Enter to skip:
+```
+
+At this prompt you can enter:
+- A **number** (1–5) to pick from the list
+- A **MangaUpdates URL** — e.g. `https://www.mangaupdates.com/series/5t4m0lg/dungeon-ni-deai-...`
+- A **URL slug** — e.g. `5t4m0lg` (the short code from the URL)
+- A **numeric series ID** — e.g. `12645175652`
+- **Enter** to skip (series is still added, just without a MangaUpdates link)
+
+Note: MangaUpdates lists series under their Japanese titles, so the match title will usually be in Japanese/romaji.
+
+### Calibre library
+
+The default Calibre database path is `C:\Users\robri\OneDrive\Calibre Library\metadata.db`. An alternative path can be passed as an argument:
+
+```sh
+book-tracker calibre "D:\Other Calibre Library\metadata.db"
+```
+
+Books must be tagged **Manga** or **Light Novel** in Calibre to be picked up by the sync. Series index is used for volume numbers.
+
 ### External APIs
 
 - **MangaUpdates** — primary source for English release dates, publisher information, JP-only licence detection, and related series. No authentication required.
