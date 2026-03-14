@@ -1,12 +1,11 @@
 # Scripts
 
-A collection of Go command-line utilities for managing MKV media files, software updates, and reading lists.
+A collection of Go command-line utilities for managing MKV media files and software updates.
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
-| [book-tracker](#book-tracker) | Track manga and light novel release schedules, Calibre library, and Plex suggestions |
 | [mkv-audit](#mkv-audit) | Normalize MKV track language codes and default/forced flags |
 | [mkv-movie](#mkv-movie) | Tag movie MKVs with full metadata from TMDB and sync timestamps |
 | [mkv-musicvideo](#mkv-musicvideo) | Fuzzy-match video files to audio files for renaming |
@@ -30,7 +29,6 @@ make all
 Build a specific tool:
 
 ```sh
-make book-tracker
 make mkv-audit
 make mkv-movie
 make mkv-musicvideo
@@ -42,101 +40,6 @@ Run all tests:
 
 ```sh
 make test
-```
-
----
-
-## book-tracker
-
-Tracks manga and light novel release schedules, syncs against a Calibre library, and suggests new series from Plex and related/sequel lookups.
-
-Data is stored as JSON in `%APPDATA%\book-tracker\` (Windows) or `~/.config/book-tracker/` (Linux/macOS).
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `book-tracker` | Alias for `check` |
-| `book-tracker check` | Show volumes available (past release date + 7-day grace) not yet in Calibre, plus any reminders |
-| `book-tracker update` | Fetch latest release dates from MangaUpdates; detect new English licences for JP-only series |
-| `book-tracker calibre [DB_PATH]` | Sync owned volumes from Calibre, advance next-volume counters, prompt to mark completed series |
-| `book-tracker plex` | Scan Plex TV library, identify anime via AniList, suggest related manga/LN not yet tracked |
-| `book-tracker suggest` | Suggest sequel/prequel/side-story/spin-off series for everything currently tracked |
-| `book-tracker import FILE.xlsx` | One-time import from the Excel spreadsheet; runs `update` automatically afterwards |
-| `book-tracker add` | Interactively add a new series with MangaUpdates matching |
-| `book-tracker list` | List all tracked and completed series |
-| `book-tracker missing` | List released volumes (vol.1 through next-1) not present in Calibre |
-
-### Series statuses
-
-| Status | Meaning |
-|--------|---------|
-| `active` | Licensed in English; tracking next volume |
-| `jp-only` | No English licence yet; checked on each `update` |
-| `online-only` | English chapters available online but not in collected volumes; 90-day reminder to check for fan compilations |
-| `completed` | Series finished and all volumes in Calibre |
-
-The `unofficial_in_calibre` flag marks series where only fan-translated copies exist in Calibre. These are counted separately from officially owned volumes.
-
-### Environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `PLEX_URL` | Plex server base URL (e.g. `http://localhost:32400`) |
-| `PLEX_TOKEN` | Plex authentication token |
-
-### MangaUpdates matching
-
-When adding a series (via `import`, `add`, `calibre`, or `suggest`), the tool searches MangaUpdates by title and shows up to five numbered results, sorted so the expected type (Manga / Novel) appears first:
-
-```
-  Results:
-    1. Dungeon ni Deai o Motomeru no wa Machigatte Iru Darou ka (Novel, 2013)
-       https://www.mangaupdates.com/series/5t4m0lg/...
-    2. Dungeon ni Deai o Motomeru no wa Machigatte Iru Darou ka Gaiden - Sword Oratoria (Novel, 2014)
-       ...
-  Enter number, URL/ID, or press Enter to skip:
-```
-
-At this prompt you can enter:
-- A **number** (1–5) to pick from the list
-- A **MangaUpdates URL** — e.g. `https://www.mangaupdates.com/series/5t4m0lg/dungeon-ni-deai-...`
-- A **URL slug** — e.g. `5t4m0lg` (the short code from the URL)
-- A **numeric series ID** — e.g. `12645175652`
-- **Enter** to skip (series is still added, just without a MangaUpdates link)
-
-Note: MangaUpdates lists series under their Japanese titles, so the match title will usually be in Japanese/romaji.
-
-### Calibre library
-
-The default Calibre database path is `C:\Users\robri\OneDrive\Calibre Library\metadata.db`. An alternative path can be passed as an argument:
-
-```sh
-book-tracker calibre "D:\Other Calibre Library\metadata.db"
-```
-
-Books must be tagged **Manga** or **Light Novel** in Calibre to be picked up by the sync. Series index is used for volume numbers.
-
-### External APIs
-
-- **MangaUpdates** — primary source for English release dates, publisher information, JP-only licence detection, and related series. No authentication required.
-- **AniList** — identifies anime in Plex, finds source manga/LN for anime entries, supplementary related-series data. No authentication required.
-
-### Workflow
-
-```sh
-# First-time setup: import your existing spreadsheet
-book-tracker import "Books & Manga.xlsx"
-
-# Daily use
-book-tracker              # see what's available to buy
-
-# Periodically
-book-tracker update       # refresh release dates (also syncs series names from MangaUpdates)
-book-tracker calibre      # sync after adding books to Calibre
-book-tracker suggest      # check for new sequels/spin-offs
-book-tracker plex         # check after finishing an anime series
-book-tracker missing      # list released volumes not yet in Calibre
 ```
 
 ---

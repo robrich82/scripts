@@ -11,7 +11,6 @@ When adding a new tool, changing a tool's commands/flags/config, or adding new f
 
 ## Build
 After completing a feature or bug fix, build the affected tool(s), do not build without using the make command:
-- `make book-tracker` — after changes to book-tracker/
 - `make mkv-audit` — after changes to mkv-audit/
 - `make mkv-movie` — after changes to mkv-movie/
 - `make mkv-musicvideo` — after changes to mkv-musicvideo/
