@@ -82,15 +82,26 @@ func cmdUpdate(dir string, mu *MUClient, interactive bool) error {
 			}
 		}
 
-		// Sync name from MangaUpdates (official English title, or Japanese if unlicensed).
-		if muName := muBestName(series); muName != "" && muName != s.Name {
-			fmt.Printf("  [~] %s: updating name to %q\n", s.Name, muName)
-			// Preserve Calibre matching under the old name if not already overridden.
-			if s.CalibreSeries == "" {
-				s.CalibreSeries = s.Name
+		// Name sync: if the stored name doesn't match any MU title, prompt to pick one.
+		if interactive {
+			allTitles := muAllTitles(series)
+			if !titleMatchesAny(s.Name, allTitles) {
+				fmt.Printf("\n  [?] %q is not a known MangaUpdates title for this series.\n", s.Name)
+				fmt.Printf("      MU titles:\n")
+				for i, t := range allTitles {
+					fmt.Printf("        %d) %s\n", i+1, t)
+				}
+				ans := ask("      Enter number to rename, or press Enter to keep current: ")
+				if idx, err := strconv.Atoi(strings.TrimSpace(ans)); err == nil && idx >= 1 && idx <= len(allTitles) {
+					newName := allTitles[idx-1]
+					fmt.Printf("  [~] Renaming %q to %q\n", s.Name, newName)
+					if s.CalibreSeries == "" {
+						s.CalibreSeries = s.Name
+					}
+					s.Name = newName
+					changed = true
+				}
 			}
-			s.Name = muName
-			changed = true
 		}
 
 		// Track MU completion status.
