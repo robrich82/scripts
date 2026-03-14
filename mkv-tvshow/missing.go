@@ -33,6 +33,7 @@ type missingItem struct {
 type MissingChecker struct {
 	cfg        Config
 	cache      *ShowCache
+	manualData map[string]ManualEntry
 	tmdb       TMDBClient
 	prompter   Prompter
 	ignoreList *MissingIgnoreList
@@ -42,6 +43,7 @@ type MissingChecker struct {
 func NewMissingChecker(
 	cfg Config,
 	cache *ShowCache,
+	manualData map[string]ManualEntry,
 	tmdb TMDBClient,
 	prompter Prompter,
 	ignoreList *MissingIgnoreList,
@@ -49,6 +51,7 @@ func NewMissingChecker(
 	return &MissingChecker{
 		cfg:        cfg,
 		cache:      cache,
+		manualData: manualData,
 		tmdb:       tmdb,
 		prompter:   prompter,
 		ignoreList: ignoreList,
@@ -91,12 +94,15 @@ func (mc *MissingChecker) Run() error {
 			continue
 		}
 
-		// Scan local files for episodes already present.
-		present, err := scanPresentEpisodes(showDir)
+		// Scan local files for episodes already present, then translate to
+		// TMDB-space keys applying any manual overrides and episode mappings.
+		localPresent, err := scanPresentEpisodes(showDir)
 		if err != nil {
 			fmt.Printf("Warning: could not scan %q: %v\n", folder, err)
 			continue
 		}
+		manualEntry := mc.manualData[folder] // zero value if not present
+		tmdbPresent := buildTMDBPresentSet(showID, localPresent, manualEntry)
 
 		showName := details.Name
 		if showName == "" {
@@ -106,14 +112,30 @@ func (mc *MissingChecker) Run() error {
 		var missing []missingItem
 
 		for _, s := range details.Seasons {
-			if mc.ignoreList.IsSeasonIgnored(showID, s.SeasonNumber) {
+			localSeason := s.SeasonNumber
+
+			if mc.ignoreList.IsSeasonIgnored(showID, localSeason) {
 				continue
 			}
 
-			// Fetch the full episode list for this season.
-			sr, err := mc.tmdb.GetSeason(showID, s.SeasonNumber)
+			// Apply any season override: local season N may map to a different
+			// TMDB show ID and/or season number (common with split-cour anime).
+			effectiveID := showID
+			effectiveSeason := localSeason
+			sKey := fmt.Sprintf("S%02d", localSeason)
+			if ovr, ok := manualEntry.Overrides[sKey]; ok {
+				if ovr.ID != "" {
+					effectiveID = ovr.ID
+				}
+				if ovr.MapSeason != 0 {
+					effectiveSeason = ovr.MapSeason
+				}
+			}
+
+			// Fetch the full episode list for the effective TMDB show/season.
+			sr, err := mc.tmdb.GetSeason(effectiveID, effectiveSeason)
 			if err != nil {
-				fmt.Printf("Warning: could not fetch season %d for %q: %v\n", s.SeasonNumber, folder, err)
+				fmt.Printf("Warning: could not fetch season %d for %q: %v\n", localSeason, folder, err)
 				continue
 			}
 
@@ -128,11 +150,12 @@ func (mc *MissingChecker) Run() error {
 				continue
 			}
 
-			// Find which aired episodes are absent locally and not ignored.
+			// Check against the TMDB-space present set for the effective show.
+			presentForShow := tmdbPresent[effectiveID]
 			var missingEps []Episode
 			for _, ep := range aired {
-				key := fmt.Sprintf("S%02dE%02d", s.SeasonNumber, ep.EpisodeNumber)
-				if !present[key] && !mc.ignoreList.IsEpisodeIgnored(showID, s.SeasonNumber, ep.EpisodeNumber) {
+				key := fmt.Sprintf("S%02dE%02d", effectiveSeason, ep.EpisodeNumber)
+				if !presentForShow[key] && !mc.ignoreList.IsEpisodeIgnored(showID, localSeason, ep.EpisodeNumber) {
 					missingEps = append(missingEps, ep)
 				}
 			}
@@ -147,10 +170,10 @@ func (mc *MissingChecker) Run() error {
 					showID:       showID,
 					showFolder:   folder,
 					showName:     showName,
-					season:       s.SeasonNumber,
+					season:       localSeason,
 					episodeCount: len(aired),
 					airDate:      aired[0].AirDate,
-					tmdbURL:      fmt.Sprintf("%s/%s/season/%d", tmdbWebBase, showID, s.SeasonNumber),
+					tmdbURL:      fmt.Sprintf("%s/%s/season/%d", tmdbWebBase, effectiveID, effectiveSeason),
 				})
 			} else {
 				// Only some episodes are missing — report individually.
@@ -160,11 +183,11 @@ func (mc *MissingChecker) Run() error {
 						showID:     showID,
 						showFolder: folder,
 						showName:   showName,
-						season:     s.SeasonNumber,
+						season:     localSeason,
 						episode:    ep.EpisodeNumber,
 						title:      ep.Name,
 						airDate:    ep.AirDate,
-						tmdbURL:    fmt.Sprintf("%s/%s/season/%d/episode/%d", tmdbWebBase, showID, s.SeasonNumber, ep.EpisodeNumber),
+						tmdbURL:    fmt.Sprintf("%s/%s/season/%d/episode/%d", tmdbWebBase, effectiveID, effectiveSeason, ep.EpisodeNumber),
 					})
 				}
 			}
@@ -254,6 +277,47 @@ func (mc *MissingChecker) Run() error {
 	}
 	fmt.Println("\nMissing episode check complete.")
 	return nil
+}
+
+// buildTMDBPresentSet translates a set of local S##E## keys into TMDB-space
+// episode keys, grouped by effective TMDB show ID. Season overrides and
+// episode mappings from the manual data entry are applied so that comparisons
+// are made against the correct TMDB show and episode numbers.
+func buildTMDBPresentSet(showID string, localPresent map[string]bool, entry ManualEntry) map[string]map[string]bool {
+	result := make(map[string]map[string]bool)
+	for key := range localPresent {
+		m := epRe.FindStringSubmatch(key)
+		if m == nil {
+			continue
+		}
+		sNum, _ := strconv.Atoi(m[1])
+		eNum, _ := strconv.Atoi(m[2])
+
+		effectiveID := showID
+		tmdbSeason := sNum
+		tmdbEpisode := eNum
+
+		sKey := fmt.Sprintf("S%02d", sNum)
+		if ovr, ok := entry.Overrides[sKey]; ok {
+			if ovr.ID != "" {
+				effectiveID = ovr.ID
+			}
+			if ovr.MapSeason != 0 {
+				tmdbSeason = ovr.MapSeason
+			}
+		}
+		epKey := fmt.Sprintf("%sE%02d", sKey, eNum)
+		if pair, ok := entry.Mapping[epKey]; ok {
+			tmdbSeason = pair[0]
+			tmdbEpisode = pair[1]
+		}
+
+		if result[effectiveID] == nil {
+			result[effectiveID] = make(map[string]bool)
+		}
+		result[effectiveID][fmt.Sprintf("S%02dE%02d", tmdbSeason, tmdbEpisode)] = true
+	}
+	return result
 }
 
 // parseRange parses a single token that is either a plain number ("3") or a

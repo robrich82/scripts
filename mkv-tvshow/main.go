@@ -71,8 +71,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading missing_ignore.json: %v\n", err)
 			os.Exit(1)
 		}
+		missingManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
+			os.Exit(1)
+		}
 		cfg := Config{MediaDir: mediaDir}
-		checker := NewMissingChecker(cfg, cache, tmdb, prompter, ignoreList)
+		checker := NewMissingChecker(cfg, cache, missingManualData, tmdb, prompter, ignoreList)
 		fmt.Printf("Checking for missing episodes in %s...\n", mediaDir)
 		if err := checker.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
