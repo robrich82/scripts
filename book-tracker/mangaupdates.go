@@ -236,6 +236,34 @@ func IsComplete(s *muSeries) bool {
 	return strings.EqualFold(s.Status, "Complete")
 }
 
+// muBestName returns the best display name for a series: the official English
+// title if it has an English publisher, otherwise the Japanese title from the
+// associated titles list (falling back to the MU main title).
+func muBestName(s *muSeries) string {
+	if EnglishPublisher(s) != "" || s.Licensed {
+		return s.Title
+	}
+	// No English license: prefer a Japanese-script title from associated names.
+	for _, a := range s.Associated {
+		if containsJapanese(a.Title) {
+			return a.Title
+		}
+	}
+	return s.Title
+}
+
+// containsJapanese reports whether s contains any hiragana, katakana, or kanji.
+func containsJapanese(s string) bool {
+	for _, r := range s {
+		if (r >= 0x3040 && r <= 0x309F) || // hiragana
+			(r >= 0x30A0 && r <= 0x30FF) || // katakana
+			(r >= 0x4E00 && r <= 0x9FFF) { // CJK unified ideographs
+			return true
+		}
+	}
+	return false
+}
+
 // RelevantRelations returns relations that are direct continuations or
 // related works (sequel, prequel, side story, spin-off). Excludes
 // "Alternative Version", "Doujinshi", "Coloured Version", etc.

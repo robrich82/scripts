@@ -65,6 +65,9 @@ type Series struct {
 	// LastAPICheck is when we last fetched from MangaUpdates.
 	LastAPICheck *time.Time `json:"last_api_check,omitempty"`
 
+	// MUComplete is true when MangaUpdates reports the series as complete.
+	MUComplete bool `json:"mu_complete,omitempty"`
+
 	// IgnoredSuggestions is the list of MangaUpdates series IDs we should
 	// not prompt about again (user declined).
 	IgnoredSuggestions []string `json:"ignored_suggestions,omitempty"`

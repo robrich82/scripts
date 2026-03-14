@@ -82,9 +82,27 @@ func cmdUpdate(dir string, mu *MUClient, interactive bool) error {
 			}
 		}
 
-		// Check for completion: series done in origin + all MU volumes released.
-		if IsComplete(series) && s.Status == StatusActive {
-			fmt.Printf("  [i] %s appears to be complete in MangaUpdates.\n", s.Name)
+		// Sync name from MangaUpdates (official English title, or Japanese if unlicensed).
+		if muName := muBestName(series); muName != "" && muName != s.Name {
+			fmt.Printf("  [~] %s: updating name to %q\n", s.Name, muName)
+			// Preserve Calibre matching under the old name if not already overridden.
+			if s.CalibreSeries == "" {
+				s.CalibreSeries = s.Name
+			}
+			s.Name = muName
+			changed = true
+		}
+
+		// Track MU completion status.
+		if IsComplete(series) {
+			if !s.MUComplete {
+				fmt.Printf("  [i] %s is complete in MangaUpdates.\n", s.Name)
+				s.MUComplete = true
+				changed = true
+			}
+		} else if s.MUComplete {
+			s.MUComplete = false
+			changed = true
 		}
 
 		changed = true // always persist LastAPICheck

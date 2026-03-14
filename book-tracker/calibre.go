@@ -151,7 +151,7 @@ func cmdCalibre(dir, dbPath string, mu *MUClient) error {
 		// Simple heuristic: if we own up to the last volume and NextVolume
 		// would be beyond what MU reports as the final volume, mark complete.
 		// We rely on the user confirming.
-		if maxOwned >= s.NextVolume-1 {
+		if s.MUComplete && maxOwned >= s.NextVolume-1 {
 			// Ask the user.
 			fmt.Printf("\n  %s: you own vol.1–%d and next expected is vol.%d.\n",
 				s.Name, maxOwned, s.NextVolume)
