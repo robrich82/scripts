@@ -4,7 +4,7 @@
 All code in this project should be written in Go where possible.
 
 ## Git Commits
-After making any code changes, always create a git commit. Use a concise, descriptive commit message that reflects the change.
+After making any code changes, always create a git commit. Use a concise, descriptive commit message that reflects the change. Fix any issues reported by `make vet` or `gofmt` before committing.
 
 ## README
 When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change.
