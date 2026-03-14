@@ -13,6 +13,7 @@ func main() {
 	processAll := flag.Bool("all", false, "Process all cached shows without prompting.")
 	ratingsOnly := flag.Bool("ratings-only", false, "Only update NZ content ratings; skip all other metadata processing.")
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
+	missingMode := flag.Bool("missing", false, "Check for episodes that have aired on TMDB but are not present locally.")
 	flag.Parse()
 
 	apiKey := os.Getenv("TMDB_API_KEY")
@@ -39,14 +40,6 @@ func main() {
 
 	prompter := newStdinPrompter()
 
-	shouldProcessAll := *processAll
-	if !shouldProcessAll {
-		ans, err := prompter.Ask("Process all cached shows without prompting? [y/n]: ")
-		if err == nil && ans == "y" {
-			shouldProcessAll = true
-		}
-	}
-
 	mediaDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
@@ -67,6 +60,34 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading cache: %v\n", err)
 		os.Exit(1)
+	}
+
+	tmdb := newHTTPTMDBClient(apiKey, "https://api.themoviedb.org/3")
+
+	// --missing mode: check for aired episodes not present locally.
+	if *missingMode {
+		ignoreList, err := LoadMissingIgnoreList(filepath.Join(cfgDir, "missing_ignore.json"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading missing_ignore.json: %v\n", err)
+			os.Exit(1)
+		}
+		cfg := Config{MediaDir: mediaDir}
+		checker := NewMissingChecker(cfg, cache, tmdb, prompter, ignoreList)
+		fmt.Printf("Checking for missing episodes in %s...\n", mediaDir)
+		if err := checker.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Normal tagging mode.
+	shouldProcessAll := *processAll
+	if !shouldProcessAll {
+		ans, err := prompter.Ask("Process all cached shows without prompting? [y/n]: ")
+		if err == nil && ans == "y" {
+			shouldProcessAll = true
+		}
 	}
 
 	manualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
@@ -95,7 +116,6 @@ func main() {
 		OverwriteRatings: *overwriteRatings,
 	}
 
-	tmdb := newHTTPTMDBClient(apiKey, "https://api.themoviedb.org/3")
 	mkv := newRealMKVRunner()
 	timer := &win32FileTimer{}
 

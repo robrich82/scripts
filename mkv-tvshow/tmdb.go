@@ -17,6 +17,7 @@ type ShowResult struct {
 // Episode holds metadata for a single TV episode from TMDB.
 type Episode struct {
 	EpisodeNumber int    `json:"episode_number"`
+	Name          string `json:"name"`
 	AirDate       string `json:"air_date"`
 	Overview      string `json:"overview"`
 }
@@ -28,10 +29,21 @@ type SeasonResult struct {
 	Episodes   []Episode `json:"episodes"`
 }
 
+// ShowSeason holds summary metadata for a single season as returned by
+// the TMDB /tv/{id} endpoint's "seasons" array.
+type ShowSeason struct {
+	SeasonNumber int    `json:"season_number"`
+	EpisodeCount int    `json:"episode_count"`
+	AirDate      string `json:"air_date"`
+	Name         string `json:"name"`
+}
+
 // ShowDetails holds top-level show metadata from TMDB.
 type ShowDetails struct {
-	PosterPath   string `json:"poster_path"`
-	FirstAirDate string `json:"first_air_date"`
+	PosterPath   string       `json:"poster_path"`
+	FirstAirDate string       `json:"first_air_date"`
+	Name         string       `json:"name"`
+	Seasons      []ShowSeason `json:"seasons"`
 }
 
 // TMDBClient is the interface for all TMDB API calls made by this tool.
