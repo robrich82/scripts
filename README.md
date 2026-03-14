@@ -65,6 +65,7 @@ Data is stored as JSON in `%APPDATA%\book-tracker\` (Windows) or `~/.config/book
 | `book-tracker import FILE.xlsx` | One-time import from the Excel spreadsheet; runs `update` automatically afterwards |
 | `book-tracker add` | Interactively add a new series with MangaUpdates matching |
 | `book-tracker list` | List all tracked and completed series |
+| `book-tracker missing` | List released volumes (vol.1 through next-1) not present in Calibre |
 
 ### Series statuses
 
@@ -131,10 +132,11 @@ book-tracker import "Books & Manga.xlsx"
 book-tracker              # see what's available to buy
 
 # Periodically
-book-tracker update       # refresh release dates
+book-tracker update       # refresh release dates (also syncs series names from MangaUpdates)
 book-tracker calibre      # sync after adding books to Calibre
 book-tracker suggest      # check for new sequels/spin-offs
 book-tracker plex         # check after finishing an anime series
+book-tracker missing      # list released volumes not yet in Calibre
 ```
 
 ---

@@ -17,6 +17,7 @@ Commands:
   import FILE        Import series from Excel spreadsheet (one-time)
   add                Interactively add a new series
   list               List all tracked and completed series
+  missing            List volumes you are missing in active series
 
 Environment:
   PLEX_URL    Plex server base URL  (e.g. http://localhost:32400)
@@ -75,6 +76,9 @@ func main() {
 
 	case "list":
 		err = cmdList(dir)
+
+	case "missing":
+		err = cmdMissing(dir)
 
 	case "help", "--help", "-h":
 		fmt.Print(usage)
