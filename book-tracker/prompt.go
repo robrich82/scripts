@@ -30,8 +30,8 @@ func confirmNo(msg string) bool {
 
 // matchMangaUpdates searches MangaUpdates by title and walks the user through
 // confirming the right series, mirroring the TMDB flow in mkv-tvshow.
-// preferType ("Manga", "Novel", "") biases the best-match selection.
-// Returns the confirmed muSeries, or nil if skipped.
+// preferType ("Manga", "Novel", "") causes matching-type results to be listed
+// first. Returns the confirmed muSeries, or nil if skipped.
 func matchMangaUpdates(mu *MUClient, title string, preferType string) *muSeries {
 	results, err := mu.SearchSeries(title)
 	if err != nil || len(results) == 0 {
@@ -40,36 +40,49 @@ func matchMangaUpdates(mu *MUClient, title string, preferType string) *muSeries 
 		return resolveManualInput(mu, ans)
 	}
 
-	// Prefer a result whose type matches what we expect.
-	best := pickBest(results, preferType)
-	fmt.Printf("  Match: %s (%s, %s)\n", best.Title, best.Type, best.Year)
-	if best.URL != "" {
-		fmt.Printf("  Link:  %s\n", best.URL)
-	}
-	ans := ask("  Correct? [y/n] or enter MangaUpdates URL/ID: ")
-	ans = strings.TrimSpace(ans)
-	switch strings.ToLower(ans) {
-	case "y", "":
-		return best
-	case "n", "s":
-		return nil
-	default:
-		return resolveManualInput(mu, ans)
-	}
-}
+	// Sort: preferred type first, then others.
+	sorted := sortByType(results, preferType)
 
-// pickBest returns the search result that best matches preferType.
-// If no result matches, returns the first result.
-func pickBest(results []muSeries, preferType string) *muSeries {
-	if preferType == "" {
-		return &results[0]
-	}
-	for i := range results {
-		if strings.EqualFold(results[i].Type, preferType) {
-			return &results[i]
+	// Display all results numbered.
+	fmt.Println("  Results:")
+	for i, r := range sorted {
+		fmt.Printf("    %d. %s (%s, %s)\n", i+1, r.Title, r.Type, r.Year)
+		if r.URL != "" {
+			fmt.Printf("       %s\n", r.URL)
 		}
 	}
-	return &results[0]
+
+	ans := ask("  Enter number, URL/ID, or press Enter to skip: ")
+	ans = strings.TrimSpace(ans)
+	if ans == "" || strings.EqualFold(ans, "s") {
+		return nil
+	}
+
+	// Try as a list index first.
+	var idx int
+	if n, _ := fmt.Sscanf(ans, "%d", &idx); n == 1 && idx >= 1 && idx <= len(sorted) {
+		return &sorted[idx-1]
+	}
+
+	// Otherwise treat as URL/ID.
+	return resolveManualInput(mu, ans)
+}
+
+// sortByType returns results with preferType first, preserving relative order
+// within each group.
+func sortByType(results []muSeries, preferType string) []muSeries {
+	if preferType == "" {
+		return results
+	}
+	var preferred, rest []muSeries
+	for _, r := range results {
+		if strings.EqualFold(r.Type, preferType) {
+			preferred = append(preferred, r)
+		} else {
+			rest = append(rest, r)
+		}
+	}
+	return append(preferred, rest...)
 }
 
 // resolveManualInput resolves a user-entered string to a muSeries.
