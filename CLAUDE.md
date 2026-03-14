@@ -10,7 +10,7 @@ After making any code changes, always create a git commit. Use a concise, descri
 When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change.
 
 ## Linting and Formatting
-After making code changes, run `make vet` to check all modules with `go vet` and `gofmt`. Fix any issues before committing. When writing new Go code, ensure it is `gofmt`-formatted (use tabs for indentation).
+`make vet` runs automatically after every Go file edit via a PostToolUse hook. Fix any issues it reports before committing. When writing new Go code, ensure it is `gofmt`-formatted (use tabs for indentation).
 
 ## Build
 After completing a feature or bug fix, build the affected tool(s), do not build without using the make command:
