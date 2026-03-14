@@ -106,9 +106,6 @@ func (mc *MissingChecker) Run() error {
 		var missing []missingItem
 
 		for _, s := range details.Seasons {
-			if s.SeasonNumber == 0 {
-				continue // skip specials
-			}
 			if mc.ignoreList.IsSeasonIgnored(showID, s.SeasonNumber) {
 				continue
 			}
