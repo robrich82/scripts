@@ -108,12 +108,19 @@ type muRelease struct {
 // --- public API --------------------------------------------------------------
 
 // SearchSeries searches for a series by title and returns up to 5 results.
-func (c *MUClient) SearchSeries(title string) ([]muSeries, error) {
-	var res muSearchResult
-	err := c.post("/series/search", map[string]any{
+// preferType, if non-empty (e.g. "Novel", "Manga"), filters the API results
+// to that type and fetches more candidates so the right entry isn't crowded out.
+func (c *MUClient) SearchSeries(title string, preferType string) ([]muSeries, error) {
+	body := map[string]any{
 		"search":  title,
 		"perpage": 5,
-	}, &res)
+	}
+	if preferType != "" {
+		body["type"] = []string{preferType}
+		body["perpage"] = 8 // fetch more when filtering so the correct entry isn't cut off
+	}
+	var res muSearchResult
+	err := c.post("/series/search", body, &res)
 	if err != nil {
 		return nil, err
 	}

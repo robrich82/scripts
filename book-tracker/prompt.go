@@ -33,15 +33,15 @@ func confirmNo(msg string) bool {
 // preferType ("Manga", "Novel", "") causes matching-type results to be listed
 // first. Returns the confirmed muSeries, or nil if skipped.
 func matchMangaUpdates(mu *MUClient, title string, preferType string) *muSeries {
-	results, err := mu.SearchSeries(title)
+	results, err := mu.SearchSeries(title, preferType)
 	if err != nil || len(results) == 0 {
 		fmt.Printf("  No MangaUpdates results for %q.\n", title)
 		ans := ask("  Enter MangaUpdates URL/ID, or press Enter to skip: ")
 		return resolveManualInput(mu, ans)
 	}
 
-	// Sort: preferred type first, then others.
-	sorted := sortByType(results, preferType)
+	// Results are already filtered by type from the API; keep the order.
+	sorted := results
 
 	// Display all results numbered.
 	fmt.Println("  Results:")
