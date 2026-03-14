@@ -239,8 +239,20 @@ func IsComplete(s *muSeries) bool {
 // muBestName returns the best display name for a series: the official English
 // title if it has an English publisher, otherwise the Japanese title from the
 // associated titles list (falling back to the MU main title).
+//
+// For English-licensed series MU's main Title is often the romaji name; the
+// English title lives in Associated.  We pick the first Associated title that
+// is Latin-script and different from the main title.
+//
+// For JP-only series we look for a Japanese-script title in Associated,
+// falling back to the main title (usually romaji).
 func muBestName(s *muSeries) string {
 	if EnglishPublisher(s) != "" || s.Licensed {
+		for _, a := range s.Associated {
+			if isLatinTitle(a.Title) && a.Title != s.Title {
+				return a.Title
+			}
+		}
 		return s.Title
 	}
 	// No English license: prefer a Japanese-script title from associated names.
@@ -250,6 +262,17 @@ func muBestName(s *muSeries) string {
 		}
 	}
 	return s.Title
+}
+
+// isLatinTitle reports whether s contains only Latin-script characters
+// (i.e. no CJK, Cyrillic, Arabic, Thai, Hangul, etc.).
+func isLatinTitle(s string) bool {
+	for _, r := range s {
+		if r >= 0x0370 { // everything from Greek and beyond
+			return false
+		}
+	}
+	return true
 }
 
 // containsJapanese reports whether s contains any hiragana, katakana, or kanji.
