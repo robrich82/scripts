@@ -16,12 +16,6 @@ func ask(msg string) string {
 	return strings.TrimSpace(line)
 }
 
-// confirm returns true if the user answers y/yes (default yes if blank).
-func confirm(msg string) bool {
-	ans := ask(msg + " [Y/n]: ")
-	return ans == "" || strings.EqualFold(ans, "y") || strings.EqualFold(ans, "yes")
-}
-
 // confirmNo returns true only on explicit y/yes (default no).
 func confirmNo(msg string) bool {
 	ans := ask(msg + " [y/N]: ")
@@ -66,23 +60,6 @@ func matchMangaUpdates(mu *MUClient, title string, preferType string) *muSeries 
 
 	// Otherwise treat as URL/ID.
 	return resolveManualInput(mu, ans)
-}
-
-// sortByType returns results with preferType first, preserving relative order
-// within each group.
-func sortByType(results []muSeries, preferType string) []muSeries {
-	if preferType == "" {
-		return results
-	}
-	var preferred, rest []muSeries
-	for _, r := range results {
-		if strings.EqualFold(r.Type, preferType) {
-			preferred = append(preferred, r)
-		} else {
-			rest = append(rest, r)
-		}
-	}
-	return append(preferred, rest...)
 }
 
 // resolveManualInput resolves a user-entered string to a muSeries.

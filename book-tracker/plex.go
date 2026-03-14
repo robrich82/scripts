@@ -36,7 +36,7 @@ func (p *PlexClient) get(path string, params url.Values, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Plex %s: HTTP %d", path, resp.StatusCode)
+		return fmt.Errorf("plex %s: HTTP %d", path, resp.StatusCode)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
@@ -97,7 +97,7 @@ func cmdPlex(dir string, plex *PlexClient, al *ALClient, mu *MUClient) error {
 	fmt.Println("Fetching TV library from Plex...")
 	titles, err := plex.TVShows()
 	if err != nil {
-		return fmt.Errorf("Plex: %w", err)
+		return fmt.Errorf("plex: %w", err)
 	}
 	fmt.Printf("Found %d shows. Checking for anime and related manga/LN...\n\n", len(titles))
 

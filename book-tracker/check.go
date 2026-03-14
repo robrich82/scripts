@@ -98,7 +98,7 @@ func cmdCheck(dir string) error {
 
 	// --- Reminders ---
 	reminded := false
-	checkReminder := func(name string, r *Reminder) bool {
+	checkReminder := func(_ string, r *Reminder) bool {
 		if r == nil {
 			return false
 		}
