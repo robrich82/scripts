@@ -12,6 +12,7 @@ type CheckerConfig struct {
 	Repo           string   `json:"repo,omitempty"`            // owner/repo (github)
 	Prerelease     bool     `json:"prerelease,omitempty"`      // include pre-releases (github)
 	AssetPatterns  []string `json:"asset_patterns,omitempty"`  // glob/regex patterns for assets (github, html, sourceforge)
+	AssetSort      string   `json:"asset_sort,omitempty"`      // sort matched assets: "name" (asc) or "name_desc" (desc), then take first
 	URL            string   `json:"url,omitempty"`             // page URL (html) or resource URL (http-header)
 	VersionRegex   string   `json:"version_regex,omitempty"`   // regex to extract version (html, sourceforge)
 	Project        string   `json:"project,omitempty"`         // project slug (sourceforge)

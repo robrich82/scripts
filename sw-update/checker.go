@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -117,6 +118,7 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 		if app.Checker.RequireAsset && len(assets) == 0 {
 			continue
 		}
+		assets = sortAndLimitAssets(assets, app.Checker.AssetSort)
 		return &CheckResult{
 			Version: strings.TrimPrefix(rel.TagName, "v"),
 			Assets:  assets,
@@ -124,6 +126,21 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 	}
 
 	return nil, fmt.Errorf("no suitable release found for %s", app.Checker.Repo)
+}
+
+// sortAndLimitAssets sorts assets by name and returns only the first when asset_sort is set.
+func sortAndLimitAssets(assets []Asset, sort string) []Asset {
+	if sort == "" || len(assets) <= 1 {
+		return assets
+	}
+	sorted := slices.Clone(assets)
+	switch sort {
+	case "name":
+		slices.SortFunc(sorted, func(a, b Asset) int { return strings.Compare(a.Name, b.Name) })
+	case "name_desc":
+		slices.SortFunc(sorted, func(a, b Asset) int { return strings.Compare(b.Name, a.Name) })
+	}
+	return sorted[:1]
 }
 
 // matchAssetPattern matches an asset name against a pattern.
