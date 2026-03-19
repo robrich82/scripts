@@ -8,10 +8,14 @@ import (
 	"strings"
 )
 
-// detectFileVersion reads the Windows PE file version via PowerShell.
-func detectFileVersion(path string) (string, error) {
+// detectFileVersion reads a Windows PE version field via PowerShell.
+// field selects which VersionInfo property to read; defaults to "FileVersion".
+func detectFileVersion(path, field string) (string, error) {
+	if field == "" {
+		field = "FileVersion"
+	}
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
-		fmt.Sprintf("(Get-Item '%s').VersionInfo.FileVersion", path))
+		fmt.Sprintf("(Get-Item '%s').VersionInfo.%s", path, field))
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("detect file version of %s: %w", path, err)

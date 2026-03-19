@@ -31,7 +31,7 @@ func (d *detectorDispatch) InstalledVersion(app App) (string, error) {
 		if app.Local.Path == "" {
 			return "", fmt.Errorf("file-version detector requires path")
 		}
-		ver, err = detectFileVersion(app.Local.Path)
+		ver, err = detectFileVersion(app.Local.Path, app.Local.VersionField)
 		if err == nil && app.Local.VersionRegex != "" {
 			ver, err = applyVersionRegex(ver, app.Local.VersionRegex)
 		}
