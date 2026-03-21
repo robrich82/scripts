@@ -174,6 +174,12 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 
 	newStem, truncated := buildNewStemFromFS(stem, fsTitlePart, dir)
 
+	// If the computed new stem is identical to the current stem the file was
+	// already truncated to fit MAX_PATH and no rename is needed.
+	if newStem == stem {
+		return
+	}
+
 	fmt.Printf("\n  [!] Title mismatch: %s\n", file)
 	for i := 0; i < max(len(fileTitles), len(expectedTitles)); i++ {
 		ft, et := "", ""
