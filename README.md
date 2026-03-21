@@ -371,6 +371,10 @@ your files:
 
 - `overrides` — redirect a local season to a different TMDB show/season
 - `mapping` — remap a local `S##E##` to a different TMDB `[season, episode]`
+- `title_overrides` — declare the correct filesystem-safe title for an episode
+  when it cannot be derived from TMDB (e.g. DVD releases that combine two OVA
+  episodes). `-title-check` compares against this value instead of fetching
+  TMDB. Use the same lookalike characters as your filenames (`╱` for `/`, etc.).
 - `extras` — metadata for non-episode files (bonus content, OPs/EDs, etc.)
   that have no `S##E##` in their name. The key is the filename **without the
   `.mkv` extension**.

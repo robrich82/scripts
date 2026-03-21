@@ -86,7 +86,8 @@ func (tc *TitleChecker) Run() error {
 		for _, path := range showFiles[showFolder] {
 			dir := filepath.Dir(path)
 			file := filepath.Base(path)
-			stem := strings.TrimSuffix(file, filepath.Ext(file))
+			ext := filepath.Ext(file)
+			stem := strings.TrimSuffix(file, ext)
 
 			// Skip files explicitly listed in the extras map.
 			if entry, ok := tc.manualData[showFolder]; ok {
@@ -101,6 +102,21 @@ func (tc *TitleChecker) Run() error {
 			}
 			sNum, _ := strconv.Atoi(epMatch[1])
 			eNum, _ := strconv.Atoi(epMatch[2])
+			epKey := fmt.Sprintf("S%02dE%02d", sNum, eNum)
+
+			fileTitles := extractFileTitles(stem)
+			if len(fileTitles) == 0 {
+				continue
+			}
+
+			// Check for a manual title override before hitting TMDB.
+			// The override is stored in FS-safe form (e.g. "╱" instead of "/").
+			if entry, ok := tc.manualData[showFolder]; ok {
+				if override, hasOverride := entry.TitleOverrides[epKey]; hasOverride {
+					tc.checkMismatch(path, file, stem, dir, ext, fileTitles, decodeOverrideTitles(override), "Override", override)
+					continue
+				}
+			}
 
 			tmdbID, tmdbSeason, tmdbEpisodeFirst := tc.resolveEpisode(showFolder, showID, sNum, eNum)
 
@@ -134,50 +150,58 @@ func (tc *TitleChecker) Run() error {
 				continue
 			}
 
-			fileTitles := extractFileTitles(stem)
-			if len(fileTitles) == 0 {
-				continue
+			// Build the FS-safe title part from TMDB titles for display and rename.
+			var fsTitles []string
+			for _, t := range tmdbTitles {
+				fsTitles = append(fsTitles, toFSSafe(t))
 			}
-
-			if titlesMatch(fileTitles, tmdbTitles) {
-				continue
-			}
-
-			// Pre-compute the new stem so we can show the exact filename before prompting.
-			newStem, truncated := buildNewStem(stem, tmdbTitles, dir)
-
-			fmt.Printf("\n  [!] Title mismatch: %s\n", file)
-			for i := 0; i < max(len(fileTitles), len(tmdbTitles)); i++ {
-				ft, tt := "", ""
-				if i < len(fileTitles) {
-					ft = fileTitles[i]
-				}
-				if i < len(tmdbTitles) {
-					tt = tmdbTitles[i]
-				}
-				fmt.Printf("       File[%d]: %s\n", i+1, ft)
-				fmt.Printf("       TMDB[%d]: %s\n", i+1, tt)
-			}
-			fmt.Printf("        New name: %s\n", newStem+filepath.Ext(file))
-			if truncated {
-				fmt.Printf("  [i] Title truncated to fit within MAX_PATH (%d chars)\n", windowsMaxPath)
-			}
-
-			ans, _ := tc.prompter.Ask("  Rename? [y/n]: ")
-			if strings.ToLower(strings.TrimSpace(ans)) != "y" {
-				continue
-			}
-
-			newPath := filepath.Join(dir, newStem+filepath.Ext(file))
-			if err := os.Rename(path, newPath); err != nil {
-				fmt.Printf("  [X] Rename failed: %v\n", err)
-			} else {
-				fmt.Printf("  [✓] Renamed to: %s\n", newStem+filepath.Ext(file))
-			}
+			fsTitlePart := strings.Join(fsTitles, " "+multiEpTitleSep+" ")
+			tc.checkMismatch(path, file, stem, dir, ext, fileTitles, tmdbTitles, "TMDB", fsTitlePart)
 		}
 	}
 
 	return nil
+}
+
+// checkMismatch compares fileTitles against expectedTitles and, when they
+// differ, shows both versions and the exact new filename, then prompts to rename.
+// fsTitlePart is the already FS-safe combined title to write into the new stem.
+// label is the source label used in display ("TMDB" or "Override").
+func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTitles, expectedTitles []string, label, fsTitlePart string) {
+	if titlesMatch(fileTitles, expectedTitles) {
+		return
+	}
+
+	newStem, truncated := buildNewStemFromFS(stem, fsTitlePart, dir)
+
+	fmt.Printf("\n  [!] Title mismatch: %s\n", file)
+	for i := 0; i < max(len(fileTitles), len(expectedTitles)); i++ {
+		ft, et := "", ""
+		if i < len(fileTitles) {
+			ft = fileTitles[i]
+		}
+		if i < len(expectedTitles) {
+			et = expectedTitles[i]
+		}
+		fmt.Printf("       File[%d]: %s\n", i+1, ft)
+		fmt.Printf("  %s[%d]: %s\n", label, i+1, et)
+	}
+	fmt.Printf("      New name: %s\n", newStem+ext)
+	if truncated {
+		fmt.Printf("  [i] Title truncated to fit within MAX_PATH (%d chars)\n", windowsMaxPath)
+	}
+
+	ans, _ := tc.prompter.Ask("  Rename? [y/n]: ")
+	if strings.ToLower(strings.TrimSpace(ans)) != "y" {
+		return
+	}
+
+	newPath := filepath.Join(dir, newStem+ext)
+	if err := os.Rename(path, newPath); err != nil {
+		fmt.Printf("  [X] Rename failed: %v\n", err)
+	} else {
+		fmt.Printf("  [✓] Renamed to: %s\n", newStem+ext)
+	}
 }
 
 // resolveEpisode applies manual overrides and mappings, mirroring the
@@ -232,6 +256,25 @@ func (tc *TitleChecker) episodeNumbers(stem string, firstENum int) []int {
 	return []int{firstENum}
 }
 
+// decodeOverrideTitles splits a title_override value on the multi-episode
+// separator and restores ASCII characters from filesystem-safe lookalikes,
+// returning individual decoded titles for comparison with extractFileTitles output.
+func decodeOverrideTitles(override string) []string {
+	parts := strings.Split(override, multiEpTitleSep)
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		for _, rc := range reverseChars {
+			p = strings.ReplaceAll(p, rc.from, rc.to)
+		}
+		result = append(result, p)
+	}
+	return result
+}
+
 // extractFileTitles returns the episode title(s) from a filename stem.
 // Titles are split on the SMALL PLUS SIGN separator for multi-episode files,
 // and filesystem-safe lookalikes are restored to their ASCII originals.
@@ -265,14 +308,14 @@ func extractFileTitles(stem string) []string {
 	return titles
 }
 
-// titlesMatch returns true when the file and TMDB title lists are equivalent
+// titlesMatch returns true when the file and expected title lists are equivalent
 // (same count, each pair equal after normalisation).
-func titlesMatch(fileTitles, tmdbTitles []string) bool {
-	if len(fileTitles) != len(tmdbTitles) {
+func titlesMatch(fileTitles, expectedTitles []string) bool {
+	if len(fileTitles) != len(expectedTitles) {
 		return false
 	}
 	for i := range fileTitles {
-		if !titleNormEqual(fileTitles[i], tmdbTitles[i]) {
+		if !titleNormEqual(fileTitles[i], expectedTitles[i]) {
 			return false
 		}
 	}
@@ -299,35 +342,28 @@ func toFSSafe(title string) string {
 	return result
 }
 
-// buildNewStem replaces the title portion of a filename stem with the TMDB
-// titles (converted to filesystem-safe form), truncating if necessary to keep
+// buildNewStemFromFS replaces the title portion of a filename stem with a
+// pre-computed filesystem-safe title part, truncating if necessary to keep
 // the full path within windowsMaxPath characters.
 // Returns the new stem and whether truncation occurred.
-func buildNewStem(oldStem string, tmdbTitles []string, dir string) (string, bool) {
+func buildNewStemFromFS(oldStem, fsTitlePart, dir string) (string, bool) {
 	m := titleEpCodeRe.FindStringIndex(oldStem)
 	if m == nil {
 		return oldStem, false
 	}
 	prefix := oldStem[:m[1]]
-
-	var fsTitles []string
-	for _, t := range tmdbTitles {
-		fsTitles = append(fsTitles, toFSSafe(t))
-	}
-	titlePart := strings.Join(fsTitles, " "+multiEpTitleSep+" ")
-	newStem := prefix + " - " + titlePart
+	newStem := prefix + " - " + fsTitlePart
 
 	if len(filepath.Join(dir, newStem+".mkv")) <= windowsMaxPath {
 		return newStem, false
 	}
 
-	// Calculate how many bytes the title part may occupy.
 	overhead := len(filepath.Join(dir, prefix+" - .mkv")) + 1 // +1 for null terminator
 	maxTitle := windowsMaxPath - overhead
 	if maxTitle <= 0 {
 		return oldStem, false
 	}
-	return prefix + " - " + truncateTitleToBytes(titlePart, maxTitle), true
+	return prefix + " - " + truncateTitleToBytes(fsTitlePart, maxTitle), true
 }
 
 // truncateTitleToBytes shortens s to fit within maxBytes, preferring a word

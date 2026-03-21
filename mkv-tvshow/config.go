@@ -27,9 +27,10 @@ type ExtraEntry struct {
 
 // ManualEntry holds per-show TMDB ID overrides and episode-level remappings.
 type ManualEntry struct {
-	Overrides map[string]SeasonOverride `json:"overrides"` // keyed by season key e.g. "S02"
-	Mapping   map[string]EpisodePair    `json:"mapping"`   // keyed by "S01E03" -> [tmdbSeason, tmdbEpisode]
-	Extras    map[string]ExtraEntry     `json:"extras"`    // keyed by filename stem (no .mkv extension)
+	Overrides      map[string]SeasonOverride `json:"overrides"`       // keyed by season key e.g. "S02"
+	Mapping        map[string]EpisodePair    `json:"mapping"`         // keyed by "S01E03" -> [tmdbSeason, tmdbEpisode]
+	Extras         map[string]ExtraEntry     `json:"extras"`          // keyed by filename stem (no .mkv extension)
+	TitleOverrides map[string]string         `json:"title_overrides"` // keyed by "S01E03" -> correct FS-safe title
 }
 
 // LoadManualData reads per-show TMDB corrections from a JSON file.
