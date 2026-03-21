@@ -14,6 +14,7 @@ func main() {
 	ratingsOnly := flag.Bool("ratings-only", false, "Only update NZ content ratings; skip all other metadata processing.")
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
 	missingMode := flag.Bool("missing", false, "Check for episodes that have aired on TMDB but are not present locally.")
+	titleCheckMode := flag.Bool("title-check", false, "Check episode titles in filenames against TMDB and offer to rename.")
 	flag.Parse()
 
 	apiKey := os.Getenv("TMDB_API_KEY")
@@ -79,6 +80,23 @@ func main() {
 		cfg := Config{MediaDir: mediaDir}
 		checker := NewMissingChecker(cfg, cache, missingManualData, tmdb, prompter, ignoreList)
 		fmt.Printf("Checking for missing episodes in %s...\n", mediaDir)
+		if err := checker.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// --title-check mode: compare filename titles against TMDB and offer to rename.
+	if *titleCheckMode {
+		titleManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
+			os.Exit(1)
+		}
+		cfg := Config{MediaDir: mediaDir}
+		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter)
+		fmt.Printf("Checking episode titles in %s...\n", mediaDir)
 		if err := checker.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
