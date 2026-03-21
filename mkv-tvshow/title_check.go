@@ -143,6 +143,9 @@ func (tc *TitleChecker) Run() error {
 				continue
 			}
 
+			// Pre-compute the new stem so we can show the exact filename before prompting.
+			newStem, truncated := buildNewStem(stem, tmdbTitles, dir)
+
 			fmt.Printf("\n  [!] Title mismatch: %s\n", file)
 			for i := 0; i < max(len(fileTitles), len(tmdbTitles)); i++ {
 				ft, tt := "", ""
@@ -155,15 +158,14 @@ func (tc *TitleChecker) Run() error {
 				fmt.Printf("       File[%d]: %s\n", i+1, ft)
 				fmt.Printf("       TMDB[%d]: %s\n", i+1, tt)
 			}
-
-			ans, _ := tc.prompter.Ask("  Rename to use TMDB title(s)? [y/n]: ")
-			if strings.ToLower(strings.TrimSpace(ans)) != "y" {
-				continue
-			}
-
-			newStem, truncated := buildNewStem(stem, tmdbTitles, dir)
+			fmt.Printf("        New name: %s\n", newStem+filepath.Ext(file))
 			if truncated {
 				fmt.Printf("  [i] Title truncated to fit within MAX_PATH (%d chars)\n", windowsMaxPath)
+			}
+
+			ans, _ := tc.prompter.Ask("  Rename? [y/n]: ")
+			if strings.ToLower(strings.TrimSpace(ans)) != "y" {
+				continue
 			}
 
 			newPath := filepath.Join(dir, newStem+filepath.Ext(file))
