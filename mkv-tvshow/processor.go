@@ -447,7 +447,7 @@ func (p *Processor) resolveEpisode(showFolder, showID string, sNum, eNum int) (i
 	}
 
 	epKey := fmt.Sprintf("%sE%02d", sKey, eNum)
-	if pair, ok := entry.Mapping[epKey]; ok {
+	if pair, ok := entry.Mapping[epKey]; ok && len(pair) >= 2 {
 		tmdbSeason = pair[0]
 		tmdbEpisode = pair[1]
 	}

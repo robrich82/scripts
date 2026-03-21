@@ -8,8 +8,14 @@ import (
 	"strings"
 )
 
-// EpisodePair holds a [tmdbSeason, tmdbEpisode] remapping.
-type EpisodePair [2]int
+// EpisodePair holds a TMDB remapping for an episode.
+//
+// Two-element form [season, episode]: remaps a single local episode.
+// Three-or-more element form [season, ep1, ep2, ...]: used by -title-check
+// to list explicit TMDB episode numbers when a local range file covers
+// non-consecutive TMDB episodes (e.g. S01E18-E20 → TMDB [18, 20, 22]).
+// The processor always uses only the first two elements.
+type EpisodePair []int
 
 // SeasonOverride redirects a local season to a different TMDB show ID and/or season number.
 type SeasonOverride struct {

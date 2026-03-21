@@ -134,11 +134,25 @@ func (tc *TitleChecker) Run() error {
 			// All local episode numbers this file covers.
 			localEpNums := tc.episodeNumbers(stem, eNum)
 
-			// Map each local episode number to the corresponding TMDB episode.
-			offset := tmdbEpisodeFirst - eNum
+			// Determine which TMDB episodes to fetch titles for.
+			// A 3+ element mapping [season, ep1, ep2, ...] gives an explicit list
+			// for range files where local and TMDB numbering diverge non-linearly.
+			// Otherwise fall back to a linear offset from the resolved first episode.
+			var tmdbEpNums []int
+			if entry, ok := tc.manualData[showFolder]; ok {
+				if pair, ok := entry.Mapping[epKey]; ok && len(pair) >= 3 {
+					tmdbEpNums = pair[1:]
+				}
+			}
+			if tmdbEpNums == nil {
+				offset := tmdbEpisodeFirst - eNum
+				for _, n := range localEpNums {
+					tmdbEpNums = append(tmdbEpNums, n+offset)
+				}
+			}
+
 			var tmdbTitles []string
-			for _, n := range localEpNums {
-				tmdbEp := n + offset
+			for _, tmdbEp := range tmdbEpNums {
 				for _, ep := range sr.Episodes {
 					if ep.EpisodeNumber == tmdbEp {
 						tmdbTitles = append(tmdbTitles, ep.Name)
@@ -228,7 +242,7 @@ func (tc *TitleChecker) resolveEpisode(showFolder, showID string, sNum, eNum int
 		}
 	}
 	epKey := fmt.Sprintf("%sE%02d", sKey, eNum)
-	if pair, ok := entry.Mapping[epKey]; ok {
+	if pair, ok := entry.Mapping[epKey]; ok && len(pair) >= 2 {
 		tmdbSeason = pair[0]
 		tmdbEpisode = pair[1]
 	}

@@ -359,7 +359,8 @@ your files:
     },
     "mapping": {
       "S01E03": [1, 3],
-      "S01E05": [1, 5]
+      "S01E05": [1, 5],
+      "S01E18": [1, 18, 20, 22]
     },
     "extras": {
       "Show Name - S02 - Drama CD": { "date": "2022-04-01", "season": 2 },
@@ -370,7 +371,11 @@ your files:
 ```
 
 - `overrides` — redirect a local season to a different TMDB show/season
-- `mapping` — remap a local `S##E##` to a different TMDB `[season, episode]`
+- `mapping` — remap a local episode to a different TMDB `[season, episode]`.
+  For range files (e.g. `S01E18-E20`) where local and TMDB numbering diverge
+  non-linearly, use `[season, ep1, ep2, ...]` to list all TMDB episode numbers
+  explicitly. The processor uses only the first two elements (for date/metadata);
+  `-title-check` uses the full list for title comparison.
 - `title_overrides` — declare the correct filesystem-safe title for an episode
   when it cannot be derived from TMDB (e.g. DVD releases that combine two OVA
   episodes). `-title-check` compares against this value instead of fetching
