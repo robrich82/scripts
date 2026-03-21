@@ -73,7 +73,7 @@ func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tm
 	}
 	timer := &captureFileTimer{}
 	rc, _ := LoadRatingCache(filepath.Join(t.TempDir(), "rating_cache.json"))
-	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t), rc, nil, nil), timer
+	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t), rc, nil, nil, nil), timer
 }
 
 func emptyRetryList(t *testing.T) *RetryList {
@@ -740,7 +740,7 @@ func TestProcessorRun_NoEpisodeDate_FallsBackToPreviousEpisode(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -769,7 +769,7 @@ func TestProcessorRun_NoEpisodeDate_NoPrevious_FallsBackToSeasonDate(t *testing.
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -798,7 +798,7 @@ func TestProcessorRun_NoEpisodeDate_NoSeasonDate_FallsBackToShowDate(t *testing.
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
 	stats := p.Run()
 	if stats.Success != 1 {
@@ -825,7 +825,7 @@ func TestProcessorRun_FallbackDate_AddsToRetryList(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil, nil)
 
 	p.Run()
 
@@ -850,7 +850,7 @@ func TestProcessorRun_RealDate_RemovesFromRetryList(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
 	retryList.Add(mkvPath) // pre-populate as if a previous run used a fallback
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil, nil)
 
 	p.Run()
 
@@ -879,7 +879,7 @@ func TestProcessorRun_RetryList_BypassesCutoff(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
 	retryList.Add(mkvPath) // file is in retry list despite being old
-	p := NewProcessor(Config{MediaDir: dir, CutoffDate: time.Now(), ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, CutoffDate: time.Now(), ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil, nil)
 
 	stats := p.Run()
 
@@ -914,7 +914,7 @@ func TestProcessorRun_ManualExtra_Processed(t *testing.T) {
 		},
 	}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
 	stats := p.Run()
 
@@ -960,7 +960,7 @@ func TestProcessorRun_ManualExtra_EpisodeRef_UsesEpisodeData(t *testing.T) {
 		},
 	}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
 	stats := p.Run()
 
@@ -1009,7 +1009,7 @@ func TestProcessorRun_ManualExtra_OpEdSuffix_FilenameTitle(t *testing.T) {
 		},
 	}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
 	stats := p.Run()
 
@@ -1057,7 +1057,7 @@ func TestProcessorRun_ManualExtra_EpisodePatternInName_TreatedAsExtra(t *testing
 		},
 	}
 	timer := &captureFileTimer{}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
 	stats := p.Run()
 

@@ -40,6 +40,7 @@ type Processor struct {
 	prompter   Prompter
 	timer      FileTimer
 	retryList  *RetryList
+	titleCache *TitleCache
 
 	// Rating pipeline — all optional (nil disables the feature).
 	ratingCache   *RatingCache
@@ -65,6 +66,7 @@ func NewProcessor(
 	ratingCache *RatingCache,
 	ratingSources []RatingSource,
 	plex PlexClient,
+	titleCache *TitleCache,
 ) *Processor {
 	return &Processor{
 		cfg:                   cfg,
@@ -78,6 +80,7 @@ func NewProcessor(
 		ratingCache:           ratingCache,
 		ratingSources:         ratingSources,
 		plex:                  plex,
+		titleCache:            titleCache,
 		sessionSkipped:        make(map[string]bool),
 		sessionConfirmed:      make(map[string]string),
 		sessionPromptedRating: make(map[string]NZRating),
@@ -326,6 +329,9 @@ func (p *Processor) Run() Stats {
 			}
 
 			title := cleanMetadataTitle(file)
+			if cached, ok := p.titleCache.Get(filePath); ok {
+				title = cached
+			}
 			if p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating) {
 				if stampDate != "" {
 					p.retryList.Remove(filePath)

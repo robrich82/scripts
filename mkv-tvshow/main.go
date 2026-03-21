@@ -87,6 +87,15 @@ func main() {
 		return
 	}
 
+	mkv := newRealMKVRunner()
+	timer := &win32FileTimer{}
+
+	titleCache, err := LoadTitleCache(filepath.Join(cfgDir, "title_cache.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading title_cache.json: %v\n", err)
+		os.Exit(1)
+	}
+
 	// --title-check mode: compare filename titles against TMDB and offer to rename.
 	if *titleCheckMode {
 		titleManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
@@ -95,7 +104,7 @@ func main() {
 			os.Exit(1)
 		}
 		cfg := Config{MediaDir: mediaDir}
-		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter)
+		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter, mkv, titleCache, timer)
 		fmt.Printf("Checking episode titles in %s...\n", mediaDir)
 		if err := checker.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -139,9 +148,6 @@ func main() {
 		OverwriteRatings: *overwriteRatings,
 	}
 
-	mkv := newRealMKVRunner()
-	timer := &win32FileTimer{}
-
 	// tmdb also implements RatingSource; Classification Office is the second source.
 	sources := []RatingSource{tmdb, newClassificationSource()}
 
@@ -160,7 +166,7 @@ func main() {
 
 	fmt.Printf("Scanning %s...\n", mediaDir)
 
-	processor := NewProcessor(cfg, cache, manualData, tmdb, mkv, prompter, timer, retryList, ratingCache, sources, plexClient)
+	processor := NewProcessor(cfg, cache, manualData, tmdb, mkv, prompter, timer, retryList, ratingCache, sources, plexClient, titleCache)
 	stats := processor.Run()
 
 	fmt.Printf("\nDone. Success: %d  Failed: %d  Skipped (old): %d\n",
