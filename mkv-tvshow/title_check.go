@@ -22,29 +22,48 @@ const multiEpTitleSep = "﹢"
 // single (S01E01), dual (S01E01E02), and Plex-normalised range (S01E01-E02) forms.
 var titleEpCodeRe = regexp.MustCompile(`(?i)S\d+(?:E\d+)+(?:-E\d+)?`)
 
-// TitleChecker compares episode title(s) in filenames against TMDB and
-// prompts to rename files where they differ.
+// TitleChecker compares episode title(s) in filenames against TMDB, offers to
+// rename files where they differ, and sets the MKV title metadata to the full
+// (untruncated) TMDB title. The full title is cached so the normal processing
+// mode does not overwrite it with a shorter filename-derived title.
 type TitleChecker struct {
 	cfg        Config
 	cache      *ShowCache
 	manualData map[string]ManualEntry
 	tmdb       TMDBClient
 	prompter   Prompter
+	mkv        MKVRunner   // nil → MKV title setting is skipped
+	titleCache *TitleCache // nil → caching/setting skipped
+	timer      FileTimer
 }
 
 // NewTitleChecker creates a TitleChecker.
-func NewTitleChecker(cfg Config, cache *ShowCache, manualData map[string]ManualEntry, tmdb TMDBClient, prompter Prompter) *TitleChecker {
+func NewTitleChecker(
+	cfg Config,
+	cache *ShowCache,
+	manualData map[string]ManualEntry,
+	tmdb TMDBClient,
+	prompter Prompter,
+	mkv MKVRunner,
+	titleCache *TitleCache,
+	timer FileTimer,
+) *TitleChecker {
 	return &TitleChecker{
 		cfg:        cfg,
 		cache:      cache,
 		manualData: manualData,
 		tmdb:       tmdb,
 		prompter:   prompter,
+		mkv:        mkv,
+		titleCache: titleCache,
+		timer:      timer,
 	}
 }
 
-// Run scans MediaDir and compares episode titles in filenames against TMDB.
-// For every mismatch it displays both titles and offers to rename the file.
+// Run scans MediaDir and for each tracked episode:
+//  1. Compares filename title(s) against TMDB and offers to rename on mismatch.
+//  2. Sets the MKV title metadata to the full (untruncated) TMDB title and
+//     caches it so normal mode will not overwrite it with the filename title.
 func (tc *TitleChecker) Run() error {
 	showFiles := map[string][]string{}
 	var showOrder []string
@@ -113,7 +132,9 @@ func (tc *TitleChecker) Run() error {
 			// The override is stored in FS-safe form (e.g. "╱" instead of "/").
 			if entry, ok := tc.manualData[showFolder]; ok {
 				if override, hasOverride := entry.TitleOverrides[epKey]; hasOverride {
-					tc.checkMismatch(path, file, stem, dir, ext, fileTitles, decodeOverrideTitles(override), "Override", override)
+					decoded := decodeOverrideTitles(override)
+					effectivePath := tc.checkMismatch(path, file, stem, dir, ext, fileTitles, decoded, "Override", override)
+					tc.applyFullTitle(effectivePath, buildFullMKVTitle(stem, decoded))
 					continue
 				}
 			}
@@ -170,7 +191,13 @@ func (tc *TitleChecker) Run() error {
 				fsTitles = append(fsTitles, toFSSafe(t))
 			}
 			fsTitlePart := strings.Join(fsTitles, " "+multiEpTitleSep+" ")
-			tc.checkMismatch(path, file, stem, dir, ext, fileTitles, tmdbTitles, "TMDB", fsTitlePart)
+
+			effectivePath := tc.checkMismatch(path, file, stem, dir, ext, fileTitles, tmdbTitles, "TMDB", fsTitlePart)
+			tc.applyFullTitle(effectivePath, buildFullMKVTitle(stem, tmdbTitles))
+		}
+
+		if err := tc.titleCache.Save(); err != nil {
+			fmt.Printf("[!] Failed to save title cache: %v\n", err)
 		}
 	}
 
@@ -181,9 +208,10 @@ func (tc *TitleChecker) Run() error {
 // differ, shows both versions and the exact new filename, then prompts to rename.
 // fsTitlePart is the already FS-safe combined title to write into the new stem.
 // label is the source label used in display ("TMDB" or "Override").
-func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTitles, expectedTitles []string, label, fsTitlePart string) {
+// Returns the effective file path after any rename (unchanged if no rename).
+func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTitles, expectedTitles []string, label, fsTitlePart string) string {
 	if titlesMatch(fileTitles, expectedTitles) {
-		return
+		return path
 	}
 
 	newStem, truncated := buildNewStemFromFS(stem, fsTitlePart, dir)
@@ -191,7 +219,7 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 	// If the computed new stem is identical to the current stem the file was
 	// already truncated to fit MAX_PATH and no rename is needed.
 	if newStem == stem {
-		return
+		return path
 	}
 
 	fmt.Printf("\n  [!] Title mismatch: %s\n", file)
@@ -213,15 +241,76 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 
 	ans, _ := tc.prompter.Ask("  Rename? [y/n]: ")
 	if strings.ToLower(strings.TrimSpace(ans)) != "y" {
-		return
+		return path
 	}
 
 	newPath := filepath.Join(dir, newStem+ext)
 	if err := os.Rename(path, newPath); err != nil {
 		fmt.Printf("  [X] Rename failed: %v\n", err)
-	} else {
-		fmt.Printf("  [✓] Renamed to: %s\n", newStem+ext)
+		return path
 	}
+	fmt.Printf("  [✓] Renamed to: %s\n", newStem+ext)
+	return newPath
+}
+
+// applyFullTitle sets the MKV title metadata to fullTitle and caches the result.
+// The file's original timestamps are preserved so the normal processing mode's
+// cutoff filter is not affected.
+// Returns true when the title was already current (no work done) or when the
+// update succeeded. Silently succeeds when mkvpropedit is absent.
+func (tc *TitleChecker) applyFullTitle(path, fullTitle string) bool {
+	if fullTitle == "" {
+		return true
+	}
+	if tc.mkv == nil || !tc.mkv.Available() {
+		return true
+	}
+	// Already up to date — skip the mkvpropedit call.
+	if cached, ok := tc.titleCache.Get(path); ok && cached == fullTitle {
+		return true
+	}
+
+	origStat, statErr := os.Stat(path)
+
+	combined, rc, err := tc.mkv.Apply(path, []string{"--edit", "info", "--set", "title=" + fullTitle})
+	if err != nil {
+		fmt.Printf("  [!] mkvpropedit error: %v\n", err)
+		return false
+	}
+	if rc != 0 && !strings.Contains(combined, mkvpropeditSuccessMsg) {
+		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n", rc)
+		return false
+	}
+
+	// Restore timestamps so normal mode's cutoff filter sees the original mtime.
+	if statErr == nil {
+		if err := tc.timer.SetTimes(path, origStat.ModTime()); err != nil {
+			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		}
+		if err := tc.timer.SetCreationTime(path, origStat.ModTime()); err != nil {
+			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		}
+	}
+
+	tc.titleCache.Set(path, fullTitle)
+	fmt.Printf("  [✓] MKV title set: %s\n", fullTitle)
+	return true
+}
+
+// buildFullMKVTitle constructs the full MKV title from a filename stem and
+// decoded (non-FS-safe) TMDB titles. The show name and episode code prefix has
+// its FS-safe lookalikes restored to ASCII. MKV metadata has no path-length
+// limit so the title is never truncated.
+func buildFullMKVTitle(stem string, titles []string) string {
+	m := titleEpCodeRe.FindStringIndex(stem)
+	if m == nil {
+		return ""
+	}
+	prefix := stem[:m[1]]
+	for _, rc := range reverseChars {
+		prefix = strings.ReplaceAll(prefix, rc.from, rc.to)
+	}
+	return prefix + " - " + strings.Join(titles, " "+multiEpTitleSep+" ")
 }
 
 // resolveEpisode applies manual overrides and mappings, mirroring the
@@ -277,8 +366,7 @@ func (tc *TitleChecker) episodeNumbers(stem string, firstENum int) []int {
 }
 
 // decodeOverrideTitles splits a title_override value on the multi-episode
-// separator and restores ASCII characters from filesystem-safe lookalikes,
-// returning individual decoded titles for comparison with extractFileTitles output.
+// separator and restores ASCII characters from filesystem-safe lookalikes.
 func decodeOverrideTitles(override string) []string {
 	parts := strings.Split(override, multiEpTitleSep)
 	var result []string
