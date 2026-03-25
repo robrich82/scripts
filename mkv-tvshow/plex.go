@@ -70,6 +70,9 @@ type PlexClient interface {
 	// sections so that newly processed files are picked up without manual
 	// intervention.
 	RefreshLibraries() error
+	// RefreshMetadata triggers a metadata refresh for the item identified by
+	// ratingKey, causing Plex to re-read embedded metadata from the files.
+	RefreshMetadata(ratingKey string) error
 }
 
 // httpPlexClient is the production PlexClient that communicates with a real
@@ -500,6 +503,18 @@ func (c *httpPlexClient) RefreshLibraries() error {
 		}
 		refreshResp.Body.Close()
 	}
+	return nil
+}
+
+// RefreshMetadata implements PlexClient. It sends a GET to the refresh
+// endpoint for a specific library item, causing Plex to re-read embedded
+// metadata from the files on disk.
+func (c *httpPlexClient) RefreshMetadata(ratingKey string) error {
+	resp, err := c.plexGet("/library/metadata/" + ratingKey + "/refresh")
+	if err != nil {
+		return fmt.Errorf("plex: refresh metadata %s: %w", ratingKey, err)
+	}
+	resp.Body.Close()
 	return nil
 }
 

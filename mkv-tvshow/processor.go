@@ -172,6 +172,7 @@ func (p *Processor) Run() Stats {
 		// seasonCache is reset per show and again whenever the directory changes.
 		seasonCache := map[string]SeasonResult{}
 		currentDir := ""
+		showTouched := false
 
 		for _, path := range showFiles[showFolder] {
 			file := filepath.Base(path)
@@ -249,6 +250,7 @@ func (p *Processor) Run() Stats {
 							} else {
 								p.retryList.Add(filePath)
 							}
+							showTouched = true
 							fmt.Printf("[✓] Processed (extra): %s\n", file)
 							stats.Success++
 						} else {
@@ -276,6 +278,7 @@ func (p *Processor) Run() Stats {
 			if p.cfg.RatingsOnly {
 				// Ratings-only mode: only write LAW_RATING to MKV, skip all other processing.
 				if p.applyRatingOnlyMKV(filePath, rating) {
+					showTouched = true
 					fmt.Printf("[✓] Rating updated: %s\n", file)
 					stats.Success++
 				} else {
@@ -338,6 +341,7 @@ func (p *Processor) Run() Stats {
 				} else {
 					p.retryList.Add(filePath)
 				}
+				showTouched = true
 				fmt.Printf("[✓] Processed: %s\n", file)
 				stats.Success++
 			} else {
@@ -354,7 +358,7 @@ func (p *Processor) Run() Stats {
 				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
 			}
 		}
-		p.applyPlexRatings(showID, showName)
+		p.applyPlexRatings(showID, showName, showTouched)
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -776,7 +780,7 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 // level. Season and show ratings are computed as the maximum (most restrictive)
 // rating across their child items. Does nothing when Plex is not configured.
 // showName is used as a title-match fallback when TMDB GUID lookup fails.
-func (p *Processor) applyPlexRatings(tmdbID, showName string) {
+func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool) {
 	if p.plex == nil || p.ratingCache == nil {
 		return
 	}
@@ -844,6 +848,14 @@ func (p *Processor) applyPlexRatings(tmdbID, showName string) {
 	if showMax != RatingNone {
 		if err := p.plex.SetContentRating(showKey, PlexTypeShow, showMax); err != nil {
 			fmt.Printf("  [!] Plex: set show %s rating: %v\n", showKey, err)
+		}
+	}
+
+	if touched {
+		if err := p.plex.RefreshMetadata(showKey); err != nil {
+			fmt.Printf("  [!] Plex: refresh metadata for show %s: %v\n", showKey, err)
+		} else {
+			fmt.Printf("  [i] Plex: metadata refresh triggered for show %s\n", showKey)
 		}
 	}
 }

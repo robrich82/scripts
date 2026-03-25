@@ -67,7 +67,8 @@ func (f *fakePlexClient) SetContentRating(ratingKey string, t PlexItemType, rati
 	return f.setRatingErr
 }
 
-func (f *fakePlexClient) RefreshLibraries() error { return nil }
+func (f *fakePlexClient) RefreshLibraries() error  { return nil }
+func (f *fakePlexClient) RefreshMetadata(_ string) error { return nil }
 
 // --- httpPlexClient unit tests ---
 
@@ -545,6 +546,25 @@ func TestHTTPPlexClient_RefreshLibraries_RefreshesShowSections(t *testing.T) {
 	}
 	if len(refreshPaths) != 1 || refreshPaths[0] != "/library/sections/1/refresh" {
 		t.Errorf("refreshPaths = %v; want [/library/sections/1/refresh]", refreshPaths)
+	}
+}
+
+// --- RefreshMetadata tests ---
+
+func TestHTTPPlexClient_RefreshMetadata_CallsCorrectPath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	if err := c.RefreshMetadata("42"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/library/metadata/42/refresh" {
+		t.Errorf("path = %q; want /library/metadata/42/refresh", gotPath)
 	}
 }
 
