@@ -59,7 +59,15 @@ func (r *realMKVRunner) Identify(filePath string) (*MKVInfo, error) {
 
 func (r *realMKVRunner) Apply(filePath string, edits []string) error {
 	args := append([]string{filePath}, edits...)
-	return exec.Command(r.mkvpropedit, args...).Run()
+	cmd := exec.Command(r.mkvpropedit, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if len(out) > 0 {
+			return fmt.Errorf("%w\n%s", err, strings.TrimSpace(string(out)))
+		}
+		return err
+	}
+	return nil
 }
 
 // loggingEditor wraps an MKVEditor and prints the planned edits before applying.
