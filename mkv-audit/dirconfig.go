@@ -145,6 +145,28 @@ func resolveIETFMap(filePath, root string, lib *Library, origin OriginInfo) map[
 	return result
 }
 
+// findMatchedOverride returns the first DirOverride from lib whose path is a
+// case-insensitive prefix of filePath (relative to root), or nil if none match.
+func findMatchedOverride(filePath, root string, lib *Library) *DirOverride {
+	if lib == nil {
+		return nil
+	}
+	rel, err := filepath.Rel(root, filePath)
+	if err != nil {
+		return nil
+	}
+	rel = filepath.ToSlash(rel)
+	for i := range lib.Overrides {
+		overridePath := filepath.ToSlash(lib.Overrides[i].Path)
+		relLower := strings.ToLower(rel)
+		ovLower := strings.ToLower(overridePath)
+		if relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/") {
+			return &lib.Overrides[i]
+		}
+	}
+	return nil
+}
+
 // contentRootDir returns the first path component of filePath relative to
 // libraryRoot. This is the per-show or per-movie directory name used as the
 // TMDB search key. Returns "" when filePath is not under libraryRoot.

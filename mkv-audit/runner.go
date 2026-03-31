@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -158,6 +159,21 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 	return origins
 }
 
+// langFix describes a single track that needs its ISO language corrected.
+type langFix struct {
+	trackID     int
+	trackType   string // "video" or "audio"
+	currentLang string
+	targetLang  string
+	targetIETF  string
+}
+
+// langMismatchCandidate groups the fixable mismatch edits for one file.
+type langMismatchCandidate struct {
+	path  string
+	fixes []langFix
+}
+
 // trimCandidate holds the data needed for the sequential trim phase.
 type trimCandidate struct {
 	path       string
@@ -175,6 +191,7 @@ type trimCandidate struct {
 func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter, tmdb TMDBOriginClient, remuxer MKVRemuxer, cutoffDate time.Time) Stats {
 	var stats Stats
 	var trimCandidates []trimCandidate
+	var langMismatches []langMismatchCandidate
 	unknownCodecs := map[string]bool{}
 
 	// Check for a previous failure cache.
@@ -232,6 +249,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			var buf strings.Builder
 			var local Stats
 			var localCodecs []string
+			var localMismatches []langMismatchCandidate
 
 			// Resolve per-file IETF map and original language.
 			origin := origins[contentRootDir(p, libRoot)]
@@ -247,6 +265,48 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			} else {
 				res = AnalyzeFile(*info, AnalyzeOptions{IETFMap: ietfMap, OriginLang: originLang})
 				localCodecs = append(localCodecs, res.UnknownCodecs...)
+
+				// Detect video/audio tracks whose language does not match the active
+				// dir override. Collect fixable cases for the sequential prompt phase.
+				if override := findMatchedOverride(p, libRoot, lib); override != nil && len(override.IETF) > 0 {
+					overrideKeys := make([]string, 0, len(override.IETF))
+					for k := range override.IETF {
+						overrideKeys = append(overrideKeys, k)
+					}
+					sort.Strings(overrideKeys)
+					keysStr := "[" + strings.Join(overrideKeys, ", ") + "]"
+					// Unambiguous fix target: only when override has exactly one key.
+					var fixLang, fixIETF string
+					if len(override.IETF) == 1 {
+						fixLang, fixIETF = overrideKeys[0], override.IETF[overrideKeys[0]]
+					}
+					var candidate langMismatchCandidate
+					candidate.path = p
+					for _, t := range info.Tracks {
+						if t.Type != "video" && t.Type != "audio" {
+							continue
+						}
+						lang := normalizeLanguage(t.Properties.Language)
+						if _, ok := override.IETF[lang]; ok {
+							continue
+						}
+						fmt.Fprintf(&buf, "[WARN]   %s: %s track language %q not in override %s\n",
+							basename, t.Type, lang, keysStr)
+						if fixLang != "" {
+							candidate.fixes = append(candidate.fixes, langFix{
+								trackID:     t.ID,
+								trackType:   t.Type,
+								currentLang: lang,
+								targetLang:  fixLang,
+								targetIETF:  fixIETF,
+							})
+						}
+					}
+					if len(candidate.fixes) > 0 {
+						localMismatches = append(localMismatches, candidate)
+					}
+				}
+
 				if res.Failed {
 					fmt.Fprintf(&buf, "[FAILED] %s: %s\n", basename, strings.Join(res.FailReasons, ", "))
 					local.Failed++
@@ -282,6 +342,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			for _, c := range localCodecs {
 				unknownCodecs[c] = true
 			}
+			langMismatches = append(langMismatches, localMismatches...)
 			if remuxer != nil && info != nil && !res.Failed {
 				trimCandidates = append(trimCandidates, trimCandidate{
 					path:       p,
@@ -294,6 +355,43 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 	}
 
 	wg.Wait()
+
+	// Sequential lang-mismatch fix phase: prompt per file, then apply.
+	if len(langMismatches) > 0 {
+		autoAll := false
+		for _, lm := range langMismatches {
+			basename := filepath.Base(lm.path)
+			if !autoAll {
+				var lines []string
+				for _, f := range lm.fixes {
+					lines = append(lines, fmt.Sprintf("    %s track: %q → %s (%s)", f.trackType, f.currentLang, f.targetLang, f.targetIETF))
+				}
+				ans, _ := prompter.Ask(fmt.Sprintf("[LANGFIX] %s\n%s\n  Fix language? (y/n/a=all): ", basename, strings.Join(lines, "\n")))
+				ans = strings.ToLower(strings.TrimSpace(ans))
+				switch ans {
+				case "a":
+					autoAll = true
+				case "y":
+					// proceed
+				default:
+					fmt.Printf("[SKIP]   %s (lang fix skipped)\n", basename)
+					continue
+				}
+			}
+			var edits []string
+			for _, f := range lm.fixes {
+				edits = append(edits, trackEdit(f.trackID, "language", f.targetLang, "language-ietf", f.targetIETF)...)
+			}
+			if err := editor.Apply(lm.path, edits); err != nil {
+				fmt.Printf("[ERR]    %s: lang fix: %v\n", basename, err)
+				stats.Failed++
+				stats.FailedPaths = append(stats.FailedPaths, lm.path)
+			} else {
+				fmt.Printf("[LANGFIX] %s: language set to %s\n", basename, lm.fixes[0].targetLang)
+				stats.LangFixes++
+			}
+		}
+	}
 
 	// Sequential trim phase: prompt per file, then remux.
 	if remuxer != nil {
