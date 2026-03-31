@@ -268,17 +268,17 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 
 				// Detect video/audio tracks whose language does not match the active
 				// dir override. Collect fixable cases for the sequential prompt phase.
-				if override := findMatchedOverride(p, libRoot, lib); override != nil && len(override.IETF) > 0 {
-					overrideKeys := make([]string, 0, len(override.IETF))
-					for k := range override.IETF {
+				if overrideIETF := matchedOverrideIETF(p, libRoot, lib); len(overrideIETF) > 0 {
+					overrideKeys := make([]string, 0, len(overrideIETF))
+					for k := range overrideIETF {
 						overrideKeys = append(overrideKeys, k)
 					}
 					sort.Strings(overrideKeys)
 					keysStr := "[" + strings.Join(overrideKeys, ", ") + "]"
-					// Unambiguous fix target: only when override has exactly one key.
+					// Unambiguous fix target: only when merged override has exactly one key.
 					var fixLang, fixIETF string
-					if len(override.IETF) == 1 {
-						fixLang, fixIETF = overrideKeys[0], override.IETF[overrideKeys[0]]
+					if len(overrideIETF) == 1 {
+						fixLang, fixIETF = overrideKeys[0], overrideIETF[overrideKeys[0]]
 					}
 					var candidate langMismatchCandidate
 					candidate.path = p
@@ -287,7 +287,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 							continue
 						}
 						lang := normalizeLanguage(t.Properties.Language)
-						if _, ok := override.IETF[lang]; ok {
+						if _, ok := overrideIETF[lang]; ok {
 							continue
 						}
 						fmt.Fprintf(&buf, "[WARN]   %s: %s track language %q not in override %s\n",

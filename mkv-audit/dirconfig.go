@@ -145,9 +145,12 @@ func resolveIETFMap(filePath, root string, lib *Library, origin OriginInfo) map[
 	return result
 }
 
-// findMatchedOverride returns the first DirOverride from lib whose path is a
-// case-insensitive prefix of filePath (relative to root), or nil if none match.
-func findMatchedOverride(filePath, root string, lib *Library) *DirOverride {
+// matchedOverrideIETF returns the merged IETF map from all DirOverrides in lib
+// whose path is a case-insensitive prefix of filePath (relative to root).
+// Returns nil when no overrides match. When multiple overrides match (e.g. a
+// parent dir and a child dir), their IETF entries are merged in order so the
+// most-specific override wins — mirroring resolveIETFMap behaviour.
+func matchedOverrideIETF(filePath, root string, lib *Library) map[string]string {
 	if lib == nil {
 		return nil
 	}
@@ -156,15 +159,21 @@ func findMatchedOverride(filePath, root string, lib *Library) *DirOverride {
 		return nil
 	}
 	rel = filepath.ToSlash(rel)
-	for i := range lib.Overrides {
-		overridePath := filepath.ToSlash(lib.Overrides[i].Path)
+	var merged map[string]string
+	for _, override := range lib.Overrides {
+		overridePath := filepath.ToSlash(override.Path)
 		relLower := strings.ToLower(rel)
 		ovLower := strings.ToLower(overridePath)
 		if relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/") {
-			return &lib.Overrides[i]
+			if merged == nil {
+				merged = make(map[string]string)
+			}
+			for k, v := range override.IETF {
+				merged[k] = v
+			}
 		}
 	}
-	return nil
+	return merged
 }
 
 // contentRootDir returns the first path component of filePath relative to
