@@ -1,0 +1,396 @@
+package main
+
+import (
+	"archive/zip"
+	"bytes"
+	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	pngenc "image/png"
+)
+
+var imageExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true,
+	".gif": true, ".webp": true, ".bmp": true,
+	".tiff": true, ".tif": true,
+}
+
+func isImageFile(name string) bool {
+	return imageExts[strings.ToLower(filepath.Ext(name))]
+}
+
+// entry describes one file that will be written into the new CBZ.
+type entry struct {
+	original *zip.File // nil for an injected blank page
+	origIdx  int       // index into the sorted imgs slice; -1 for blank
+	newName  string
+	data     []byte // populated only for blank pages
+}
+
+// pageInfo holds the attributes we care about from a ComicInfo <Page> element.
+type pageInfo struct {
+	pageType      string
+	doublePage    bool
+	imageSize     int64
+	width, height int
+}
+
+func processCBZ(path string, dryRun, verbose bool) error {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+
+	// ── Collect files ──────────────────────────────────────────────────────
+	var ciFile *zip.File
+	var imgs []*zip.File
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		base := filepath.Base(f.Name)
+		if strings.EqualFold(base, "ComicInfo.xml") {
+			ciFile = f
+		} else if isImageFile(f.Name) {
+			imgs = append(imgs, f)
+		}
+	}
+
+	if len(imgs) == 0 {
+		zr.Close()
+		return fmt.Errorf("no image files found")
+	}
+
+	// ── Sort images (natural, case-insensitive — same as CBZ viewers) ──────
+	sort.Slice(imgs, func(i, j int) bool {
+		return naturalLess(imgs[i].Name, imgs[j].Name)
+	})
+
+	// ── Idempotency guard ──────────────────────────────────────────────────
+	// If the first image is already "cover.*" and the second is "p001.*" the
+	// file has been processed before; skip it.
+	coverBase := strings.ToLower(filepath.Base(imgs[0].Name))
+	if strings.HasPrefix(coverBase, "cover.") &&
+		len(imgs) > 1 && strings.HasPrefix(strings.ToLower(filepath.Base(imgs[1].Name)), "p001.") {
+		zr.Close()
+		if verbose {
+			fmt.Println("  already processed, skipping")
+		}
+		return nil
+	}
+
+	// ── Parse ComicInfo.xml ────────────────────────────────────────────────
+	var ci *ComicInfo
+	oldInfo := make(map[int]pageInfo) // Image index → metadata
+	if ciFile != nil {
+		data, err := readZipEntry(ciFile)
+		if err != nil {
+			zr.Close()
+			return fmt.Errorf("read ComicInfo.xml: %w", err)
+		}
+		ci, err = parseComicInfo(data)
+		if err != nil {
+			zr.Close()
+			return fmt.Errorf("parse ComicInfo.xml: %w", err)
+		}
+		if ci.Pages != nil {
+			for _, p := range ci.Pages.Pages {
+				oldInfo[p.Image] = pageInfo{
+					pageType:   p.Type,
+					doublePage: p.DoublePage,
+					imageSize:  p.ImageSize,
+					width:      p.ImageWidth,
+					height:     p.ImageHeight,
+				}
+			}
+		}
+	}
+
+	// ── Find insertion point ───────────────────────────────────────────────
+	// Scan from imgs[1] onward; insert blank before the first non-double page.
+	insertBefore := -1
+	for i := 1; i < len(imgs); i++ {
+		if !isDoublePage(imgs[i], oldInfo, i) {
+			insertBefore = i
+			break
+		}
+	}
+
+	// ── Create blank page ──────────────────────────────────────────────────
+	var blankData []byte
+	var blankExt string
+	var blankW, blankH int
+	if insertBefore >= 0 {
+		blankW, blankH, blankExt, blankData, err = createBlankLike(imgs[insertBefore])
+		if err != nil {
+			// Non-fatal: warn and skip blank insertion.
+			fmt.Printf("  WARNING: could not create blank page (%v); skipping blank insertion\n", err)
+			insertBefore = -1
+		}
+	}
+
+	// ── Build entry list ───────────────────────────────────────────────────
+	coverExt := strings.ToLower(filepath.Ext(imgs[0].Name))
+	entries := []entry{{original: imgs[0], origIdx: 0, newName: "cover" + coverExt}}
+
+	newIdx := 1
+	for i := 1; i < len(imgs); i++ {
+		if i == insertBefore {
+			entries = append(entries, entry{
+				origIdx: -1,
+				newName: fmt.Sprintf("p%03d%s", newIdx, blankExt),
+				data:    blankData,
+			})
+			newIdx++
+		}
+		ext := strings.ToLower(filepath.Ext(imgs[i].Name))
+		entries = append(entries, entry{
+			original: imgs[i],
+			origIdx:  i,
+			newName:  fmt.Sprintf("p%03d%s", newIdx, ext),
+		})
+		newIdx++
+	}
+
+	// ── Verbose output ─────────────────────────────────────────────────────
+	if verbose {
+		for _, e := range entries {
+			if e.origIdx < 0 {
+				fmt.Printf("  [blank %dx%d] → %s\n", blankW, blankH, e.newName)
+			} else {
+				fmt.Printf("  %s → %s\n", imgs[e.origIdx].Name, e.newName)
+			}
+		}
+	}
+
+	if dryRun {
+		zr.Close()
+		return nil
+	}
+
+	// ── Build updated ComicInfo ────────────────────────────────────────────
+	if ci == nil {
+		ci = &ComicInfo{}
+	}
+	ci.PageCount = len(entries)
+	ci.Pages = &ComicPages{Pages: buildPages(entries, oldInfo, blankW, blankH)}
+
+	ciData, err := marshalComicInfo(ci)
+	if err != nil {
+		zr.Close()
+		return fmt.Errorf("marshal ComicInfo.xml: %w", err)
+	}
+
+	// ── Write new zip to a temp file (zr still open for reads) ────────────
+	tmpPath, err := writeNewCBZ(filepath.Dir(path), entries, ciData, zr)
+	zr.Close()
+	if err != nil {
+		return fmt.Errorf("write new CBZ: %w", err)
+	}
+
+	// ── Backup original ────────────────────────────────────────────────────
+	backupPath := path + ".bak"
+	if err := copyFile(path, backupPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("backup: %w", err)
+	}
+
+	// ── Replace original with new zip ─────────────────────────────────────
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("replace original (backup at %s): %w", backupPath, err)
+	}
+
+	return nil
+}
+
+// isDoublePage returns true if the image at imgs[imgIdx] is a double-page spread.
+// It checks ComicInfo metadata first, falling back to reading image dimensions.
+func isDoublePage(f *zip.File, oldInfo map[int]pageInfo, imgIdx int) bool {
+	if pi, ok := oldInfo[imgIdx]; ok {
+		if pi.doublePage || strings.EqualFold(pi.pageType, "DoublePage") {
+			return true
+		}
+		if pi.width > 0 && pi.height > 0 {
+			return pi.width > pi.height
+		}
+	}
+	rc, err := f.Open()
+	if err != nil {
+		return false
+	}
+	defer rc.Close()
+	cfg, _, err := image.DecodeConfig(rc)
+	if err != nil {
+		return false
+	}
+	return cfg.Width > cfg.Height
+}
+
+// createBlankLike creates a white image matching the dimensions of f.
+// Returns width, height, extension (with dot), encoded bytes, error.
+func createBlankLike(f *zip.File) (w, h int, ext string, data []byte, err error) {
+	rc, err := f.Open()
+	if err != nil {
+		return 0, 0, "", nil, err
+	}
+	cfg, format, decErr := image.DecodeConfig(rc)
+	rc.Close()
+	if decErr != nil {
+		return 0, 0, "", nil, fmt.Errorf("decode config %s: %w", f.Name, decErr)
+	}
+	w, h = cfg.Width, cfg.Height
+
+	// Build a white grayscale image.
+	img := newWhiteGray(w, h)
+
+	var buf bytes.Buffer
+	if format == "jpeg" {
+		ext = ".jpg"
+		err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90})
+	} else {
+		ext = ".png"
+		err = pngenc.Encode(&buf, img)
+	}
+	if err != nil {
+		return 0, 0, "", nil, fmt.Errorf("encode blank: %w", err)
+	}
+	return w, h, ext, buf.Bytes(), nil
+}
+
+// newWhiteGray returns a white grayscale image of the given dimensions.
+func newWhiteGray(w, h int) *image.Gray {
+	img := image.NewGray(image.Rect(0, 0, w, h))
+	for i := range img.Pix {
+		img.Pix[i] = 255
+	}
+	return img
+}
+
+// buildPages constructs the updated ComicInfo <Pages> list.
+func buildPages(entries []entry, oldInfo map[int]pageInfo, blankW, blankH int) []ComicPage {
+	pages := make([]ComicPage, len(entries))
+	for newIdx, e := range entries {
+		page := ComicPage{Image: newIdx}
+		switch {
+		case newIdx == 0:
+			page.Type = "FrontCover"
+			if pi, ok := oldInfo[e.origIdx]; ok {
+				page.ImageWidth = pi.width
+				page.ImageHeight = pi.height
+				page.ImageSize = pi.imageSize
+			}
+		case e.origIdx < 0:
+			// Blank page — no type, no double-page flag.
+			page.ImageWidth = blankW
+			page.ImageHeight = blankH
+		default:
+			if pi, ok := oldInfo[e.origIdx]; ok {
+				page.DoublePage = pi.doublePage
+				page.ImageWidth = pi.width
+				page.ImageHeight = pi.height
+				page.ImageSize = pi.imageSize
+			}
+		}
+		pages[newIdx] = page
+	}
+	return pages
+}
+
+// writeNewCBZ streams entries (and ComicInfo.xml) into a new temp file.
+// Returns the temp file path on success.
+func writeNewCBZ(dir string, entries []entry, ciData []byte, zr *zip.ReadCloser) (string, error) {
+	tmp, err := os.CreateTemp(dir, "cbzfix-*.tmp")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+
+	zw := zip.NewWriter(tmp)
+
+	cleanup := func() {
+		zw.Close()
+		tmp.Close()
+		os.Remove(tmpPath)
+	}
+
+	for _, e := range entries {
+		w, err := zw.Create(e.newName)
+		if err != nil {
+			cleanup()
+			return "", fmt.Errorf("create entry %s: %w", e.newName, err)
+		}
+		if e.original != nil {
+			rc, err := e.original.Open()
+			if err != nil {
+				cleanup()
+				return "", fmt.Errorf("open source entry %s: %w", e.original.Name, err)
+			}
+			_, cpErr := io.Copy(w, rc)
+			rc.Close()
+			if cpErr != nil {
+				cleanup()
+				return "", fmt.Errorf("copy entry %s: %w", e.original.Name, cpErr)
+			}
+		} else {
+			if _, err := w.Write(e.data); err != nil {
+				cleanup()
+				return "", fmt.Errorf("write blank page: %w", err)
+			}
+		}
+	}
+
+	// Write ComicInfo.xml.
+	w, err := zw.Create("ComicInfo.xml")
+	if err != nil {
+		cleanup()
+		return "", fmt.Errorf("create ComicInfo.xml: %w", err)
+	}
+	if _, err := w.Write(ciData); err != nil {
+		cleanup()
+		return "", fmt.Errorf("write ComicInfo.xml: %w", err)
+	}
+
+	if err := zw.Close(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("close zip writer: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", err
+	}
+	return tmpPath, nil
+}
+
+func readZipEntry(f *zip.File) ([]byte, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
+}
+
+func copyFile(src, dst string) error {
+	sf, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sf.Close()
+	df, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer df.Close()
+	_, err = io.Copy(df, sf)
+	return err
+}

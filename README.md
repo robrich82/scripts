@@ -1,11 +1,12 @@
 # Scripts
 
-A collection of Go command-line utilities for managing MKV media files and software updates.
+A collection of Go command-line utilities for managing MKV media files, CBZ comic archives, and software updates.
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
+| [cbz-fix](#cbz-fix) | Normalise CBZ archives: rename cover, insert blank page, renumber pages |
 | [mkv-audit](#mkv-audit) | Normalize MKV track language codes and default/forced flags |
 | [mkv-movie](#mkv-movie) | Tag movie MKVs with full metadata from TMDB and sync timestamps |
 | [mkv-musicvideo](#mkv-musicvideo) | Fuzzy-match video files to audio files for renaming |
@@ -29,6 +30,7 @@ make all
 Build a specific tool:
 
 ```sh
+make cbz-fix
 make mkv-audit
 make mkv-movie
 make mkv-musicvideo
@@ -40,6 +42,61 @@ Run all tests:
 
 ```sh
 make test
+```
+
+---
+
+## cbz-fix
+
+Normalises CBZ comic archives for consistent two-page-spread viewing:
+
+1. **Backs up** each CBZ to `<file>.cbz.bak` alongside the original.
+2. **Reads `ComicInfo.xml`** (if present) to gather page metadata.
+3. **Renames the cover** (first image by natural sort order) to `cover.<ext>`.
+4. **Inserts a blank page** — white, same dimensions as the first non-double-page
+   after the cover — so that interior pages land on the correct side in a
+   two-page-spread viewer.
+5. **Renames all remaining pages** to `p001.<ext>`, `p002.<ext>`, … in sort order,
+   moving every image to the root of the zip.
+6. **Updates `ComicInfo.xml`** `PageCount` and `Pages` to reflect the new layout.
+   Creates a minimal `ComicInfo.xml` if one did not exist.
+
+A double-page spread is detected by checking `DoublePage="true"` or
+`Type="DoublePage"` in `ComicInfo.xml` first, then falling back to image
+dimensions (width > height = landscape = double spread).
+
+Files whose first image is already named `cover.*` and second image `p001.*`
+are treated as already processed and skipped.
+
+### Usage
+
+Run from (or pass as an argument) the directory containing your CBZ files:
+
+```sh
+cbz-fix              # process all CBZs under the current directory
+cbz-fix /path/to/comics
+cbz-fix --dry-run    # preview without making changes
+cbz-fix --verbose    # show per-file rename details
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview all changes without modifying any files |
+| `--verbose` | Print each filename mapping for every CBZ processed |
+
+### Output
+
+```
+/comics/Batman Vol 1/Batman 001.cbz
+/comics/Batman Vol 1/Batman 002.cbz
+  [blank 1280x1988] → p001.png
+  Batman_002_p001.jpg → p002.jpg
+  Batman_002_p002.jpg → p003.jpg
+  ...
+
+Done — processed: 2  errors: 0
 ```
 
 ---
@@ -553,6 +610,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 .
 ├── Makefile
 ├── dist/               # Built executables (git-ignored)
+├── cbz-fix/
 ├── mkv-audit/
 ├── mkv-movie/
 ├── mkv-musicvideo/

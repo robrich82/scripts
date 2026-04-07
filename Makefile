@@ -1,6 +1,9 @@
-.PHONY: all clean mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update test vet
+.PHONY: all clean cbz-fix mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update test vet
 
-all: mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update
+all: cbz-fix mkv-audit mkv-movie mkv-musicvideo mkv-tvshow sw-update
+
+cbz-fix:
+	cd cbz-fix && go build -o ../dist/cbz-fix.exe .
 
 mkv-audit:
 	cd mkv-audit && go build -o ../dist/mkv-audit.exe .
