@@ -171,7 +171,7 @@ func selectAssets(ghAssets []ghAsset, patterns []string) []Asset {
 }
 
 var (
-	nonWindowsExts        = []string{".AppImage", ".deb", ".rpm", ".dmg"}
+	nonWindowsExts        = []string{".appimage", ".deb", ".rpm", ".dmg"}
 	nonWindowsSubstrings  = []string{"-linux-", "-macos-", "-darwin-", ".tar.xz", "-steamrt-", "-musl-"}
 	windowsPreferKeywords = []string{"win", "windows", "x64", "amd64", "x86_64"}
 	windowsPreferExts     = []string{".exe", ".msi", ".zip", ".7z"}
