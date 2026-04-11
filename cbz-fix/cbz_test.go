@@ -144,7 +144,7 @@ func TestProcessCBZ_BasicRename(t *testing.T) {
 		{"003.png", portrait},
 	})
 
-	if err := processCBZ(path, false, false); err != nil {
+	if err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestProcessCBZ_BlankIsWhite(t *testing.T) {
 		{"002.png", portrait},
 	})
 
-	if err := processCBZ(path, false, false); err != nil {
+	if err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestProcessCBZ_DoublePageSkipped(t *testing.T) {
 		{"003.png", portrait},  // first non-double page
 	})
 
-	if err := processCBZ(path, false, false); err != nil {
+	if err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func TestProcessCBZ_ComicInfoUpdated(t *testing.T) {
 		{"ComicInfo.xml", []byte(ci)},
 	})
 
-	if err := processCBZ(path, false, false); err != nil {
+	if err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -297,7 +297,7 @@ func TestProcessCBZ_BackupCreated(t *testing.T) {
 		{"002.png", portrait},
 	})
 
-	if err := processCBZ(path, false, false); err != nil {
+	if err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -316,7 +316,7 @@ func TestProcessCBZ_DryRun(t *testing.T) {
 	// Record original names.
 	before := readCBZNames(t, path)
 
-	if err := processCBZ(path, true, false); err != nil {
+	if err := processCBZ(path, true, false, false); err != nil {
 		t.Fatalf("processCBZ dry-run: %v", err)
 	}
 
@@ -339,7 +339,7 @@ func TestProcessCBZ_Idempotent(t *testing.T) {
 
 	before := readCBZNames(t, path)
 
-	if err := processCBZ(path, false, false); err != nil {
+	if err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -358,7 +358,7 @@ func TestProcessCBZ_SubdirImages(t *testing.T) {
 		{"Comic Name/003.png", portrait},
 	})
 
-	if err := processCBZ(path, false, false); err != nil {
+	if err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 

@@ -43,7 +43,7 @@ type pageInfo struct {
 	width, height int
 }
 
-func processCBZ(path string, dryRun, verbose bool) error {
+func processCBZ(path string, dryRun, verbose, noBlank bool) error {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return fmt.Errorf("open: %w", err)
@@ -117,10 +117,12 @@ func processCBZ(path string, dryRun, verbose bool) error {
 	// ── Find insertion point ───────────────────────────────────────────────
 	// Scan from imgs[1] onward; insert blank before the first non-double page.
 	insertBefore := -1
-	for i := 1; i < len(imgs); i++ {
-		if !isDoublePage(imgs[i], oldInfo, i) {
-			insertBefore = i
-			break
+	if !noBlank {
+		for i := 1; i < len(imgs); i++ {
+			if !isDoublePage(imgs[i], oldInfo, i) {
+				insertBefore = i
+				break
+			}
 		}
 	}
 

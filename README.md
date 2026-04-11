@@ -77,6 +77,7 @@ cbz-fix              # process all CBZs under the current directory
 cbz-fix /path/to/comics
 cbz-fix --dry-run    # preview without making changes
 cbz-fix --verbose    # show per-file rename details
+cbz-fix --no-blank   # rename and renumber without inserting a blank page
 ```
 
 #### Flags
@@ -84,6 +85,7 @@ cbz-fix --verbose    # show per-file rename details
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Preview all changes without modifying any files |
+| `--no-blank` | Skip blank page insertion (rename and renumber only) |
 | `--verbose` | Print each filename mapping for every CBZ processed |
 
 ### Output
