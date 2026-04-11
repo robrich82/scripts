@@ -75,6 +75,7 @@ Run from (or pass as an argument) the directory containing your CBZ files:
 ```sh
 cbz-fix              # process all CBZs under the current directory
 cbz-fix /path/to/comics
+cbz-fix --check      # list files that need fixing; exit 1 if any found
 cbz-fix --dry-run    # preview without making changes
 cbz-fix --verbose    # show per-file rename details
 cbz-fix --no-blank   # rename and renumber without inserting a blank page
@@ -84,6 +85,7 @@ cbz-fix --no-blank   # rename and renumber without inserting a blank page
 
 | Flag | Description |
 |------|-------------|
+| `--check` | List files that need processing and exit 1 if any are found (implies `--dry-run`) |
 | `--dry-run` | Preview all changes without modifying any files |
 | `--no-blank` | Skip blank page insertion (rename and renumber only) |
 | `--verbose` | Print each filename mapping for every CBZ processed |

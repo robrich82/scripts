@@ -110,7 +110,7 @@ func TestNaturalLess(t *testing.T) {
 	}{
 		{"001.jpg", "002.jpg", true},
 		{"002.jpg", "001.jpg", false},
-		{"page2.jpg", "page10.jpg", true},   // numeric: 2 < 10
+		{"page2.jpg", "page10.jpg", true}, // numeric: 2 < 10
 		{"page10.jpg", "page2.jpg", false},
 		{"abc", "abd", true},
 		{"abc", "abc", false},
@@ -144,7 +144,7 @@ func TestProcessCBZ_BasicRename(t *testing.T) {
 		{"003.png", portrait},
 	})
 
-	if err := processCBZ(path, false, false, false); err != nil {
+	if _, err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestProcessCBZ_BlankIsWhite(t *testing.T) {
 		{"002.png", portrait},
 	})
 
-	if err := processCBZ(path, false, false, false); err != nil {
+	if _, err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestProcessCBZ_DoublePageSkipped(t *testing.T) {
 		{"003.png", portrait},  // first non-double page
 	})
 
-	if err := processCBZ(path, false, false, false); err != nil {
+	if _, err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func TestProcessCBZ_ComicInfoUpdated(t *testing.T) {
 		{"ComicInfo.xml", []byte(ci)},
 	})
 
-	if err := processCBZ(path, false, false, false); err != nil {
+	if _, err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -297,7 +297,7 @@ func TestProcessCBZ_BackupCreated(t *testing.T) {
 		{"002.png", portrait},
 	})
 
-	if err := processCBZ(path, false, false, false); err != nil {
+	if _, err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -316,7 +316,7 @@ func TestProcessCBZ_DryRun(t *testing.T) {
 	// Record original names.
 	before := readCBZNames(t, path)
 
-	if err := processCBZ(path, true, false, false); err != nil {
+	if _, err := processCBZ(path, true, false, false); err != nil {
 		t.Fatalf("processCBZ dry-run: %v", err)
 	}
 
@@ -329,7 +329,8 @@ func TestProcessCBZ_DryRun(t *testing.T) {
 	}
 }
 
-// TestProcessCBZ_Idempotent verifies that an already-processed CBZ is skipped.
+// TestProcessCBZ_Idempotent verifies that an already-processed CBZ is skipped
+// and returns skipped=true.
 func TestProcessCBZ_Idempotent(t *testing.T) {
 	path := makeCBZ(t, []zipEntry{
 		{"cover.png", portrait},
@@ -339,13 +340,34 @@ func TestProcessCBZ_Idempotent(t *testing.T) {
 
 	before := readCBZNames(t, path)
 
-	if err := processCBZ(path, false, false, false); err != nil {
+	skipped, err := processCBZ(path, false, false, false)
+	if err != nil {
 		t.Fatalf("processCBZ: %v", err)
+	}
+	if !skipped {
+		t.Error("expected skipped=true for already-processed CBZ")
 	}
 
 	after := readCBZNames(t, path)
 	if len(before) != len(after) {
 		t.Errorf("idempotency broken: before=%v after=%v", before, after)
+	}
+}
+
+// TestProcessCBZ_NeedsFixing verifies that a CBZ requiring processing returns
+// skipped=false.
+func TestProcessCBZ_NeedsFixing(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"001.png", portrait},
+		{"002.png", portrait},
+	})
+
+	skipped, err := processCBZ(path, true, false, false) // dry-run
+	if err != nil {
+		t.Fatalf("processCBZ: %v", err)
+	}
+	if skipped {
+		t.Error("expected skipped=false for CBZ that needs fixing")
 	}
 }
 
@@ -358,7 +380,7 @@ func TestProcessCBZ_SubdirImages(t *testing.T) {
 		{"Comic Name/003.png", portrait},
 	})
 
-	if err := processCBZ(path, false, false, false); err != nil {
+	if _, err := processCBZ(path, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 

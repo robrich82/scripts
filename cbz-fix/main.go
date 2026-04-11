@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	check := flag.Bool("check", false, "list files that need processing and exit 1 if any found")
 	dryRun := flag.Bool("dry-run", false, "preview changes without modifying files")
 	verbose := flag.Bool("verbose", false, "print each file rename")
 	noBlank := flag.Bool("no-blank", false, "skip blank page insertion")
@@ -19,7 +20,10 @@ func main() {
 		dir = flag.Arg(0)
 	}
 
-	var processed, errCount int
+	// --check implies dry-run
+	impliedDryRun := *dryRun || *check
+
+	var needsFix, errCount int
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -28,12 +32,22 @@ func main() {
 			return nil
 		}
 
-		fmt.Printf("%s\n", path)
-		if processErr := processCBZ(path, *dryRun, *verbose, *noBlank); processErr != nil {
+		if !*check {
+			fmt.Printf("%s\n", path)
+		}
+
+		skipped, processErr := processCBZ(path, impliedDryRun, *verbose, *noBlank)
+		if processErr != nil {
+			if *check {
+				fmt.Printf("%s\n", path)
+			}
 			fmt.Fprintf(os.Stderr, "  ERROR: %v\n", processErr)
 			errCount++
-		} else {
-			processed++
+		} else if !skipped {
+			needsFix++
+			if *check {
+				fmt.Printf("%s\n", path)
+			}
 		}
 		return nil
 	})
@@ -42,9 +56,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	label := "processed"
-	if *dryRun {
-		label = "would process"
+	switch {
+	case *check:
+		fmt.Printf("\nDone — needs fixing: %d  errors: %d\n", needsFix, errCount)
+		if needsFix > 0 || errCount > 0 {
+			os.Exit(1)
+		}
+	case *dryRun:
+		fmt.Printf("\nDone — would process: %d  errors: %d\n", needsFix, errCount)
+	default:
+		fmt.Printf("\nDone — processed: %d  errors: %d\n", needsFix, errCount)
 	}
-	fmt.Printf("\nDone — %s: %d  errors: %d\n", label, processed, errCount)
 }

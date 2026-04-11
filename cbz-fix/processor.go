@@ -43,10 +43,13 @@ type pageInfo struct {
 	width, height int
 }
 
-func processCBZ(path string, dryRun, verbose, noBlank bool) error {
+// processCBZ processes a single CBZ file. It returns (true, nil) when the file
+// is already in the expected layout and no work is needed, (false, nil) on
+// success (real or dry-run), and (false, err) on failure.
+func processCBZ(path string, dryRun, verbose, noBlank bool) (skipped bool, err error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return fmt.Errorf("open: %w", err)
+		return false, fmt.Errorf("open: %w", err)
 	}
 
 	// ── Collect files ──────────────────────────────────────────────────────
@@ -66,7 +69,7 @@ func processCBZ(path string, dryRun, verbose, noBlank bool) error {
 
 	if len(imgs) == 0 {
 		zr.Close()
-		return fmt.Errorf("no image files found")
+		return false, fmt.Errorf("no image files found")
 	}
 
 	// ── Sort images (natural, case-insensitive — same as CBZ viewers) ──────
@@ -84,7 +87,7 @@ func processCBZ(path string, dryRun, verbose, noBlank bool) error {
 		if verbose {
 			fmt.Println("  already processed, skipping")
 		}
-		return nil
+		return true, nil
 	}
 
 	// ── Parse ComicInfo.xml ────────────────────────────────────────────────
@@ -94,12 +97,12 @@ func processCBZ(path string, dryRun, verbose, noBlank bool) error {
 		data, err := readZipEntry(ciFile)
 		if err != nil {
 			zr.Close()
-			return fmt.Errorf("read ComicInfo.xml: %w", err)
+			return false, fmt.Errorf("read ComicInfo.xml: %w", err)
 		}
 		ci, err = parseComicInfo(data)
 		if err != nil {
 			zr.Close()
-			return fmt.Errorf("parse ComicInfo.xml: %w", err)
+			return false, fmt.Errorf("parse ComicInfo.xml: %w", err)
 		}
 		if ci.Pages != nil {
 			for _, p := range ci.Pages.Pages {
@@ -175,7 +178,7 @@ func processCBZ(path string, dryRun, verbose, noBlank bool) error {
 
 	if dryRun {
 		zr.Close()
-		return nil
+		return false, nil
 	}
 
 	// ── Build updated ComicInfo ────────────────────────────────────────────
@@ -188,30 +191,30 @@ func processCBZ(path string, dryRun, verbose, noBlank bool) error {
 	ciData, err := marshalComicInfo(ci)
 	if err != nil {
 		zr.Close()
-		return fmt.Errorf("marshal ComicInfo.xml: %w", err)
+		return false, fmt.Errorf("marshal ComicInfo.xml: %w", err)
 	}
 
 	// ── Write new zip to a temp file (zr still open for reads) ────────────
 	tmpPath, err := writeNewCBZ(filepath.Dir(path), entries, ciData, zr)
 	zr.Close()
 	if err != nil {
-		return fmt.Errorf("write new CBZ: %w", err)
+		return false, fmt.Errorf("write new CBZ: %w", err)
 	}
 
 	// ── Backup original ────────────────────────────────────────────────────
 	backupPath := path + ".bak"
 	if err := copyFile(path, backupPath); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("backup: %w", err)
+		return false, fmt.Errorf("backup: %w", err)
 	}
 
 	// ── Replace original with new zip ─────────────────────────────────────
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("replace original (backup at %s): %w", backupPath, err)
+		return false, fmt.Errorf("replace original (backup at %s): %w", backupPath, err)
 	}
 
-	return nil
+	return false, nil
 }
 
 // isDoublePage returns true if the image at imgs[imgIdx] is a double-page spread.
