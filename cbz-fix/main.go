@@ -29,7 +29,7 @@ func main() {
 			return err
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") {
+			if isHiddenDir(d.Name(), path) {
 				return filepath.SkipDir
 			}
 			return nil
