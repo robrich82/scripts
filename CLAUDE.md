@@ -9,17 +9,5 @@ After making any code changes, always create a git commit. Use a concise, descri
 ## README
 When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change.
 
-## Build
-After completing a feature or bug fix, build the affected tool(s), do not build without using the make command:
-- `make cbz-fix` — after changes to cbz-fix/
-- `make mkv-audit` — after changes to mkv-audit/
-- `make mkv-movie` — after changes to mkv-movie/
-- `make mkv-musicvideo` — after changes to mkv-musicvideo/
-- `make mkv-tvshow` — after changes to mkv-tvshow/
-- `make sw-update` — after changes to sw-update/
-- `make all` — to rebuild everything
-
-## Test & Lint
-Before committing, run:
-- `make test` — runs `go test ./...` across all modules
-- `make vet` — runs `go vet`, `gofmt`, `staticcheck`, and `unparam` across all modules
+## Build, Test & Lint
+Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
