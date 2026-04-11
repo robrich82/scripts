@@ -252,6 +252,7 @@ Flags:
 | Flag | Description |
 |------|-------------|
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values |
+| `--force` | Re-apply all metadata even if already cached |
 
 Output:
 
