@@ -185,6 +185,15 @@ func (tc *TitleChecker) Run() error {
 				continue
 			}
 
+			// If TMDB only has placeholder titles ("Episode N") but the file
+			// already has a real title, treat the file title as authoritative
+			// until TMDB is updated. Skip the rename prompt and use the file's
+			// own title for MKV metadata.
+			if allPlaceholders(tmdbTitles) && !allPlaceholders(fileTitles) {
+				tc.applyFullTitle(path, buildFullMKVTitle(stem, fileTitles))
+				continue
+			}
+
 			// Build the FS-safe title part from TMDB titles for display and rename.
 			var fsTitles []string
 			for _, t := range tmdbTitles {
@@ -414,6 +423,23 @@ func extractFileTitles(stem string) []string {
 		titles = append(titles, p)
 	}
 	return titles
+}
+
+// placeholderTitleRe matches TMDB placeholder episode titles like "Episode 2".
+var placeholderTitleRe = regexp.MustCompile(`(?i)^Episode\s+\d+$`)
+
+// allPlaceholders reports whether every title in the slice is a TMDB
+// placeholder of the form "Episode N".
+func allPlaceholders(titles []string) bool {
+	if len(titles) == 0 {
+		return false
+	}
+	for _, t := range titles {
+		if !placeholderTitleRe.MatchString(strings.TrimSpace(t)) {
+			return false
+		}
+	}
+	return true
 }
 
 // titlesMatch returns true when the file and expected title lists are equivalent
