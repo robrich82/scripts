@@ -1,6 +1,6 @@
 ---
 name: check
-description: Run tests and linting across all modules (make test + make vet)
+description: Run the full test and lint suite (make vet + make test) across all modules. Use this skill before committing, after making code changes, or any time you want to verify the repo is clean — never run go vet or go test directly.
 disable-model-invocation: true
 allowed-tools: Bash(make *)
 ---

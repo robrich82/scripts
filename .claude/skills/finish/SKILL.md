@@ -1,8 +1,8 @@
 ---
 name: finish
-description: Full done-with-a-feature pipeline: vet, build affected tool(s), test, commit
+description: Full done-with-a-feature pipeline: vet, build affected tool(s), test, then commit. Use this skill whenever a feature or fix is ready to wrap up — it handles the vet/build/test/commit sequence so nothing gets skipped.
 disable-model-invocation: true
-allowed-tools: Bash(make *) Bash(git *)
+allowed-tools: Bash(make *) Bash(git *) Read Edit Glob Grep
 ---
 
 Run the complete end-of-feature pipeline for this repo.
@@ -19,7 +19,8 @@ Run the complete end-of-feature pipeline for this repo.
    - sw-update/ → `make sw-update`
    - multiple / unsure → `make all`
 3. **Test** — run `make test`. All tests must pass before committing.
-4. **Commit** — stage changed files and create a git commit with a concise, descriptive message following conventional commits style. Co-author line required:
+4. **README** — if the changes add a new tool, change a tool's commands/flags/config, or add new functionality, update README.md to reflect the change.
+5. **Commit** — stage changed files and create a git commit with a concise, descriptive message following conventional commits style. Co-author line required:
    ```
    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
    ```
