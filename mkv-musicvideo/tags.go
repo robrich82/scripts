@@ -205,7 +205,7 @@ func newRealMusicVideoTagger() (*realMusicVideoTagger, error) {
 
 // TagsMatchMKV implements MusicVideoTagger.
 // It reads tags from audioPath and the current tags embedded in mkvPath,
-// then compares all text fields (cover art is not compared).
+// then compares all text fields and cover art.
 // Returns false on any error so the caller falls back to copying.
 func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix string) (bool, error) {
 	var want AudioTags
@@ -245,14 +245,21 @@ func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix stri
 		wantYear = strconv.Itoa(want.Year)
 	}
 
-	return lvl30["TITLE"] == want.Title &&
+	if !(lvl30["TITLE"] == want.Title &&
 		lvl30["ARTIST"] == want.Artist &&
 		lvl30["PART_NUMBER"] == wantTrack &&
 		lvl50["TITLE"] == want.Album &&
 		lvl50["ARTIST"] == want.AlbumArtist &&
 		lvl50["DATE_RECORDED"] == wantYear &&
 		lvl50["GENRE"] == want.Genre &&
-		lvl50["COMMENT"] == want.Comment, nil
+		lvl50["COMMENT"] == want.Comment) {
+		return false, nil
+	}
+
+	// Compare cover art: extract the current attachment from the MKV and check
+	// it byte-for-byte against the source.
+	mkvCover, _ := extractMKACover(t.mkvextractPath, t.mkvmergePath, mkvPath)
+	return bytes.Equal(want.CoverData, mkvCover), nil
 }
 
 // CopyTagsToMKV implements MusicVideoTagger.
