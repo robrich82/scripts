@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // configDir returns the per-user config directory for mkv-audit.
@@ -134,8 +136,11 @@ func resolveIETFMap(filePath, root string, lib *Library, origin OriginInfo) map[
 		overridePath := filepath.ToSlash(override.Path)
 		// Case-insensitive prefix match. Ensure the match is at a directory
 		// boundary (prefix ends with "/" or equals the relative path exactly).
-		relLower := strings.ToLower(rel)
-		ovLower := strings.ToLower(overridePath)
+		// Normalize to NFC so config paths and filesystem paths with different
+		// Unicode normalization forms (e.g. NFC vs NFD for Japanese characters)
+		// compare equal.
+		relLower := strings.ToLower(norm.NFC.String(rel))
+		ovLower := strings.ToLower(norm.NFC.String(overridePath))
 		if relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/") {
 			for k, v := range override.IETF {
 				result[k] = v
@@ -162,8 +167,8 @@ func matchedOverrideIETF(filePath, root string, lib *Library) map[string]string 
 	var merged map[string]string
 	for _, override := range lib.Overrides {
 		overridePath := filepath.ToSlash(override.Path)
-		relLower := strings.ToLower(rel)
-		ovLower := strings.ToLower(overridePath)
+		relLower := strings.ToLower(norm.NFC.String(rel))
+		ovLower := strings.ToLower(norm.NFC.String(overridePath))
 		if relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/") {
 			if merged == nil {
 				merged = make(map[string]string)

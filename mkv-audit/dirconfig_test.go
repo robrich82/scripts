@@ -223,3 +223,73 @@ func TestResolveIETFMap_CaseInsensitive(t *testing.T) {
 		t.Errorf("expected en-AU for case-insensitive match, got %q", m["eng"])
 	}
 }
+
+// TestResolveIETFMap_FileSpecificOverride verifies that a DirOverride whose
+// path is a full relative file path (not a directory) matches only that file.
+func TestResolveIETFMap_FileSpecificOverride(t *testing.T) {
+	root := t.TempDir()
+	lib := &Library{
+		Name: "Music",
+		Path: root,
+		Overrides: []DirOverride{
+			// Directory-level: all YOASOBI files are Japanese.
+			{Path: "YOASOBI", IETF: map[string]string{"jpn": "ja-JP"}},
+			// File-level: one specific track is English.
+			{Path: "YOASOBI/アイドル (2023)/02 - Idol - Idol-video.mkv", IETF: map[string]string{"eng": "en-JP"}},
+		},
+	}
+
+	// The specific file should get both overrides merged.
+	target := filepath.Join(root, "YOASOBI", "アイドル (2023)", "02 - Idol - Idol-video.mkv")
+	m := resolveIETFMap(target, root, lib, OriginInfo{})
+	if m["jpn"] != "ja-JP" {
+		t.Errorf("expected ja-JP for jpn on target file, got %q", m["jpn"])
+	}
+	if m["eng"] != "en-JP" {
+		t.Errorf("expected en-JP for eng on target file, got %q", m["eng"])
+	}
+
+	// A sibling file should only get the directory override.
+	sibling := filepath.Join(root, "YOASOBI", "アイドル (2023)", "01 - アイドル - アイドル-video.mkv")
+	m2 := resolveIETFMap(sibling, root, lib, OriginInfo{})
+	if m2["jpn"] != "ja-JP" {
+		t.Errorf("expected ja-JP for jpn on sibling, got %q", m2["jpn"])
+	}
+	if m2["eng"] != "en-US" {
+		t.Errorf("expected en-US (default) for eng on sibling, got %q", m2["eng"])
+	}
+
+	// matchedOverrideIETF should also return both keys for the target file.
+	ov := matchedOverrideIETF(target, root, lib)
+	if ov["eng"] != "en-JP" {
+		t.Errorf("matchedOverrideIETF: expected en-JP for eng, got %q", ov["eng"])
+	}
+	if ov["jpn"] != "ja-JP" {
+		t.Errorf("matchedOverrideIETF: expected ja-JP for jpn, got %q", ov["jpn"])
+	}
+}
+
+// TestResolveIETFMap_NFDPath verifies that an override path in NFC matches a
+// filesystem path in NFD (and vice-versa) — both normalized to NFC before compare.
+func TestResolveIETFMap_NFDPath(t *testing.T) {
+	// NFC form of "ド" is U+30C9; NFD form is U+30C8 + U+309B.
+	nfc := "YOASOBI/\u30A2\u30A4\u30C9\u30EB (2023)/02 - Idol - Idol-video.mkv" // ア+イ+ド+ル (NFC)
+	nfd := "YOASOBI/\u30A2\u30A4\u30C8\u3099\u30EB (2023)/02 - Idol - Idol-video.mkv" // ア+イ+ト+combining-dakuten+ル (NFD)
+
+	root := t.TempDir()
+	lib := &Library{
+		Name: "Music",
+		Path: root,
+		Overrides: []DirOverride{
+			// Config stores the path in NFC.
+			{Path: nfc, IETF: map[string]string{"eng": "en-JP"}},
+		},
+	}
+
+	// Filesystem path arrives as NFD (e.g. copied from macOS).
+	fileNFD := filepath.Join(root, filepath.FromSlash(nfd))
+	m := resolveIETFMap(fileNFD, root, lib, OriginInfo{})
+	if m["eng"] != "en-JP" {
+		t.Errorf("NFC config path should match NFD filesystem path; got eng=%q", m["eng"])
+	}
+}
