@@ -5,12 +5,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func main() {
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
 	force := flag.Bool("force", false, "Re-apply all metadata even if already cached.")
+	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	flag.Parse()
+
+	var cutoff time.Time
+	if *cutoffDateStr != "" {
+		var err error
+		cutoff, err = time.Parse("2006-01-02", *cutoffDateStr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid --cutoff-date %q, expected YYYY-MM-DD\n", *cutoffDateStr)
+			os.Exit(1)
+		}
+	} else {
+		now := time.Now()
+		cutoff = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	}
 
 	tmdbKey := os.Getenv("TMDB_API_KEY")
 	if tmdbKey == "" {
@@ -72,9 +87,14 @@ func main() {
 		}
 	}
 
+	if cutoff.IsZero() {
+		fmt.Println("--- Cutoff date: none (all files) ---")
+	} else {
+		fmt.Printf("--- Cutoff date: %s ---\n", cutoff.Format("2006-01-02"))
+	}
 	fmt.Printf("Scanning %s...\n", dir)
-	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, *force)
+	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, *force, cutoff)
 
-	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Errors: %d\n",
-		stats.Updated, stats.OK, stats.Skipped, stats.Errors)
+	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Skipped (old): %d  Errors: %d\n",
+		stats.Updated, stats.OK, stats.Skipped, stats.SkippedOld, stats.Errors)
 }

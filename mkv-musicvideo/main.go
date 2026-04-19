@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func configDir() (string, error) {
@@ -15,6 +17,22 @@ func configDir() (string, error) {
 }
 
 func main() {
+	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
+	flag.Parse()
+
+	var cutoff time.Time
+	if *cutoffDateStr != "" {
+		var err error
+		cutoff, err = time.Parse("2006-01-02", *cutoffDateStr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid --cutoff-date %q, expected YYYY-MM-DD\n", *cutoffDateStr)
+			os.Exit(1)
+		}
+	} else {
+		now := time.Now()
+		cutoff = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	}
+
 	root, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
@@ -46,6 +64,13 @@ func main() {
 		processor.tagger = tagger
 	}
 
+	processor.cutoffDate = cutoff
+
+	if cutoff.IsZero() {
+		fmt.Println("--- Cutoff date: none (all files) ---")
+	} else {
+		fmt.Printf("--- Cutoff date: %s ---\n", cutoff.Format("2006-01-02"))
+	}
 	fmt.Printf("--- Scanning and Matching in: %s ---\n\n", root)
 
 	stats, skippedVideos, unmatchedVideos := processor.Run()
@@ -66,6 +91,7 @@ func main() {
 	if len(unmatchedVideos) == 0 && len(skippedVideos) == 0 {
 		fmt.Println("\nNo videos were skipped or unmatched.")
 	}
-
-	_ = stats
+	if stats.SkippedOld > 0 {
+		fmt.Printf("\nSkipped (old): %d\n", stats.SkippedOld)
+	}
 }

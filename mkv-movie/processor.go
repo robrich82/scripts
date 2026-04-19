@@ -89,10 +89,11 @@ func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath st
 
 // Stats counts processing outcomes.
 type Stats struct {
-	Updated int
-	OK      int
-	Skipped int
-	Errors  int
+	Updated    int
+	OK         int
+	Skipped    int
+	SkippedOld int
+	Errors     int
 }
 
 // FileResult is the outcome of processing a single file.
@@ -493,7 +494,7 @@ func extractYear(filename string) string {
 }
 
 // walkAndProcess walks root for .mkv files and processes each one.
-func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, force bool) Stats {
+func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, force bool, cutoff time.Time) Stats {
 	var stats Stats
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -501,6 +502,13 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
 			return nil
+		}
+		if !cutoff.IsZero() {
+			info, err := d.Info()
+			if err == nil && info.ModTime().Before(cutoff) {
+				stats.SkippedOld++
+				return nil
+			}
 		}
 		switch processFile(path, tmdb, applier, timer, rr, cache, force) {
 		case ResultUpdated:

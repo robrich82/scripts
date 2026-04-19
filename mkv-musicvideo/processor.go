@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var (
@@ -17,9 +18,10 @@ var (
 
 // Stats holds the counts of actions taken during a scan.
 type Stats struct {
-	Renamed   int
-	Skipped   int
-	Unmatched int
+	Renamed    int
+	Skipped    int
+	Unmatched  int
+	SkippedOld int
 }
 
 // IgnoreData holds ignore patterns used when fuzzy-matching video filenames to
@@ -40,6 +42,7 @@ type Processor struct {
 	renamer         func(oldPath, newPath string) error
 	patternAppender func(ignoreFile, videoFile, pattern string) error
 	tagger          MusicVideoTagger // nil = tag copying disabled
+	cutoffDate      time.Time
 }
 
 // NewProcessor creates a Processor for the given root directory.
@@ -366,6 +369,13 @@ func (p *Processor) Run() (Stats, []string, []string) {
 			ext := strings.ToLower(filepath.Ext(f))
 			if !containsStr(videoExts, ext) {
 				continue
+			}
+			if !p.cutoffDate.IsZero() {
+				info, err := os.Stat(filepath.Join(dir, f))
+				if err == nil && info.ModTime().Before(p.cutoffDate) {
+					stats.SkippedOld++
+					continue
+				}
 			}
 			result := p.processVideo(dir, f, audioData, audioPaths)
 			switch result {
