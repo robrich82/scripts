@@ -134,15 +134,16 @@ func buildAudioPaths(dirFiles []string) map[string]string {
 }
 
 // cleanVideoBase strips the last occurrence of a known suffix from base.
-// Returns the cleaned name and the matched suffix (or "" if none).
-func cleanVideoBase(base string) (clean, suffix string) {
+// Returns the cleaned name, the matched suffix, and any text that followed
+// the suffix (e.g. " (Second Version)"). All three are "" when no suffix matches.
+func cleanVideoBase(base string) (clean, suffix, postSuffix string) {
 	for _, s := range videoSuffixes {
 		if strings.Contains(base, s) {
 			idx := strings.LastIndex(base, s)
-			return base[:idx], s
+			return base[:idx], s, base[idx+len(s):]
 		}
 	}
-	return base, ""
+	return base, "", ""
 }
 
 // trackNumber returns the text before the first " - " separator, or "".
@@ -218,8 +219,9 @@ func (p *Processor) findIgnoredPatterns(cleanVideo, videoFile string) string {
 
 // copyTagsIfConfigured copies tags from the matched audio file to mkvPath when
 // a tagger is configured. cleanVideo is the video base before ignore-pattern
-// stripping and is used to detect which patterns should be appended to the title.
-func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir, videoFile string, audioPaths map[string]string) {
+// stripping; postSuffix is any text after the recognized video suffix (e.g.
+// " (Second Version)"). Both are used to build the MKV title suffix.
+func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile string, audioPaths map[string]string) {
 	if p.tagger == nil || audioPaths == nil {
 		return
 	}
@@ -229,6 +231,13 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir
 	}
 	audioFullPath := filepath.Join(videoDir, audioFilename)
 	titleSuffix := p.findIgnoredPatterns(cleanVideo, videoFile)
+	if t := strings.TrimSpace(postSuffix); t != "" {
+		if titleSuffix == "" {
+			titleSuffix = t
+		} else {
+			titleSuffix += " " + t
+		}
+	}
 	if match, err := p.tagger.TagsMatchMKV(audioFullPath, mkvPath, titleSuffix); err == nil && match {
 		fmt.Printf("    [TAG] Already up to date: %s\n", filepath.Base(mkvPath))
 		return
@@ -246,8 +255,9 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, videoDir
 func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPaths map[string]string) string {
 	ext := filepath.Ext(videoFile)
 	videoBase := strings.TrimSuffix(videoFile, ext)
-	cleanVideo, foundSuffix := cleanVideoBase(videoBase)
+	cleanVideo, foundSuffix, postSuffix := cleanVideoBase(videoBase)
 	cleanVideoIgnored := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoFile))
+	postSuffixIgnored := removeIgnoredParts(postSuffix, p.effectivePatterns(videoFile))
 
 	matchKey, ok := findMatch(cleanVideoIgnored, audioData)
 	if !ok {
@@ -261,17 +271,17 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		effectiveSuffix = "-video"
 	}
 	targetName := matchedBase + effectiveSuffix
-	currentName := cleanVideoIgnored + effectiveSuffix
+	currentName := cleanVideoIgnored + effectiveSuffix + postSuffixIgnored
 	fullPath := filepath.Join(videoDir, videoFile)
 	if targetName == currentName {
 		// Filename is already correct — just copy tags.
-		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, videoDir, videoFile, audioPaths)
+		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile, audioPaths)
 		return ""
 	}
 
 	fmt.Printf("\n[?] UNMATCHED VIDEO: %s\n", videoFile)
 	fmt.Printf("    SUGGESTED MATCH: %s%s\n", targetName, ext)
-	fmt.Printf("    Current: %s\n", cleanVideo)
+	fmt.Printf("    Current: %s\n", cleanVideo+postSuffix)
 	fmt.Printf("    Expected: %s\n", matchedBase)
 
 	choice, err := p.prompter.Ask("    (r)ename, (i)gnore pattern, (s)kip: ")
@@ -287,12 +297,14 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			fmt.Printf("    [ERROR] Could not rename: %v\n", err)
 		} else {
 			fmt.Printf("    [OK] Renamed to: %s%s\n", targetName, ext)
-			// Copy tags to the new path after a successful rename.
-			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, videoDir, videoFile, audioPaths)
+			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile, audioPaths)
 			return "renamed"
 		}
 	case "i":
 		diff := computeDiff(cleanVideo, matchedBase)
+		if diff == "" {
+			diff = strings.TrimSpace(postSuffixIgnored)
+		}
 		pattern, err := p.prompter.Ask(fmt.Sprintf("    Enter the part to ignore (default: '%s'): ", diff))
 		if err != nil {
 			return ""
@@ -310,10 +322,11 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			} else {
 				fmt.Printf("    [OK] Added '%s' to ignore list for %s\n", pattern, videoFile)
 			}
-			reChecked := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoFile))
-			if reChecked == matchedBase {
+			reCheckedClean := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoFile))
+			reCheckedPost := removeIgnoredParts(postSuffix, p.effectivePatterns(videoFile))
+			if reCheckedClean+effectiveSuffix+reCheckedPost == targetName {
 				fmt.Println("    [OK] File now matches after ignoring pattern!")
-				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, videoDir, videoFile, audioPaths)
+				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile, audioPaths)
 			} else {
 				fmt.Println("    Still doesn't match after ignoring")
 			}

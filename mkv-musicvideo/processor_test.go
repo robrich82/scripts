@@ -83,23 +83,30 @@ func TestBuildAudioData_MultipleFiles(t *testing.T) {
 // --- cleanVideoBase tests ---
 
 func TestCleanVideoBase_StripsVideoSuffix(t *testing.T) {
-	clean, suffix := cleanVideoBase("Artist - Song-video")
-	if clean != "Artist - Song" || suffix != "-video" {
-		t.Errorf("clean=%q suffix=%q", clean, suffix)
+	clean, suffix, post := cleanVideoBase("Artist - Song-video")
+	if clean != "Artist - Song" || suffix != "-video" || post != "" {
+		t.Errorf("clean=%q suffix=%q post=%q", clean, suffix, post)
 	}
 }
 
 func TestCleanVideoBase_StripsLiveSuffix(t *testing.T) {
-	clean, suffix := cleanVideoBase("Artist - Song-live")
-	if clean != "Artist - Song" || suffix != "-live" {
-		t.Errorf("clean=%q suffix=%q", clean, suffix)
+	clean, suffix, post := cleanVideoBase("Artist - Song-live")
+	if clean != "Artist - Song" || suffix != "-live" || post != "" {
+		t.Errorf("clean=%q suffix=%q post=%q", clean, suffix, post)
 	}
 }
 
 func TestCleanVideoBase_NoKnownSuffix(t *testing.T) {
-	clean, suffix := cleanVideoBase("Artist - Song")
-	if clean != "Artist - Song" || suffix != "" {
-		t.Errorf("clean=%q suffix=%q", clean, suffix)
+	clean, suffix, post := cleanVideoBase("Artist - Song")
+	if clean != "Artist - Song" || suffix != "" || post != "" {
+		t.Errorf("clean=%q suffix=%q post=%q", clean, suffix, post)
+	}
+}
+
+func TestCleanVideoBase_PostSuffix(t *testing.T) {
+	clean, suffix, post := cleanVideoBase("Artist - Song-video (Second Version)")
+	if clean != "Artist - Song" || suffix != "-video" || post != " (Second Version)" {
+		t.Errorf("clean=%q suffix=%q post=%q", clean, suffix, post)
 	}
 }
 
@@ -176,6 +183,41 @@ func TestProcessVideo_IgnoreChosen_SavesPattern(t *testing.T) {
 	patterns := p.ignoreData.FilePatterns["Artist - Song OFFICIAL-video.mkv"]
 	if len(patterns) != 1 || patterns[0] != " OFFICIAL" {
 		t.Errorf("FilePatterns=%v", p.ignoreData.FilePatterns)
+	}
+}
+
+func TestProcessVideo_PostSuffix_PromptsAndIgnores(t *testing.T) {
+	dir := t.TempDir()
+	mkvFile := "08 - Rise & Shine - Rise & Shine-video (Second Version).mkv"
+	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
+
+	var savedPattern string
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", ""}})
+	p.patternAppender = func(_, _, pattern string) error {
+		savedPattern = pattern
+		return nil
+	}
+
+	audioData := map[string]string{"08 - Rise & Shine": "08 - Rise & Shine - Rise & Shine"}
+	p.processVideo(dir, mkvFile, audioData, nil)
+
+	if savedPattern != "(Second Version)" {
+		t.Errorf("saved pattern %q, want '(Second Version)'", savedPattern)
+	}
+}
+
+func TestProcessVideo_PostSuffix_AlreadyIgnored_NoPrompt(t *testing.T) {
+	dir := t.TempDir()
+	mkvFile := "08 - Rise & Shine - Rise & Shine-video (Second Version).mkv"
+	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
+
+	p := NewProcessor(dir, "", &fakePrompter{})
+	p.ignoreData.FilePatterns = map[string][]string{mkvFile: {" (Second Version)"}}
+
+	audioData := map[string]string{"08 - Rise & Shine": "08 - Rise & Shine - Rise & Shine"}
+	result := p.processVideo(dir, mkvFile, audioData, nil)
+	if result != "" {
+		t.Errorf("got %q, want empty (already correct after ignore)", result)
 	}
 }
 
