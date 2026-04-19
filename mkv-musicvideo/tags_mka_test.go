@@ -93,6 +93,43 @@ func TestParseMKVTagsXML_EmptyFile(t *testing.T) {
 	}
 }
 
+// --- buildHeaderTitle tests ---
+
+func TestBuildHeaderTitle_Full(t *testing.T) {
+	tags := AudioTags{AlbumArtist: "The Goo Goo Dolls", Album: "Dizzy Up the Girl", Title: "Iris"}
+	got := buildHeaderTitle(tags, "")
+	if got != "The Goo Goo Dolls - Dizzy Up the Girl - Iris" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestBuildHeaderTitle_WithSuffix(t *testing.T) {
+	tags := AudioTags{AlbumArtist: "The Cardigans", Album: "Emmerdale", Title: "Rise & Shine"}
+	got := buildHeaderTitle(tags, "(Second Version)")
+	if got != "The Cardigans - Emmerdale - Rise & Shine (Second Version)" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestBuildHeaderTitle_FallsBackToArtist(t *testing.T) {
+	tags := AudioTags{Artist: "Alanis Morissette", Album: "Jagged Little Pill", Title: "Ironic"}
+	got := buildHeaderTitle(tags, "")
+	if got != "Alanis Morissette - Jagged Little Pill - Ironic" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestBuildHeaderTitle_MissingParts(t *testing.T) {
+	got := buildHeaderTitle(AudioTags{Title: "Song"}, "")
+	if got != "Song" {
+		t.Errorf("got %q", got)
+	}
+	got = buildHeaderTitle(AudioTags{}, "")
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
 func TestParseMKVTagsXML_FirstValueWins(t *testing.T) {
 	dir := t.TempDir()
 	xmlPath := filepath.Join(dir, "tags.xml")

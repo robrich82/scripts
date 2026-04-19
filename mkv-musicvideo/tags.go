@@ -165,6 +165,30 @@ func rawVorbisString(raw interface{}, key string) string {
 	return ""
 }
 
+// buildHeaderTitle constructs the MKV file-header title in the form:
+//
+//	AlbumArtist - Album - Title
+//
+// AlbumArtist falls back to Artist when empty. Parts that are empty are omitted.
+// titleSuffix (e.g. "(Second Version)") is appended to Title with a space.
+func buildHeaderTitle(t AudioTags, titleSuffix string) string {
+	artist := t.AlbumArtist
+	if artist == "" {
+		artist = t.Artist
+	}
+	songTitle := t.Title
+	if titleSuffix != "" {
+		songTitle = strings.TrimSpace(songTitle + " " + titleSuffix)
+	}
+	var parts []string
+	for _, p := range []string{artist, t.Album, songTitle} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, " - ")
+}
+
 // xmlEscape replaces XML special characters with their entity references.
 func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
@@ -256,6 +280,10 @@ func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix stri
 		return false, nil
 	}
 
+	if readMKVHeaderTitle(t.mkvmergePath, mkvPath) != buildHeaderTitle(want, "") {
+		return false, nil
+	}
+
 	// Compare cover art: extract the current attachment from the MKV and check
 	// it byte-for-byte against the source.
 	mkvCover, _ := extractMKACover(t.mkvextractPath, t.mkvmergePath, mkvPath)
@@ -328,8 +356,8 @@ func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix str
 
 	// Single mkvpropedit call: title header + tags + optional cover attachment.
 	args := []string{mkvPath}
-	if tags.Title != "" {
-		args = append(args, "--edit", "info", "--set", "title="+tags.Title)
+	if headerTitle := buildHeaderTitle(tags, ""); headerTitle != "" {
+		args = append(args, "--edit", "info", "--set", "title="+headerTitle)
 	}
 	args = append(args, "--tags", "all:"+xmlFile.Name())
 	if coverTmpPath != "" {

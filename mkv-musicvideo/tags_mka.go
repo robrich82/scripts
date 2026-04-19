@@ -63,12 +63,34 @@ func parseMKVTagsXML(xmlPath string) (level50, level30 map[string]string) {
 }
 
 // mkvmergeIdentify is the subset of `mkvmerge --identification-format json`
-// output needed to discover image attachments.
+// output needed to discover image attachments and the file header title.
 type mkvmergeIdentify struct {
+	Container struct {
+		Properties struct {
+			Title string `json:"title"`
+		} `json:"properties"`
+	} `json:"container"`
 	Attachments []struct {
 		ID          int    `json:"id"`
 		ContentType string `json:"content_type"`
 	} `json:"attachments"`
+}
+
+// readMKVHeaderTitle returns the file-header title stored in an MKV, or ""
+// when the title is absent or the identify call fails.
+func readMKVHeaderTitle(mkvmergePath, mkvPath string) string {
+	var buf bytes.Buffer
+	cmd := exec.Command(mkvmergePath, "--identify", "--identification-format", "json", mkvPath)
+	cmd.Stdout = &buf
+	cmd.Stderr = io.Discard
+	if cmd.Run() != nil {
+		return ""
+	}
+	var info mkvmergeIdentify
+	if err := json.Unmarshal(buf.Bytes(), &info); err != nil {
+		return ""
+	}
+	return info.Container.Properties.Title
 }
 
 // extractMKACover finds the first image attachment in mkaPath and returns its
