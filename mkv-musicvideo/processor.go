@@ -17,8 +17,9 @@ var (
 
 // Stats holds the counts of actions taken during a scan.
 type Stats struct {
-	Renamed int
-	Skipped int
+	Renamed   int
+	Skipped   int
+	Unmatched int
 }
 
 // IgnoreData holds ignore patterns used when fuzzy-matching video filenames to
@@ -250,7 +251,8 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 
 	matchKey, ok := findMatch(cleanVideoIgnored, audioData)
 	if !ok {
-		return ""
+		fmt.Printf("[WARN] No audio match found: %s\n", videoFile)
+		return "unmatched"
 	}
 
 	matchedBase := audioData[matchKey]
@@ -324,9 +326,10 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 }
 
 // Run walks root, groups files by directory, and processes each video file.
-func (p *Processor) Run() (Stats, []string) {
+func (p *Processor) Run() (Stats, []string, []string) {
 	var stats Stats
 	var skippedVideos []string
+	var unmatchedVideos []string
 
 	dirOrder := []string{}
 	dirFiles := map[string][]string{}
@@ -358,8 +361,11 @@ func (p *Processor) Run() (Stats, []string) {
 			case "skipped":
 				stats.Skipped++
 				skippedVideos = append(skippedVideos, filepath.Join(dir, f))
+			case "unmatched":
+				stats.Unmatched++
+				unmatchedVideos = append(unmatchedVideos, filepath.Join(dir, f))
 			}
 		}
 	}
-	return stats, skippedVideos
+	return stats, skippedVideos, unmatchedVideos
 }

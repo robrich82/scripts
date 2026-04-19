@@ -48,16 +48,23 @@ func main() {
 
 	fmt.Printf("--- Scanning and Matching in: %s ---\n\n", root)
 
-	stats, skippedVideos := processor.Run()
+	stats, skippedVideos, unmatchedVideos := processor.Run()
 
 	fmt.Println("\n--- Scan Complete ---")
+	if len(unmatchedVideos) > 0 {
+		fmt.Printf("\n--- UNMATCHED VIDEOS (%d) ---\n", len(unmatchedVideos))
+		for _, path := range unmatchedVideos {
+			fmt.Println(path)
+		}
+	}
 	if len(skippedVideos) > 0 {
 		fmt.Printf("\n--- SKIPPED VIDEOS (%d) ---\n", len(skippedVideos))
 		for _, path := range skippedVideos {
 			fmt.Println(path)
 		}
-	} else {
-		fmt.Println("\nNo videos were skipped.")
+	}
+	if len(unmatchedVideos) == 0 && len(skippedVideos) == 0 {
+		fmt.Println("\nNo videos were skipped or unmatched.")
 	}
 
 	_ = stats

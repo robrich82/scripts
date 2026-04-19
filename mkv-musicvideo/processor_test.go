@@ -105,12 +105,12 @@ func TestCleanVideoBase_NoKnownSuffix(t *testing.T) {
 
 // --- processVideo tests ---
 
-func TestProcessVideo_NoAudioData_NoAction(t *testing.T) {
+func TestProcessVideo_NoAudioData_Unmatched(t *testing.T) {
 	dir := t.TempDir()
 	p := NewProcessor(dir, "", &fakePrompter{})
 	result := p.processVideo(dir, "Unknown - Song-video.mkv", map[string]string{}, nil)
-	if result != "" {
-		t.Errorf("got %q, want empty (no audio to match)", result)
+	if result != "unmatched" {
+		t.Errorf("got %q, want 'unmatched'", result)
 	}
 }
 
@@ -198,7 +198,7 @@ func TestRun_AlreadyCorrect_NoStats(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Artist - Song - Song-video.mkv"), []byte{}, 0644)
 
 	p := NewProcessor(dir, "", &fakePrompter{})
-	stats, skipped := p.Run()
+	stats, skipped, _ := p.Run()
 	if stats.Renamed != 0 || stats.Skipped != 0 || len(skipped) != 0 {
 		t.Errorf("expected no actions, got %+v skipped=%v", stats, skipped)
 	}
@@ -210,9 +210,25 @@ func TestRun_SkipsNonVideoFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 
 	p := NewProcessor(dir, "", &fakePrompter{})
-	stats, _ := p.Run()
+	stats, _, _ := p.Run()
 	if stats.Renamed != 0 || stats.Skipped != 0 {
 		t.Errorf("non-video files should produce no stats, got %+v", stats)
+	}
+}
+
+func TestRun_CountsUnmatched(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	// "Nemure.mkv" has no Latin/Japanese character overlap with audio files.
+	os.WriteFile(filepath.Join(dir, "Nemure.mkv"), []byte{}, 0644)
+
+	p := NewProcessor(dir, "", &fakePrompter{})
+	stats, _, unmatched := p.Run()
+	if stats.Unmatched != 1 {
+		t.Errorf("Unmatched=%d, want 1", stats.Unmatched)
+	}
+	if len(unmatched) != 1 {
+		t.Errorf("unmatched paths len=%d, want 1", len(unmatched))
 	}
 }
 
@@ -223,7 +239,7 @@ func TestRun_CountsSkipped(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644)
 
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"s"}})
-	stats, skipped := p.Run()
+	stats, skipped, _ := p.Run()
 	if stats.Skipped != 1 {
 		t.Errorf("Skipped=%d, want 1", stats.Skipped)
 	}
