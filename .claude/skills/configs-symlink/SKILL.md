@@ -20,12 +20,12 @@ The `configs/` directory at the repo root contains Windows directory symlinks po
 
 ## Adding a symlink for a new binary
 
-When a new binary is added that reads from `%APPDATA%\<name>`, create the symlink from an **elevated** `cmd.exe` (not PowerShell, not bash):
+When a new binary is added that reads from `%APPDATA%\<name>`, create a junction from `cmd.exe` (no admin required):
 
 ```cmd
-mklink /D configs\<name> %APPDATA%\<name>
+mklink /J configs\<name> %APPDATA%\<name>
 ```
 
 Replace `<name>` with the binary's name. The target directory must already exist before running this command.
 
-After creating the symlink, commit the new entry — git tracks the symlink itself, not the contents of the target directory.
+Note: `configs/` is listed in `.gitignore`, so junctions are not tracked by git.
