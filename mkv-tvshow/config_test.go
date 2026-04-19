@@ -40,7 +40,7 @@ func TestCleanMetadataTitle_AllReplacements(t *testing.T) {
 		{"A│B", "A|B"},
 		{"A＊B", "A*B"},
 		{"A？B", "A?B"},
-		{"A''B", `A"B`},
+		{"A＂B", `A"B`},
 		{"A＜B", "A<B"},
 		{"A＞B", "A>B"},
 	}
