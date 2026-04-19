@@ -1,5 +1,4 @@
+configs/
 dist/
-__pycache__/
 *.exe
-*.pyc
 .claude/settings.local.json
