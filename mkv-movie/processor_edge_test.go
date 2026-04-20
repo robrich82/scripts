@@ -131,8 +131,8 @@ func TestExtractYear_NotFound_ReturnsEmpty(t *testing.T) {
 	cases := []string{
 		"NoBrackets.mkv",
 		"file.mkv",
-		"1899film.mkv",  // below range
-		"2100film.mkv",  // above range
+		"1899film.mkv", // below range
+		"2100film.mkv", // above range
 	}
 	for _, tc := range cases {
 		got := extractYear(tc)
@@ -191,8 +191,8 @@ func TestProcessFile_CachedTMDBID_SkipsSearch(t *testing.T) {
 		ReleaseDate: "2014-11-07",
 	}
 	tmdb := &trackingTMDBClient{
-		details:          details,
-		onSearchCalled:   func() { searchCalled = true },
+		details:        details,
+		onSearchCalled: func() { searchCalled = true },
 	}
 
 	applier := &fakeApplier{}
@@ -281,7 +281,7 @@ func TestWalkAndProcess_MultipleFiles_CountsAll(t *testing.T) {
 	// Client always returns not-found.
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
 	cache := makeCache(t)
-	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false)
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false, time.Time{})
 
 	// All three have derivable titles and go to TMDB, which returns not-found for each.
 	if stats.Skipped != 3 {
@@ -300,7 +300,7 @@ func TestWalkAndProcess_SavesCache(t *testing.T) {
 	cache.Set("test", RatingG)
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
-	walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false)
+	walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false, time.Time{})
 
 	if _, statErr := os.Stat(cacheFile); os.IsNotExist(statErr) {
 		t.Error("cache file should be written by walkAndProcess")

@@ -394,7 +394,7 @@ func TestWalkAndProcess_SkipsNonMKV(t *testing.T) {
 
 	tmdb := &fakeTMDBMovieClient{}
 	cache := makeCache(t)
-	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false)
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false, time.Time{})
 	if stats.Skipped != 0 || stats.Updated != 0 || stats.Errors != 0 {
 		t.Errorf("unexpected stats for non-mkv file: %+v", stats)
 	}
@@ -407,7 +407,7 @@ func TestWalkAndProcess_CountsSkipped(t *testing.T) {
 	// TMDB finds nothing → skipped.
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
 	cache := makeCache(t)
-	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false)
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false, time.Time{})
 	if stats.Skipped != 1 {
 		t.Errorf("got Skipped=%d, want 1", stats.Skipped)
 	}

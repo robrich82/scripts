@@ -195,7 +195,7 @@ func processCBZ(path string, dryRun, verbose, noBlank bool) (skipped bool, err e
 	}
 
 	// ── Write new zip to a temp file (zr still open for reads) ────────────
-	tmpPath, err := writeNewCBZ(filepath.Dir(path), entries, ciData, zr)
+	tmpPath, err := writeNewCBZ(filepath.Dir(path), entries, ciData)
 	zr.Close()
 	if err != nil {
 		return false, fmt.Errorf("write new CBZ: %w", err)
@@ -312,7 +312,7 @@ func buildPages(entries []entry, oldInfo map[int]pageInfo, blankW, blankH int) [
 
 // writeNewCBZ streams entries (and ComicInfo.xml) into a new temp file.
 // Returns the temp file path on success.
-func writeNewCBZ(dir string, entries []entry, ciData []byte, zr *zip.ReadCloser) (string, error) {
+func writeNewCBZ(dir string, entries []entry, ciData []byte) (string, error) {
 	tmp, err := os.CreateTemp(dir, "cbzfix-*.tmp")
 	if err != nil {
 		return "", err

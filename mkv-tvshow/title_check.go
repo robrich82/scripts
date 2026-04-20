@@ -267,16 +267,16 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 // cutoff filter is not affected.
 // Returns true when the title was already current (no work done) or when the
 // update succeeded. Silently succeeds when mkvpropedit is absent.
-func (tc *TitleChecker) applyFullTitle(path, fullTitle string) bool {
+func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 	if fullTitle == "" {
-		return true
+		return
 	}
 	if tc.mkv == nil || !tc.mkv.Available() {
-		return true
+		return
 	}
 	// Already up to date — skip the mkvpropedit call.
 	if cached, ok := tc.titleCache.Get(path); ok && cached == fullTitle {
-		return true
+		return
 	}
 
 	origStat, statErr := os.Stat(path)
@@ -284,11 +284,11 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) bool {
 	combined, rc, err := tc.mkv.Apply(path, []string{"--edit", "info", "--set", "title=" + fullTitle})
 	if err != nil {
 		fmt.Printf("  [!] mkvpropedit error: %v\n", err)
-		return false
+		return
 	}
 	if rc != 0 && !strings.Contains(combined, mkvpropeditSuccessMsg) {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n", rc)
-		return false
+		return
 	}
 
 	// Restore timestamps so normal mode's cutoff filter sees the original mtime.
@@ -303,7 +303,6 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) bool {
 
 	tc.titleCache.Set(path, fullTitle)
 	fmt.Printf("  [✓] MKV title set: %s\n", fullTitle)
-	return true
 }
 
 // buildFullMKVTitle constructs the full MKV title from a filename stem and

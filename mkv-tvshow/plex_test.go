@@ -67,7 +67,7 @@ func (f *fakePlexClient) SetContentRating(ratingKey string, t PlexItemType, rati
 	return f.setRatingErr
 }
 
-func (f *fakePlexClient) RefreshLibraries() error  { return nil }
+func (f *fakePlexClient) RefreshLibraries() error        { return nil }
 func (f *fakePlexClient) RefreshMetadata(_ string) error { return nil }
 
 // --- httpPlexClient unit tests ---
