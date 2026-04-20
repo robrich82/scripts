@@ -1,5 +1,32 @@
 package main
 
+import (
+	"encoding/json"
+	"time"
+)
+
+// flexInt64 unmarshals a JSON number or an RFC3339 string into a Unix timestamp (seconds).
+// Newer mkvmerge versions emit date_utc as an ISO 8601 string instead of an integer.
+type flexInt64 int64
+
+func (f *flexInt64) UnmarshalJSON(data []byte) error {
+	var n int64
+	if err := json.Unmarshal(data, &n); err == nil {
+		*f = flexInt64(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return err
+	}
+	*f = flexInt64(t.Unix())
+	return nil
+}
+
 // TrackProperties mirrors the "properties" object from mkvmerge --identify JSON.
 type TrackProperties struct {
 	Language         string `json:"language"`
@@ -25,7 +52,7 @@ type Track struct {
 type MKVInfo struct {
 	Container struct {
 		Properties struct {
-			DateUTC *int64 `json:"date_utc"`
+			DateUTC *flexInt64 `json:"date_utc"`
 		} `json:"properties"`
 	} `json:"container"`
 	Tracks []Track `json:"tracks"`

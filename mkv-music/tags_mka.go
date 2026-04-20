@@ -13,6 +13,28 @@ import (
 	"time"
 )
 
+// flexInt64 unmarshals a JSON number or an RFC3339 string into a Unix timestamp (seconds).
+// Newer mkvmerge versions emit date_utc as an ISO 8601 string instead of an integer.
+type flexInt64 int64
+
+func (f *flexInt64) UnmarshalJSON(data []byte) error {
+	var n int64
+	if err := json.Unmarshal(data, &n); err == nil {
+		*f = flexInt64(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return err
+	}
+	*f = flexInt64(t.Unix())
+	return nil
+}
+
 // mkvTagsDocument decodes the XML produced by: mkvextract <file> tags <output>
 // mkvextract always includes a DOCTYPE declaration; Go's encoding/xml skips it.
 type mkvTagsDocument struct {
@@ -69,7 +91,7 @@ type mkvmergeIdentify struct {
 	Container struct {
 		Properties struct {
 			Title   string `json:"title"`
-			DateUTC *int64 `json:"date_utc"`
+			DateUTC *flexInt64 `json:"date_utc"`
 		} `json:"properties"`
 	} `json:"container"`
 	Attachments []struct {
@@ -113,7 +135,7 @@ func readMKVHeaderDate(mkvmergePath, mkvPath string) (time.Time, bool) {
 	if info.Container.Properties.DateUTC == nil {
 		return time.Time{}, false
 	}
-	return time.Unix(*info.Container.Properties.DateUTC, 0).UTC(), true
+	return time.Unix(int64(*info.Container.Properties.DateUTC), 0).UTC(), true
 }
 
 // extractMKACover finds the first image attachment in mkaPath and returns its

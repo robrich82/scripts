@@ -333,7 +333,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 					if tagDate, ok := ident.ReadTagDate(p); ok {
 						needsFix := true
 						if info.Container.Properties.DateUTC != nil {
-							containerDate := time.Unix(*info.Container.Properties.DateUTC, 0).UTC()
+							containerDate := time.Unix(int64(*info.Container.Properties.DateUTC), 0).UTC()
 							needsFix = containerDate.Format("2006-01-02") != tagDate.UTC().Format("2006-01-02")
 						}
 						if needsFix {
