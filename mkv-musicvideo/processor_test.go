@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // fakePrompter returns pre-queued answers in order.
@@ -42,6 +43,10 @@ func (f *fakeTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix string) (bool,
 func (f *fakeTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error {
 	f.calls = append(f.calls, taggerCall{audioPath, mkvPath, titleSuffix})
 	return f.err
+}
+
+func (f *fakeTagger) MKVDate(mkvPath string) (time.Time, bool) {
+	return time.Time{}, false
 }
 
 // --- buildAudioData tests ---

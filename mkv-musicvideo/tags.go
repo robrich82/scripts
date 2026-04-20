@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dhowden/tag"
 )
@@ -21,6 +22,9 @@ type MusicVideoTagger interface {
 	// Returns false (not true) on any error so the caller falls back to copying.
 	TagsMatchMKV(audioPath, mkvPath, titleSuffix string) (bool, error)
 	CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error
+	// MKVDate returns the date stored in the MKV container header and true,
+	// or zero time and false when absent or on error.
+	MKVDate(mkvPath string) (time.Time, bool)
 }
 
 // AudioTags holds the metadata extracted from an audio file.
@@ -227,6 +231,11 @@ func newRealMusicVideoTagger() (*realMusicVideoTagger, error) {
 	}, nil
 }
 
+// MKVDate implements MusicVideoTagger.
+func (t *realMusicVideoTagger) MKVDate(mkvPath string) (time.Time, bool) {
+	return readMKVHeaderDate(t.mkvmergePath, mkvPath)
+}
+
 // TagsMatchMKV implements MusicVideoTagger.
 // It reads tags from audioPath and the current tags embedded in mkvPath,
 // then compares all text fields and cover art.
@@ -282,6 +291,14 @@ func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix stri
 
 	if readMKVHeaderTitle(t.mkvmergePath, mkvPath) != buildHeaderTitle(want, "") {
 		return false, nil
+	}
+
+	// Check MKV header date matches the audio year.
+	if want.Year > 0 {
+		mkvDate, ok := readMKVHeaderDate(t.mkvmergePath, mkvPath)
+		if !ok || mkvDate.Year() != want.Year {
+			return false, nil
+		}
 	}
 
 	// Compare cover art: extract the current attachment from the MKV and check
@@ -354,10 +371,18 @@ func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix str
 		deleteAttachment("cover.png")
 	}
 
-	// Single mkvpropedit call: title header + tags + optional cover attachment.
+	// Single mkvpropedit call: title + date header + tags + optional cover attachment.
 	args := []string{mkvPath}
+	editInfo := false
 	if headerTitle := buildHeaderTitle(tags, ""); headerTitle != "" {
 		args = append(args, "--edit", "info", "--set", "title="+headerTitle)
+		editInfo = true
+	}
+	if tags.Year > 0 {
+		if !editInfo {
+			args = append(args, "--edit", "info")
+		}
+		args = append(args, "--set", fmt.Sprintf("date=%d-01-01T00:00:00Z", tags.Year))
 	}
 	args = append(args, "--tags", "all:"+xmlFile.Name())
 	if coverTmpPath != "" {

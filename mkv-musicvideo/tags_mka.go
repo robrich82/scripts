@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"time"
 	"strconv"
 	"strings"
 )
@@ -67,7 +68,8 @@ func parseMKVTagsXML(xmlPath string) (level50, level30 map[string]string) {
 type mkvmergeIdentify struct {
 	Container struct {
 		Properties struct {
-			Title string `json:"title"`
+			Title   string `json:"title"`
+			DateUTC *int64 `json:"date_utc"`
 		} `json:"properties"`
 	} `json:"container"`
 	Attachments []struct {
@@ -91,6 +93,27 @@ func readMKVHeaderTitle(mkvmergePath, mkvPath string) string {
 		return ""
 	}
 	return info.Container.Properties.Title
+}
+
+// readMKVHeaderDate returns the date stored in the MKV container header.
+// date_utc from mkvmerge JSON is a Unix timestamp in seconds (UTC).
+// Returns zero time and false when absent or on error.
+func readMKVHeaderDate(mkvmergePath, mkvPath string) (time.Time, bool) {
+	var buf bytes.Buffer
+	cmd := exec.Command(mkvmergePath, "--identify", "--identification-format", "json", mkvPath)
+	cmd.Stdout = &buf
+	cmd.Stderr = io.Discard
+	if cmd.Run() != nil {
+		return time.Time{}, false
+	}
+	var info mkvmergeIdentify
+	if err := json.Unmarshal(buf.Bytes(), &info); err != nil {
+		return time.Time{}, false
+	}
+	if info.Container.Properties.DateUTC == nil {
+		return time.Time{}, false
+	}
+	return time.Unix(*info.Container.Properties.DateUTC, 0).UTC(), true
 }
 
 // extractMKACover finds the first image attachment in mkaPath and returns its
