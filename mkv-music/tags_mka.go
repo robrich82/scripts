@@ -90,7 +90,7 @@ func parseMKVTagsXML(xmlPath string) (level50, level30 map[string]string) {
 type mkvmergeIdentify struct {
 	Container struct {
 		Properties struct {
-			Title   string `json:"title"`
+			Title   string     `json:"title"`
 			DateUTC *flexInt64 `json:"date_utc"`
 		} `json:"properties"`
 	} `json:"container"`

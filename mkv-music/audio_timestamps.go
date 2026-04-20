@@ -63,29 +63,32 @@ func SetAudioTimestamps(root string, cutoffDate time.Time, timer FileTimer, exif
 	return stats
 }
 
-// readAudioFileDate tries each exiftool tag in sequence and returns the first
-// parseable date. MKA files get Matroska-specific tags tried first.
+// readAudioFileDate returns the embedded date for an audio file.
+// Non-MKA formats use dhowden/tag (avoids path issues with exiftool on Windows).
+// MKA files fall back to exiftool since dhowden/tag doesn't support Matroska.
 func readAudioFileDate(path, ext, exiftoolPath string) (time.Time, bool) {
-	var tags []string
-	if ext == ".mka" {
-		tags = []string{
-			"Matroska:DateTimeOriginal-en-US",
-			"Matroska:DateTimeOriginal-und",
-			"ContentCreateDate",
-			"DateTimeOriginal",
-			"Date",
-			"Year",
+	if ext != ".mka" {
+		tags, err := readAudioTags(path)
+		if err == nil && tags.Date != "" {
+			if dt, ok := parseAudioDate(tags.Date); ok {
+				return dt, true
+			}
 		}
-	} else {
-		tags = []string{
-			"ContentCreateDate",
-			"DateTimeOriginal",
-			"Date",
-			"Year",
-		}
+		return time.Time{}, false
 	}
-	for _, tag := range tags {
-		out, err := exec.Command(exiftoolPath, "-s3", "-"+tag, path).Output()
+	// MKA: use exiftool with Matroska-specific tags.
+	mkaTagNames := []string{
+		"Matroska:DateTimeOriginal-en-US",
+		"Matroska:DateTimeOriginal-und",
+		"ContentCreateDate",
+		"DateTimeOriginal",
+		"Date",
+		"Year",
+	}
+	for _, tag := range mkaTagNames {
+		cmd := exec.Command(exiftoolPath, "-s3", "-"+tag, filepath.Base(path))
+		cmd.Dir = filepath.Dir(path)
+		out, err := cmd.Output()
 		if err != nil {
 			continue
 		}
