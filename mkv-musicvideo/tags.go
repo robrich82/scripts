@@ -35,6 +35,7 @@ type AudioTags struct {
 	Album       string
 	TrackNum    int
 	Year        int
+	Date        string // full date string: "YYYY-MM-DD", "YYYY-MM", or "YYYY"
 	Genre       string
 	Comment     string
 	CoverData   []byte
@@ -75,18 +76,63 @@ func readAudioTags(path string) (AudioTags, error) {
 		albumArtist = rawVorbisString(m.Raw(), "album_artist")
 	}
 
+	raw := m.Raw()
+	dateStr := rawVorbisString(raw, "date")   // Vorbis/FLAC
+	if dateStr == "" {
+		dateStr = rawVorbisString(raw, "TDRC") // ID3v2.4 recording time
+	}
+	if dateStr == "" {
+		dateStr = rawVorbisString(raw, "©day") // M4A/AAC
+	}
+	dateStr = normalizeDate(dateStr)
+	if dateStr == "" && m.Year() > 0 {
+		dateStr = strconv.Itoa(m.Year())
+	}
+
+	year := m.Year()
+	if dt, ok := parseAudioDate(dateStr); ok && year == 0 {
+		year = dt.Year()
+	}
+
 	return AudioTags{
 		Title:       m.Title(),
 		Artist:      artist,
 		AlbumArtist: albumArtist,
 		Album:       m.Album(),
 		TrackNum:    trackNum,
-		Year:        m.Year(),
+		Year:        year,
+		Date:        dateStr,
 		Genre:       m.Genre(),
 		Comment:     m.Comment(),
 		CoverData:   coverData,
 		CoverMIME:   coverMIME,
 	}, nil
+}
+
+// normalizeDate strips time components and validates the date string, returning
+// a clean "YYYY-MM-DD", "YYYY-MM", or "YYYY" string, or "" if unrecognised.
+func normalizeDate(s string) string {
+	if i := strings.IndexByte(s, 'T'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	for _, layout := range []string{"2006-01-02", "2006-01", "2006"} {
+		if _, err := time.Parse(layout, s); err == nil {
+			return s
+		}
+	}
+	return ""
+}
+
+// parseAudioDate parses a date string produced by normalizeDate into a
+// time.Time (UTC, day/month defaulting to 1). Returns false if unparseable.
+func parseAudioDate(s string) (time.Time, bool) {
+	for _, layout := range []string{"2006-01-02", "2006-01", "2006"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // buildTagsXML returns a Matroska tags XML document for the given AudioTags.
@@ -111,9 +157,7 @@ func buildTagsXML(t AudioTags) string {
 	// Album-level tags (TargetTypeValue=50): TITLE=album title, ARTIST=album artist.
 	addTo(&lvl50, "TITLE", t.Album)
 	addTo(&lvl50, "ARTIST", t.AlbumArtist)
-	if t.Year > 0 {
-		addTo(&lvl50, "DATE_RECORDED", strconv.Itoa(t.Year))
-	}
+	addTo(&lvl50, "DATE_RECORDED", t.Date)
 	addTo(&lvl50, "GENRE", t.Genre)
 	addTo(&lvl50, "COMMENT", t.Comment)
 
@@ -273,17 +317,13 @@ func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix stri
 	if want.TrackNum > 0 {
 		wantTrack = strconv.Itoa(want.TrackNum)
 	}
-	wantYear := ""
-	if want.Year > 0 {
-		wantYear = strconv.Itoa(want.Year)
-	}
 
 	if !(lvl30["TITLE"] == want.Title &&
 		lvl30["ARTIST"] == want.Artist &&
 		lvl30["PART_NUMBER"] == wantTrack &&
 		lvl50["TITLE"] == want.Album &&
 		lvl50["ARTIST"] == want.AlbumArtist &&
-		lvl50["DATE_RECORDED"] == wantYear &&
+		lvl50["DATE_RECORDED"] == want.Date &&
 		lvl50["GENRE"] == want.Genre &&
 		lvl50["COMMENT"] == want.Comment) {
 		return false, nil
@@ -293,10 +333,10 @@ func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix stri
 		return false, nil
 	}
 
-	// Check MKV header date matches the audio year.
-	if want.Year > 0 {
-		mkvDate, ok := readMKVHeaderDate(t.mkvmergePath, mkvPath)
-		if !ok || mkvDate.Year() != want.Year {
+	// Check MKV header date matches the audio date.
+	if wantDt, ok := parseAudioDate(want.Date); ok {
+		mkvDate, hasMKVDate := readMKVHeaderDate(t.mkvmergePath, mkvPath)
+		if !hasMKVDate || mkvDate.UTC().Format("2006-01-02") != wantDt.UTC().Format("2006-01-02") {
 			return false, nil
 		}
 	}
@@ -378,11 +418,11 @@ func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix str
 		args = append(args, "--edit", "info", "--set", "title="+headerTitle)
 		editInfo = true
 	}
-	if tags.Year > 0 {
+	if dt, ok := parseAudioDate(tags.Date); ok {
 		if !editInfo {
 			args = append(args, "--edit", "info")
 		}
-		args = append(args, "--set", fmt.Sprintf("date=%d-01-01T00:00:00Z", tags.Year))
+		args = append(args, "--set", fmt.Sprintf("date=%sT00:00:00Z", dt.Format("2006-01-02")))
 	}
 	args = append(args, "--tags", "all:"+xmlFile.Name())
 	if coverTmpPath != "" {

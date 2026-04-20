@@ -177,12 +177,14 @@ func readAudioTagsFromMKA(path, mkvextractPath, mkvmergePath string) (AudioTags,
 
 	lvl50, lvl30 := parseMKVTagsXML(xmlTmp.Name())
 
-	var trackNum, year int
+	var trackNum int
 	if n, err := strconv.Atoi(lvl30["PART_NUMBER"]); err == nil {
 		trackNum = n
 	}
-	if y, err := strconv.Atoi(lvl50["DATE_RECORDED"]); err == nil {
-		year = y
+	dateStr := normalizeDate(lvl50["DATE_RECORDED"])
+	var year int
+	if dt, ok := parseAudioDate(dateStr); ok {
+		year = dt.Year()
 	}
 
 	coverData, coverMIME := extractMKACover(mkvextractPath, mkvmergePath, path)
@@ -194,6 +196,7 @@ func readAudioTagsFromMKA(path, mkvextractPath, mkvmergePath string) (AudioTags,
 		Album:       lvl50["TITLE"],
 		TrackNum:    trackNum,
 		Year:        year,
+		Date:        dateStr,
 		Genre:       lvl50["GENRE"],
 		Comment:     lvl50["COMMENT"],
 		CoverData:   coverData,
