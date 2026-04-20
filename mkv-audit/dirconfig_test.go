@@ -273,7 +273,7 @@ func TestResolveIETFMap_FileSpecificOverride(t *testing.T) {
 // filesystem path in NFD (and vice-versa) — both normalized to NFC before compare.
 func TestResolveIETFMap_NFDPath(t *testing.T) {
 	// NFC form of "ド" is U+30C9; NFD form is U+30C8 + U+309B.
-	nfc := "YOASOBI/\u30A2\u30A4\u30C9\u30EB (2023)/02 - Idol - Idol-video.mkv" // ア+イ+ド+ル (NFC)
+	nfc := "YOASOBI/\u30A2\u30A4\u30C9\u30EB (2023)/02 - Idol - Idol-video.mkv"       // ア+イ+ド+ル (NFC)
 	nfd := "YOASOBI/\u30A2\u30A4\u30C8\u3099\u30EB (2023)/02 - Idol - Idol-video.mkv" // ア+イ+ト+combining-dakuten+ル (NFD)
 
 	root := t.TempDir()
