@@ -52,6 +52,7 @@ func main() {
 
 	prompter := newStdinPrompter()
 	processor := NewProcessor(root, ignoreFile, prompter)
+	processor.timer = &win32FileTimer{}
 
 	if err := processor.LoadIgnorePatterns(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not load ignore patterns: %v\n", err)

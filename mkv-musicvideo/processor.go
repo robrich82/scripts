@@ -42,6 +42,7 @@ type Processor struct {
 	renamer         func(oldPath, newPath string) error
 	patternAppender func(ignoreFile, videoFile, pattern string) error
 	tagger          MusicVideoTagger // nil = tag copying disabled
+	timer           FileTimer        // nil = timestamp syncing disabled
 	cutoffDate      time.Time
 }
 
@@ -243,12 +244,42 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 	}
 	if match, err := p.tagger.TagsMatchMKV(audioFullPath, mkvPath, titleSuffix); err == nil && match {
 		fmt.Printf("    [TAG] Already up to date: %s\n", filepath.Base(mkvPath))
+		p.syncTimestamps(mkvPath, audioFullPath)
 		return
 	}
 	if err := p.tagger.CopyTagsToMKV(audioFullPath, mkvPath, titleSuffix); err != nil {
 		fmt.Printf("    [WARN] tag copy failed for %s: %v\n", filepath.Base(mkvPath), err)
 	} else {
 		fmt.Printf("    [TAG] Copied tags from %s\n", audioFilename)
+		p.syncTimestamps(mkvPath, audioFullPath)
+	}
+}
+
+// syncTimestamps sets mkvPath's modified and created timestamps to January 1st
+// of the year embedded in the audio file's tags. No-op if timer is nil, year
+// is zero, or the timestamps already match.
+func (p *Processor) syncTimestamps(mkvPath, audioPath string) {
+	if p.timer == nil {
+		return
+	}
+	var tags AudioTags
+	var err error
+	if strings.EqualFold(filepath.Ext(audioPath), ".mka") {
+		// MKA tags require mkvextract; skip timestamp sync when tagger is nil.
+		return
+	}
+	tags, err = readAudioTags(audioPath)
+	if err != nil || tags.Year <= 0 {
+		return
+	}
+	dt := time.Date(tags.Year, time.January, 1, 0, 0, 0, 0, time.Local)
+	if p.timer.CreationTimeNeedsUpdate(mkvPath, dt.Unix()) {
+		if err := p.timer.SetCreationTime(mkvPath, dt); err != nil {
+			fmt.Printf("    [WARN] set ctime failed for %s: %v\n", filepath.Base(mkvPath), err)
+		}
+	}
+	if err := p.timer.SetTimes(mkvPath, dt); err != nil {
+		fmt.Printf("    [WARN] set mtime failed for %s: %v\n", filepath.Base(mkvPath), err)
 	}
 }
 
