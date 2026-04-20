@@ -23,6 +23,11 @@ type Track struct {
 
 // MKVInfo is the top-level structure from mkvmerge --identify --identification-format json.
 type MKVInfo struct {
+	Container struct {
+		Properties struct {
+			DateUTC *int64 `json:"date_utc"`
+		} `json:"properties"`
+	} `json:"container"`
 	Tracks []Track `json:"tracks"`
 }
 
@@ -38,5 +43,6 @@ type Stats struct {
 	VideoInherit int
 	FlagFixes    int
 	NamesAdded   int
+	DateFixes    int
 	FailedPaths  []string
 }

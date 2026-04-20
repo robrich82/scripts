@@ -121,5 +121,6 @@ func main() {
 	fmt.Printf("Video Lang Inherited:   %d\n", stats.VideoInherit)
 	fmt.Printf("Flag Rules Applied:     %d\n", stats.FlagFixes)
 	fmt.Printf("Names Added:            %d\n", stats.NamesAdded)
+	fmt.Printf("Date Header Fixes:      %d\n", stats.DateFixes)
 	fmt.Println("========================================")
 }

@@ -19,6 +19,9 @@ const unknownCodecsFile = "unknown_codecs.json"
 // MKVIdentifier reads track metadata from an MKV file.
 type MKVIdentifier interface {
 	Identify(filePath string) (*MKVInfo, error)
+	// ReadTagDate returns the DATE_RECORDED Matroska tag value and true when
+	// present. Returns zero time and false when absent or unsupported.
+	ReadTagDate(filePath string) (time.Time, bool)
 }
 
 // MKVEditor applies edits to an MKV file via mkvpropedit.
@@ -29,6 +32,7 @@ type MKVEditor interface {
 type realMKVRunner struct {
 	mkvmerge    string
 	mkvpropedit string
+	mkvextract  string
 }
 
 func newRealMKVRunner() (*realMKVRunner, error) {
@@ -40,7 +44,15 @@ func newRealMKVRunner() (*realMKVRunner, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mkvpropedit not found in PATH")
 	}
-	return &realMKVRunner{mkvmerge: merge, mkvpropedit: prop}, nil
+	extract, _ := exec.LookPath("mkvextract") // optional; empty string disables date sync
+	return &realMKVRunner{mkvmerge: merge, mkvpropedit: prop, mkvextract: extract}, nil
+}
+
+func (r *realMKVRunner) ReadTagDate(filePath string) (time.Time, bool) {
+	if r.mkvextract == "" {
+		return time.Time{}, false
+	}
+	return readTagDateFromMKA(r.mkvextract, filePath)
 }
 
 func (r *realMKVRunner) Identify(filePath string) (*MKVInfo, error) {
@@ -314,6 +326,24 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 					}
 				}
 
+				// MKA container date sync: read DATE_RECORDED tag and compare with
+				// the container date header; append a fix edit when they differ.
+				var dateFix int
+				if !res.Failed && strings.EqualFold(filepath.Ext(basename), ".mka") {
+					if tagDate, ok := ident.ReadTagDate(p); ok {
+						needsFix := true
+						if info.Container.Properties.DateUTC != nil {
+							containerDate := time.Unix(*info.Container.Properties.DateUTC, 0).UTC()
+							needsFix = containerDate.Format("2006-01-02") != tagDate.UTC().Format("2006-01-02")
+						}
+						if needsFix {
+							dateStr := tagDate.UTC().Format("2006-01-02") + "T00:00:00Z"
+							res.Edits = append(res.Edits, "--edit", "info", "--set", "date="+dateStr)
+							dateFix = 1
+						}
+					}
+				}
+
 				if res.Failed {
 					fmt.Fprintf(&buf, "[FAILED] %s: %s\n", basename, strings.Join(res.FailReasons, ", "))
 					local.Failed++
@@ -332,6 +362,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 					local.VideoInherit += res.LocalFixes.Video
 					local.FlagFixes += res.LocalFixes.Flags
 					local.NamesAdded += res.LocalFixes.Names
+					local.DateFixes += dateFix
 				}
 			}
 
@@ -360,6 +391,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			stats.VideoInherit += local.VideoInherit
 			stats.FlagFixes += local.FlagFixes
 			stats.NamesAdded += local.NamesAdded
+			stats.DateFixes += local.DateFixes
 			for _, c := range localCodecs {
 				unknownCodecs[c] = true
 			}

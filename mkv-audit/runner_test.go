@@ -18,6 +18,10 @@ func (f *fakeIdentifier) Identify(_ string) (*MKVInfo, error) {
 	return f.info, f.err
 }
 
+func (f *fakeIdentifier) ReadTagDate(_ string) (time.Time, bool) {
+	return time.Time{}, false
+}
+
 // fakeEditor records Apply calls and returns a controlled error.
 type fakeEditor struct {
 	calls []string
