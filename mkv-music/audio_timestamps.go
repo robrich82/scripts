@@ -26,8 +26,8 @@ type AudioTimestampStats struct {
 	Failed     int
 }
 
-// SetAudioTimestamps walks root, reads each audio file's embedded date tag via
-// exiftool, and sets OS file timestamps. Files older than cutoffDate are skipped.
+// SetAudioTimestamps walks root, reads each audio file's embedded date tag and
+// sets OS file timestamps. Files older than cutoffDate are skipped.
 func SetAudioTimestamps(root string, cutoffDate time.Time, timer FileTimer, exiftoolPath string) AudioTimestampStats {
 	var stats AudioTimestampStats
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -64,8 +64,8 @@ func SetAudioTimestamps(root string, cutoffDate time.Time, timer FileTimer, exif
 }
 
 // readAudioFileDate returns the embedded date for an audio file.
-// Non-MKA formats use dhowden/tag (avoids path issues with exiftool on Windows).
-// MKA files fall back to exiftool since dhowden/tag doesn't support Matroska.
+// Non-MKA formats are read via go-taglib (supports WMA, FLAC, MP3, M4A, DSF, etc.).
+// MKA uses exiftool via stdin since TagLib doesn't support Matroska.
 func readAudioFileDate(path, ext, exiftoolPath string) (time.Time, bool) {
 	if ext != ".mka" {
 		tags, err := readAudioTags(path)
@@ -76,32 +76,45 @@ func readAudioFileDate(path, ext, exiftoolPath string) (time.Time, bool) {
 		}
 		return time.Time{}, false
 	}
-	// MKA: use exiftool with Matroska-specific tags.
-	mkaTagNames := []string{
+	for _, tagName := range []string{
 		"Matroska:DateTimeOriginal-en-US",
 		"Matroska:DateTimeOriginal-und",
 		"ContentCreateDate",
 		"DateTimeOriginal",
 		"Date",
 		"Year",
-	}
-	for _, tag := range mkaTagNames {
-		cmd := exec.Command(exiftoolPath, "-s3", "-"+tag, filepath.Base(path))
-		cmd.Dir = filepath.Dir(path)
-		out, err := cmd.Output()
-		if err != nil {
-			continue
-		}
-		s := strings.TrimSpace(string(out))
-		if s == "" {
-			continue
-		}
-		dt, err := parseExifDate(s)
-		if err == nil {
+	} {
+		dt, ok := exiftoolReadTag(exiftoolPath, path, tagName)
+		if ok {
 			return dt, true
 		}
 	}
 	return time.Time{}, false
+}
+
+// exiftoolReadTag runs exiftool on path for a single tag, piping the file via
+// stdin to avoid filename encoding issues on Windows.
+func exiftoolReadTag(exiftoolPath, path, tagName string) (time.Time, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer f.Close()
+	cmd := exec.Command(exiftoolPath, "-s3", "-"+tagName, "-")
+	cmd.Stdin = f
+	out, err := cmd.Output()
+	if err != nil {
+		return time.Time{}, false
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return time.Time{}, false
+	}
+	dt, err := parseExifDate(s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return dt, true
 }
 
 // parseExifDate normalises the various date string formats exiftool returns.

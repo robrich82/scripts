@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dhowden/tag"
+	"go.senan.xyz/taglib"
 )
 
 // MusicVideoTagger copies tags and cover art from a source audio file to a
@@ -42,71 +42,75 @@ type AudioTags struct {
 	CoverMIME   string
 }
 
-// readAudioTags opens path and reads its embedded metadata via dhowden/tag.
-// The track number is normalised to an integer — dhowden/tag already strips
-// any "/total" suffix stored by formats such as DSF.
+// readAudioTags opens path and reads its embedded metadata via go-taglib.
 func readAudioTags(path string) (AudioTags, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return AudioTags{}, err
-	}
-	defer f.Close()
-
-	m, err := tag.ReadFrom(f)
+	tags, err := taglib.ReadTags(path)
 	if err != nil {
 		return AudioTags{}, fmt.Errorf("read tags %s: %w", path, err)
 	}
 
-	trackNum, _ := m.Track()
-	var coverData []byte
-	var coverMIME string
-	if pic := m.Picture(); pic != nil {
-		coverData = pic.Data
-		coverMIME = pic.MIMEType
+	artist := firstTag(tags, taglib.Artist, "PERFORMER")
+	albumArtist := firstTag(tags, taglib.AlbumArtist, "ALBUM_ARTIST")
+
+	dateStr := normalizeDate(firstTag(tags, taglib.Date))
+	var year int
+	if dateStr != "" {
+		if dt, ok := parseAudioDate(dateStr); ok {
+			year = dt.Year()
+		}
+	}
+	if year == 0 {
+		if y, err := strconv.Atoi(firstTag(tags, taglib.Date)); err == nil && y > 0 {
+			year = y
+			dateStr = strconv.Itoa(y)
+		}
 	}
 
-	// dhowden/tag maps the Vorbis "artist" key but not "performer".
-	// Some FLAC files (e.g. ripped with certain tools) use PERFORMER instead of ARTIST.
-	artist := m.Artist()
-	if artist == "" {
-		artist = rawVorbisString(m.Raw(), "performer")
-	}
-	albumArtist := m.AlbumArtist()
-	if albumArtist == "" {
-		albumArtist = rawVorbisString(m.Raw(), "album_artist")
+	trackNum := 0
+	if s := firstTag(tags, taglib.TrackNumber); s != "" {
+		// TRACKNUMBER may be "3" or "3/12"
+		trackNum, _ = strconv.Atoi(strings.SplitN(s, "/", 2)[0])
 	}
 
-	raw := m.Raw()
-	dateStr := rawVorbisString(raw, "date") // Vorbis/FLAC
-	if dateStr == "" {
-		dateStr = rawVorbisString(raw, "TDRC") // ID3v2.4 recording time
-	}
-	if dateStr == "" {
-		dateStr = rawVorbisString(raw, "©day") // M4A/AAC
-	}
-	dateStr = normalizeDate(dateStr)
-	if dateStr == "" && m.Year() > 0 {
-		dateStr = strconv.Itoa(m.Year())
-	}
-
-	year := m.Year()
-	if dt, ok := parseAudioDate(dateStr); ok && year == 0 {
-		year = dt.Year()
+	coverData, _ := taglib.ReadImage(path)
+	coverMIME := ""
+	if len(coverData) > 0 {
+		coverMIME = imageMIMEType(coverData)
 	}
 
 	return AudioTags{
-		Title:       m.Title(),
+		Title:       firstTag(tags, taglib.Title),
 		Artist:      artist,
 		AlbumArtist: albumArtist,
-		Album:       m.Album(),
+		Album:       firstTag(tags, taglib.Album),
 		TrackNum:    trackNum,
 		Year:        year,
 		Date:        dateStr,
-		Genre:       m.Genre(),
-		Comment:     m.Comment(),
+		Genre:       firstTag(tags, taglib.Genre),
+		Comment:     firstTag(tags, taglib.Comment),
 		CoverData:   coverData,
 		CoverMIME:   coverMIME,
 	}, nil
+}
+
+// firstTag returns the first non-empty value for any of the given keys.
+func firstTag(tags map[string][]string, keys ...string) string {
+	for _, k := range keys {
+		for _, v := range tags[k] {
+			if v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+// imageMIMEType detects image/jpeg or image/png from magic bytes.
+func imageMIMEType(data []byte) string {
+	if bytes.HasPrefix(data, []byte{0x89, 'P', 'N', 'G'}) {
+		return "image/png"
+	}
+	return "image/jpeg"
 }
 
 // normalizeDate strips time components and validates the date string, returning
@@ -186,55 +190,6 @@ func buildTagsXML(t AudioTags) string {
 	}
 	sb.WriteString("</Tags>")
 	return sb.String()
-}
-
-// rawVorbisString reads a string value from the raw Vorbis comment map returned
-// by tag.Metadata.Raw(). Values can be strings or []string (multiple comments
-// with the same key); we return the first non-empty value found.
-func rawVorbisString(raw interface{}, key string) string {
-	m, ok := raw.(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	v, ok := m[key]
-	if !ok {
-		return ""
-	}
-	switch s := v.(type) {
-	case string:
-		return s
-	case []string:
-		for _, item := range s {
-			if item != "" {
-				return item
-			}
-		}
-	}
-	return ""
-}
-
-// buildHeaderTitle constructs the MKV file-header title in the form:
-//
-//	AlbumArtist - Album - Title
-//
-// AlbumArtist falls back to Artist when empty. Parts that are empty are omitted.
-// titleSuffix (e.g. "(Second Version)") is appended to Title with a space.
-func buildHeaderTitle(t AudioTags, titleSuffix string) string {
-	artist := t.AlbumArtist
-	if artist == "" {
-		artist = t.Artist
-	}
-	songTitle := t.Title
-	if titleSuffix != "" {
-		songTitle = strings.TrimSpace(songTitle + " " + titleSuffix)
-	}
-	var parts []string
-	for _, p := range []string{artist, t.Album, songTitle} {
-		if p != "" {
-			parts = append(parts, p)
-		}
-	}
-	return strings.Join(parts, " - ")
 }
 
 // xmlEscape replaces XML special characters with their entity references.
@@ -444,4 +399,28 @@ func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix str
 		return fmt.Errorf("mkvpropedit: %w", err)
 	}
 	return nil
+}
+
+// buildHeaderTitle constructs the MKV file-header title in the form:
+//
+//	AlbumArtist - Album - Title
+//
+// AlbumArtist falls back to Artist when empty. Parts that are empty are omitted.
+// titleSuffix (e.g. "(Second Version)") is appended to Title with a space.
+func buildHeaderTitle(t AudioTags, titleSuffix string) string {
+	artist := t.AlbumArtist
+	if artist == "" {
+		artist = t.Artist
+	}
+	songTitle := t.Title
+	if titleSuffix != "" {
+		songTitle = strings.TrimSpace(songTitle + " " + titleSuffix)
+	}
+	var parts []string
+	for _, p := range []string{artist, t.Album, songTitle} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, " - ")
 }
