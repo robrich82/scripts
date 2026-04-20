@@ -50,18 +50,30 @@ func readTagDateFromMKA(mkvextractPath, path string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 
+	// Prefer level-50 (album); fall back to level-30 (track).
+	var level30Date time.Time
 	for _, tag := range doc.Tags {
 		tv := tag.Targets.TargetTypeValue
-		if tv != "" && tv != "50" {
+		isL50 := tv == "" || tv == "50"
+		isL30 := tv == "30"
+		if !isL50 && !isL30 {
 			continue
 		}
 		for _, s := range tag.Simple {
 			if strings.ToUpper(s.Name) == "DATE_RECORDED" && s.String != "" {
 				if dt, err := parseMKATagDate(s.String); err == nil {
-					return dt, true
+					if isL50 {
+						return dt, true
+					}
+					if level30Date.IsZero() {
+						level30Date = dt
+					}
 				}
 			}
 		}
+	}
+	if !level30Date.IsZero() {
+		return level30Date, true
 	}
 	return time.Time{}, false
 }
