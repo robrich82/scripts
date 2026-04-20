@@ -9,7 +9,7 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 | [cbz-fix](#cbz-fix) | Normalise CBZ archives: rename cover, insert blank page, renumber pages |
 | [mkv-audit](#mkv-audit) | Normalize MKV track language codes and default/forced flags |
 | [mkv-movie](#mkv-movie) | Tag movie MKVs with full metadata from TMDB and sync timestamps |
-| [mkv-musicvideo](#mkv-musicvideo) | Fuzzy-match video files to audio files for renaming |
+| [mkv-music](#mkv-music) | Fuzzy-match video files to audio files for renaming; sync audio file timestamps |
 | [mkv-tvshow](#mkv-tvshow) | Tag TV episode MKVs with metadata from TMDB |
 | [sw-update](#sw-update) | Track and install software updates from GitHub releases or web pages |
 
@@ -33,7 +33,7 @@ Build a specific tool:
 make cbz-fix
 make mkv-audit
 make mkv-movie
-make mkv-musicvideo
+make mkv-music
 make mkv-tvshow
 make sw-update
 ```
@@ -278,10 +278,12 @@ already had their full metadata written.
 
 ---
 
-## mkv-musicvideo
+## mkv-music
 
 Matches video files to their corresponding audio files using fuzzy filename
-similarity (LCS-based), then renames them to a consistent scheme.
+similarity (LCS-based), then renames them to a consistent scheme. Also sets
+OS file timestamps on audio files (flac, mp3, m4a, mka, wma, dsf) from their
+embedded date tags.
 
 Supported video extensions: `.mkv`, `.mp4`, `.avi`, `.mov`, `.vob`
 Supported audio extensions: `.flac`, `.mp3`, `.m4a`, `.wav`, `.ogg`, `.wma`, `.mka`, `.dsf`
@@ -291,15 +293,15 @@ Supported audio extensions: `.flac`, `.mp3`, `.m4a`, `.wav`, `.ogg`, `.wma`, `.m
 Run from the directory containing your files:
 
 ```sh
-mkv-musicvideo
+mkv-music
 ```
 
 The tool prompts for manual confirmation when a match is ambiguous.
 
 ### Configuration
 
-Config is stored in `%APPDATA%\mkv-musicvideo\` (Windows) or
-`$XDG_CONFIG_HOME/mkv-musicvideo/` (Linux/macOS).
+Config is stored in `%APPDATA%\mkv-music\` (Windows) or
+`$XDG_CONFIG_HOME/mkv-music/` (Linux/macOS).
 
 #### `ignore_patterns.json` (optional)
 
@@ -618,7 +620,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 ├── cbz-fix/
 ├── mkv-audit/
 ├── mkv-movie/
-├── mkv-musicvideo/
+├── mkv-music/
 ├── mkv-tvshow/
 └── sw-update/
 ```

@@ -1,4 +1,4 @@
-module mkv-musicvideo
+module mkv-music
 
 go 1.26.0
 

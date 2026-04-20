@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -13,7 +14,7 @@ func configDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "mkv-musicvideo"), nil
+	return filepath.Join(dir, "mkv-music"), nil
 }
 
 func main() {
@@ -75,6 +76,17 @@ func main() {
 	fmt.Printf("--- Scanning and Matching in: %s ---\n\n", root)
 
 	stats, skippedVideos, unmatchedVideos := processor.Run()
+
+	// Audio timestamp pass: set OS file timestamps from embedded date tags.
+	exiftoolPath, exiftoolErr := exec.LookPath("exiftool")
+	if exiftoolErr != nil {
+		fmt.Fprintln(os.Stderr, "Warning: exiftool not found in PATH — audio timestamp sync disabled")
+	} else {
+		fmt.Printf("\n--- Syncing audio file timestamps in: %s ---\n\n", root)
+		aStats := SetAudioTimestamps(root, cutoff, &win32FileTimer{}, exiftoolPath)
+		fmt.Printf("\nAudio timestamps: %d updated, %d no date, %d failed, %d skipped (old)\n",
+			aStats.Updated, aStats.NoDate, aStats.Failed, aStats.SkippedOld)
+	}
 
 	fmt.Println("\n--- Scan Complete ---")
 	if len(unmatchedVideos) > 0 {

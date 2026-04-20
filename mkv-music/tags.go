@@ -77,7 +77,7 @@ func readAudioTags(path string) (AudioTags, error) {
 	}
 
 	raw := m.Raw()
-	dateStr := rawVorbisString(raw, "date")   // Vorbis/FLAC
+	dateStr := rawVorbisString(raw, "date") // Vorbis/FLAC
 	if dateStr == "" {
 		dateStr = rawVorbisString(raw, "TDRC") // ID3v2.4 recording time
 	}

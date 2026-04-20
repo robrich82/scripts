@@ -8,9 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"time"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // mkvTagsDocument decodes the XML produced by: mkvextract <file> tags <output>
