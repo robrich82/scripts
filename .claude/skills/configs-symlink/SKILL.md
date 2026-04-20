@@ -12,20 +12,22 @@ The `configs/` directory at the repo root contains Windows directory symlinks po
 |-----------------|----------------------------------------|
 | mkv-audit       | %APPDATA%\mkv-audit                    |
 | mkv-movie       | %APPDATA%\mkv-movie                    |
-| mkv-musicvideo  | %APPDATA%\mkv-musicvideo               |
-| mkv-sw-update   | %APPDATA%\sw-update                    |
+| mkv-music       | %APPDATA%\mkv-music                    |
+| sw-update       | %APPDATA%\sw-update                    |
 | mkv-tvshow      | %APPDATA%\mkv-tvshow                   |
 
-`cbz-fix` does not have a symlink yet (it has no config directory).
+`cbz-fix` and `sw-update` do not have symlinks (neither uses a config directory).
 
 ## Adding a symlink for a new binary
 
-When a new binary is added that reads from `%APPDATA%\<name>`, create a junction from `cmd.exe` (no admin required):
+When a new binary is added that reads from `%APPDATA%\<name>`, create a junction from `cmd.exe` (no admin required). Run this from inside the `configs/` directory:
 
 ```cmd
-mklink /J configs\<name> %APPDATA%\<name>
+mklink /J <name> %APPDATA%\<name>
 ```
 
-Replace `<name>` with the binary's name. The target directory must already exist before running this command.
+The target directory must already exist before running this command.
+
+Note: `%APPDATA%` does not expand when `cmd.exe` is invoked from bash (e.g. `cmd.exe /c "mklink ..."`). Run this directly in a native `cmd.exe` prompt, or first resolve the path with `cmd.exe /c "echo %APPDATA%"` and substitute it in.
 
 Note: `configs/` is listed in `.gitignore`, so junctions are not tracked by git.
