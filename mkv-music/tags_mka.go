@@ -204,6 +204,9 @@ func readAudioTagsFromMKA(path, mkvextractPath, mkvmergePath string) (AudioTags,
 		trackNum = n
 	}
 	dateStr := normalizeDate(lvl50["DATE_RECORDED"])
+	if dateStr == "" {
+		dateStr = normalizeDate(lvl30["DATE_RECORDED"])
+	}
 	// Fall back to the MKV container header date when DATE_RECORDED is absent.
 	if dateStr == "" {
 		if dt, ok := readMKVHeaderDate(mkvmergePath, path); ok {
