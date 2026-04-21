@@ -204,6 +204,12 @@ func readAudioTagsFromMKA(path, mkvextractPath, mkvmergePath string) (AudioTags,
 		trackNum = n
 	}
 	dateStr := normalizeDate(lvl50["DATE_RECORDED"])
+	// Fall back to the MKV container header date when DATE_RECORDED is absent.
+	if dateStr == "" {
+		if dt, ok := readMKVHeaderDate(mkvmergePath, path); ok {
+			dateStr = dt.UTC().Format("2006-01-02")
+		}
+	}
 	var year int
 	if dt, ok := parseAudioDate(dateStr); ok {
 		year = dt.Year()
