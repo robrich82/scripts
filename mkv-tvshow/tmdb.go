@@ -40,10 +40,11 @@ type ShowSeason struct {
 
 // ShowDetails holds top-level show metadata from TMDB.
 type ShowDetails struct {
-	PosterPath   string       `json:"poster_path"`
-	FirstAirDate string       `json:"first_air_date"`
-	Name         string       `json:"name"`
-	Seasons      []ShowSeason `json:"seasons"`
+	PosterPath       string       `json:"poster_path"`
+	FirstAirDate     string       `json:"first_air_date"`
+	Name             string       `json:"name"`
+	Seasons          []ShowSeason `json:"seasons"`
+	OriginalLanguage string       `json:"original_language"`
 }
 
 // TMDBClient is the interface for all TMDB API calls made by this tool.

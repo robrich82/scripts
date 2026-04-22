@@ -66,6 +66,10 @@ type PlexClient interface {
 	// SetContentRating updates the contentRating field on a Plex item and
 	// locks it to prevent automatic overwriting.
 	SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error
+	// SetAudioLanguage sets the preferred audio language on the show identified
+	// by ratingKey. langCode is a BCP-47/ISO 639-1 tag (e.g. "ja", "en", "ko").
+	// Applied at the show level only; no locking so the user can override in Plex.
+	SetAudioLanguage(ratingKey string, langCode string) error
 	// RefreshLibraries triggers a metadata scan of all Plex TV show library
 	// sections so that newly processed files are picked up without manual
 	// intervention.
@@ -515,6 +519,31 @@ func (c *httpPlexClient) RefreshMetadata(ratingKey string) error {
 		return fmt.Errorf("plex: refresh metadata %s: %w", ratingKey, err)
 	}
 	resp.Body.Close()
+	return nil
+}
+
+// SetAudioLanguage implements PlexClient. It sends a PUT to the metadata
+// endpoint setting the preferred audio language on the show. The field is
+// intentionally not locked so the user can override it per-show inside Plex.
+func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langCode string) error {
+	path := fmt.Sprintf("/library/metadata/%s?type=%d&id=%s&audioLanguage.value=%s&X-Plex-Token=%s",
+		ratingKey, int(PlexTypeShow), ratingKey, url.QueryEscape(langCode), url.QueryEscape(c.token))
+
+	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("plex: build put request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("plex: set audio language: %w", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("plex: set audio language got status %d", resp.StatusCode)
+	}
 	return nil
 }
 

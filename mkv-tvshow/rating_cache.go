@@ -15,6 +15,10 @@ type RatingCacheData struct {
 	// Applied maps absolute file path → rating string already written as Matroska tags.
 	// Used by --ratings-only mode to avoid re-writing tags on every run.
 	Applied map[string]string `json:"applied,omitempty"`
+	// LanguageApplied maps TMDB show ID → BCP-47 language code already set as the
+	// preferred audio language in Plex for that show. Used to apply the setting only
+	// once so the user can override it per-show inside Plex.
+	LanguageApplied map[string]string `json:"language_applied,omitempty"`
 }
 
 // RatingCache persists NZ ratings across runs so slow scrapes and user-entered
@@ -30,9 +34,10 @@ func LoadRatingCache(path string) (*RatingCache, error) {
 	c := &RatingCache{
 		path: path,
 		data: RatingCacheData{
-			Shows:    make(map[string]string),
-			Episodes: make(map[string]string),
-			Applied:  make(map[string]string),
+			Shows:           make(map[string]string),
+			Episodes:        make(map[string]string),
+			Applied:         make(map[string]string),
+			LanguageApplied: make(map[string]string),
 		},
 	}
 	data, err := os.ReadFile(path)
@@ -53,6 +58,9 @@ func LoadRatingCache(path string) (*RatingCache, error) {
 	}
 	if c.data.Applied == nil {
 		c.data.Applied = make(map[string]string)
+	}
+	if c.data.LanguageApplied == nil {
+		c.data.LanguageApplied = make(map[string]string)
 	}
 	return c, nil
 }
@@ -111,4 +119,19 @@ func (c *RatingCache) SetEpisodeRating(tmdbID string, season, episode int, r NZR
 // episodeRatingKey returns the map key for an episode, e.g. "12345/S01E03".
 func episodeRatingKey(tmdbID string, season, episode int) string {
 	return fmt.Sprintf("%s/S%02dE%02d", tmdbID, season, episode)
+}
+
+// GetLanguageApplied returns the BCP-47 language code previously applied to
+// the Plex show for the given TMDB ID, and whether any value was recorded.
+func (c *RatingCache) GetLanguageApplied(tmdbID string) (string, bool) {
+	lang, ok := c.data.LanguageApplied[tmdbID]
+	return lang, ok && lang != ""
+}
+
+// SetLanguageApplied records that the given BCP-47 language code has been set
+// as the preferred audio language in Plex for the show identified by tmdbID.
+func (c *RatingCache) SetLanguageApplied(tmdbID, lang string) {
+	if lang != "" {
+		c.data.LanguageApplied[tmdbID] = lang
+	}
 }

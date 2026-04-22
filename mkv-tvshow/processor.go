@@ -16,11 +16,12 @@ const mkvpropeditSuccessMsg = "The changes are written to the file. Done."
 
 // Config holds all runtime configuration for a processing run.
 type Config struct {
-	MediaDir         string
-	CutoffDate       time.Time
-	ProcessAll       bool
-	RatingsOnly      bool // skip all standard MKV processing; only update ratings
-	OverwriteRatings bool // ignore cached ratings and re-fetch/re-prompt
+	MediaDir          string
+	CutoffDate        time.Time
+	ProcessAll        bool
+	RatingsOnly       bool // skip all standard MKV processing; only update ratings
+	OverwriteRatings  bool // ignore cached ratings and re-fetch/re-prompt
+	OverwriteLanguage bool // re-apply Plex audio language even if already set for a show
 }
 
 // Stats counts outcomes across an entire processing run.
@@ -51,6 +52,7 @@ type Processor struct {
 	sessionConfirmed      map[string]string
 	sessionPromptedRating map[string]NZRating // tmdbID → rating from user prompt this run
 	sessionPlexKey        map[string]string   // tmdbID → Plex show ratingKey (cached across methods)
+	sessionOriginalLang   map[string]string   // tmdbID → original_language from TMDB (ISO 639-1)
 }
 
 // NewProcessor constructs a Processor with the given dependencies.
@@ -85,6 +87,7 @@ func NewProcessor(
 		sessionConfirmed:      make(map[string]string),
 		sessionPromptedRating: make(map[string]NZRating),
 		sessionPlexKey:        make(map[string]string),
+		sessionOriginalLang:   make(map[string]string),
 	}
 }
 
@@ -166,6 +169,9 @@ func (p *Processor) Run() Stats {
 					mainPoster = tmdbImageBase + details.PosterPath
 				}
 				showFirstAirDate = details.FirstAirDate
+				if details.OriginalLanguage != "" {
+					p.sessionOriginalLang[showID] = details.OriginalLanguage
+				}
 			}
 		}
 
@@ -851,6 +857,8 @@ func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool) {
 		}
 	}
 
+	p.applyPlexAudioLanguage(showKey, tmdbID, showName)
+
 	if touched {
 		if err := p.plex.RefreshMetadata(showKey); err != nil {
 			fmt.Printf("  [!] Plex: refresh metadata for show %s: %v\n", showKey, err)
@@ -858,4 +866,42 @@ func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool) {
 			fmt.Printf("  [i] Plex: metadata refresh triggered for show %s\n", showKey)
 		}
 	}
+}
+
+// resolveOriginalLang returns the TMDB original_language code (ISO 639-1) for
+// the given show, using the session cache to avoid redundant API calls.
+func (p *Processor) resolveOriginalLang(tmdbID string) string {
+	if lang, ok := p.sessionOriginalLang[tmdbID]; ok {
+		return lang
+	}
+	if p.tmdb != nil {
+		if details, err := p.tmdb.GetShow(tmdbID); err == nil && details.OriginalLanguage != "" {
+			p.sessionOriginalLang[tmdbID] = details.OriginalLanguage
+			return details.OriginalLanguage
+		}
+	}
+	return ""
+}
+
+// applyPlexAudioLanguage sets the show's preferred audio language in Plex to
+// the TMDB original language, but only once per show unless OverwriteLanguage
+// is set. This lets the user override the preference inside Plex on a
+// show-by-show basis without it being overwritten on subsequent runs.
+func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string) {
+	if p.ratingCache == nil {
+		return
+	}
+	lang := p.resolveOriginalLang(tmdbID)
+	if lang == "" {
+		return
+	}
+	if applied, ok := p.ratingCache.GetLanguageApplied(tmdbID); ok && applied == lang && !p.cfg.OverwriteLanguage {
+		return
+	}
+	if err := p.plex.SetAudioLanguage(showKey, lang); err != nil {
+		fmt.Printf("  [!] Plex: set audio language for %q: %v\n", showName, err)
+		return
+	}
+	p.ratingCache.SetLanguageApplied(tmdbID, lang)
+	fmt.Printf("  [i] Plex: audio language for %q set to %q\n", showName, lang)
 }

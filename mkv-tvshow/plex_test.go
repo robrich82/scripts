@@ -15,6 +15,11 @@ type setRatingCall struct {
 	rating    NZRating
 }
 
+type setLangCall struct {
+	ratingKey string
+	lang      string
+}
+
 type fakePlexClient struct {
 	showRatingKey     string
 	findErr           error
@@ -30,6 +35,8 @@ type fakePlexClient struct {
 	setRatingErr      error
 	contentRating     NZRating
 	contentRatingErr  error
+	setLangCalls      []setLangCall
+	setLangErr        error
 }
 
 func (f *fakePlexClient) FindShowByTMDBID(_ string) (string, error) {
@@ -65,6 +72,11 @@ func (f *fakePlexClient) GetContentRating(_ string) (NZRating, error) {
 func (f *fakePlexClient) SetContentRating(ratingKey string, t PlexItemType, rating NZRating) error {
 	f.setRatingCalls = append(f.setRatingCalls, setRatingCall{ratingKey, t, rating})
 	return f.setRatingErr
+}
+
+func (f *fakePlexClient) SetAudioLanguage(ratingKey, lang string) error {
+	f.setLangCalls = append(f.setLangCalls, setLangCall{ratingKey, lang})
+	return f.setLangErr
 }
 
 func (f *fakePlexClient) RefreshLibraries() error        { return nil }
@@ -269,6 +281,45 @@ func TestHTTPPlexClient_SetContentRating_ErrorOnNon2xx(t *testing.T) {
 
 	c := newHTTPPlexClient(srv.URL, "bad-token")
 	err := c.SetContentRating("1", PlexTypeShow, RatingM)
+	if err == nil {
+		t.Error("expected error for non-2xx response")
+	}
+}
+
+func TestHTTPPlexClient_SetAudioLanguage_SendsCorrectParams(t *testing.T) {
+	var gotQuery url.Values
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotQuery = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "mytoken")
+	err := c.SetAudioLanguage("99", "ja")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method = %q; want PUT", gotMethod)
+	}
+	if gotQuery.Get("audioLanguage.value") != "ja" {
+		t.Errorf("audioLanguage.value = %q; want ja", gotQuery.Get("audioLanguage.value"))
+	}
+	if gotQuery.Get("type") != "2" {
+		t.Errorf("type = %q; want 2 (PlexTypeShow)", gotQuery.Get("type"))
+	}
+}
+
+func TestHTTPPlexClient_SetAudioLanguage_ErrorOnNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "bad-token")
+	err := c.SetAudioLanguage("1", "en")
 	if err == nil {
 		t.Error("expected error for non-2xx response")
 	}

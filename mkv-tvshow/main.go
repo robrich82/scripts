@@ -13,6 +13,7 @@ func main() {
 	processAll := flag.Bool("all", false, "Process all cached shows without prompting.")
 	ratingsOnly := flag.Bool("ratings-only", false, "Only update NZ content ratings; skip all other metadata processing.")
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
+	overwriteLanguage := flag.Bool("overwrite-language", false, "Re-apply Plex audio language preference even if already set for a show.")
 	missingMode := flag.Bool("missing", false, "Check for episodes that have aired on TMDB but are not present locally.")
 	titleCheckMode := flag.Bool("title-check", false, "Check episode titles in filenames against TMDB and offer to rename.")
 	flag.Parse()
@@ -141,11 +142,12 @@ func main() {
 	}
 
 	cfg := Config{
-		MediaDir:         mediaDir,
-		CutoffDate:       cutoff,
-		ProcessAll:       shouldProcessAll,
-		RatingsOnly:      *ratingsOnly,
-		OverwriteRatings: *overwriteRatings,
+		MediaDir:          mediaDir,
+		CutoffDate:        cutoff,
+		ProcessAll:        shouldProcessAll,
+		RatingsOnly:       *ratingsOnly,
+		OverwriteRatings:  *overwriteRatings,
+		OverwriteLanguage: *overwriteLanguage,
 	}
 
 	// tmdb also implements RatingSource; Classification Office is the second source.

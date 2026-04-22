@@ -353,6 +353,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--all` | false | Process all cached shows without prompting |
 | `--ratings-only` | false | Only update NZ content ratings; skip all other metadata |
 | `--overwrite-ratings` | false | Re-fetch all ratings, ignoring cached values |
+| `--overwrite-language` | false | Re-apply Plex audio language preference even if already set for a show |
 | `--missing` | false | Check for missing episodes (see below) |
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
 
@@ -393,6 +394,11 @@ runs. You can ignore a single episode, a whole season, or the entire show.
 
 - TMDB API (requires `TMDB_API_KEY` environment variable)
 - `mkvpropedit` — applies metadata edits
+- `PLEX_URL` / `PLEX_TOKEN` — optional; used to push NZ ratings and set per-show audio language in Plex
+
+When Plex is configured, after processing each show the tool:
+1. Pushes the resolved NZ content rating to every episode, season, and the show itself.
+2. Sets the show's preferred audio language in Plex to the TMDB original language (e.g. `ja` for anime). This is applied once per show and cached in `rating_cache.json` so you can override it inside Plex without it being reset on the next run. Use `--overwrite-language` to force a re-apply.
 
 ### Configuration
 
