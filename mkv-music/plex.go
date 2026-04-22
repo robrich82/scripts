@@ -23,6 +23,11 @@ type PlexClient interface {
 	// RefreshMetadata triggers a metadata refresh for the item identified by
 	// ratingKey, causing Plex to re-read embedded metadata from the files.
 	RefreshMetadata(ratingKey string) error
+	// AnalyzeMedia triggers a media analysis for the item and all its children,
+	// causing Plex to re-read codec, resolution, and other stream properties.
+	// This is needed when a file's codec changes (e.g. AV1 → HEVC) so Plex
+	// stops transcoding using the old codec profile.
+	AnalyzeMedia(ratingKey string) error
 }
 
 // httpPlexClient is the production PlexClient that communicates with a real
@@ -122,11 +127,40 @@ func (c *httpPlexClient) findArtistInSection(sectionKey, normTitle string) (stri
 	return "", nil
 }
 
+// plexPut performs a PUT request to path (relative to baseURL), appending the
+// Plex token.
+func (c *httpPlexClient) plexPut(path string) (*http.Response, error) {
+	u := c.baseURL + path
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	u += sep + "X-Plex-Token=" + url.QueryEscape(c.token)
+	req, err := http.NewRequest(http.MethodPut, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	return c.httpClient.Do(req)
+}
+
 // RefreshMetadata implements PlexClient.
 func (c *httpPlexClient) RefreshMetadata(ratingKey string) error {
 	resp, err := c.plexGet("/library/metadata/" + ratingKey + "/refresh")
 	if err != nil {
 		return fmt.Errorf("plex: refresh metadata %s: %w", ratingKey, err)
+	}
+	resp.Body.Close()
+	return nil
+}
+
+// AnalyzeMedia implements PlexClient. It sends a PUT to the analyze endpoint,
+// causing Plex to re-read codec and stream properties for the item and all
+// its children (albums and tracks under an artist).
+func (c *httpPlexClient) AnalyzeMedia(ratingKey string) error {
+	resp, err := c.plexPut("/library/metadata/" + ratingKey + "/analyze")
+	if err != nil {
+		return fmt.Errorf("plex: analyze media %s: %w", ratingKey, err)
 	}
 	resp.Body.Close()
 	return nil

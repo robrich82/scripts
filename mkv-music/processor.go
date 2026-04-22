@@ -98,6 +98,11 @@ func (p *Processor) refreshPlexArtists() {
 		} else {
 			fmt.Printf("  [Plex] Refreshed artist: %q\n", artist)
 		}
+		if err := p.plex.AnalyzeMedia(ratingKey); err != nil {
+			fmt.Printf("  [Plex] Analyze failed for %q: %v\n", artist, err)
+		} else {
+			fmt.Printf("  [Plex] Media analysis triggered for %q\n", artist)
+		}
 	}
 }
 
