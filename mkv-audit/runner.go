@@ -188,8 +188,9 @@ type langMismatchCandidate struct {
 
 // undAudioCandidate holds a file whose first audio track has language 'und'.
 type undAudioCandidate struct {
-	path    string
-	trackID int
+	path         string
+	trackID      int
+	resolvedIETF map[string]string // per-file resolved IETF map (global + TMDB + dir overrides)
 }
 
 // trimCandidate holds the data needed for the sequential trim phase.
@@ -252,6 +253,91 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 		libType = lib.Type
 	}
 	origins := fetchOrigins(filesToScan, libRoot, libType, tmdb)
+
+	// First pass: identify files whose first audio track has language 'und'.
+	// This runs before the main analysis so that language fixes are applied
+	// first, allowing the main pass to analyze flags with correct language tags.
+	{
+		sem := make(chan struct{}, runtime.NumCPU())
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		for _, path := range filesToScan {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(p string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				info, err := ident.Identify(p)
+				if err != nil {
+					return
+				}
+				for _, t := range info.Tracks {
+					if t.Type == "audio" {
+						if normalizeLanguage(t.Properties.Language) == "und" {
+							origin := origins[contentRootDir(p, libRoot)]
+							resolved := resolveIETFMap(p, libRoot, lib, origin)
+							mu.Lock()
+							undCandidates = append(undCandidates, undAudioCandidate{
+								path:         p,
+								trackID:      t.ID,
+								resolvedIETF: resolved,
+							})
+							mu.Unlock()
+							fmt.Printf("[UND]    %s: first audio track language is 'und'\n", filepath.Base(p))
+						}
+						break
+					}
+				}
+			}(path)
+		}
+		wg.Wait()
+	}
+
+	// Sequential und-audio fix phase: prompt for language, then apply.
+	// Runs before the main analysis so the main pass sees correct language tags.
+	if len(undCandidates) > 0 {
+		autoAll := false
+		for _, uc := range undCandidates {
+			basename := filepath.Base(uc.path)
+			defaultIETF := uc.resolvedIETF["eng"]
+			if defaultIETF == "" {
+				defaultIETF = "en-US"
+			}
+			ietfChoice := defaultIETF
+			if !autoAll {
+				ans, _ := prompter.Ask(fmt.Sprintf("[UND]    %s: audio track language is 'und'. Enter IETF language [%s]: ", basename, defaultIETF))
+				ans = strings.TrimSpace(ans)
+				switch {
+				case strings.EqualFold(ans, "a"):
+					autoAll = true
+					// ietfChoice stays as defaultIETF
+				case ans != "":
+					ietfChoice = ans
+				}
+			}
+			// Build reverse map from the file's resolved IETF map so directory
+			// overrides (e.g. eng → en-GB) are reflected in the lookup.
+			ietfToISO := make(map[string]string, len(uc.resolvedIETF))
+			for iso, ietf := range uc.resolvedIETF {
+				ietfToISO[strings.ToLower(ietf)] = iso
+			}
+			isoCode, ok := ietfToISO[strings.ToLower(ietfChoice)]
+			if !ok {
+				fmt.Printf("[SKIP]   %s (unknown language %q)\n", basename, ietfChoice)
+				continue
+			}
+			canonicalIETF := uc.resolvedIETF[isoCode]
+			edits := trackEdit(uc.trackID, "language", isoCode, "language-ietf", canonicalIETF)
+			if err := editor.Apply(uc.path, edits); err != nil {
+				fmt.Printf("[ERR]    %s: und fix: %v\n", basename, err)
+				stats.Failed++
+				stats.FailedPaths = append(stats.FailedPaths, uc.path)
+			} else {
+				fmt.Printf("[LANGFIX] %s: audio language 'und' → %s (%s)\n", basename, isoCode, canonicalIETF)
+				stats.LangFixes++
+			}
+		}
+	}
 
 	sem := make(chan struct{}, runtime.NumCPU())
 	var mu sync.Mutex
@@ -366,20 +452,6 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				}
 			}
 
-			// Detect first audio track with language 'und' for sequential prompting.
-			var localUnd []undAudioCandidate
-			if info != nil {
-				for _, t := range info.Tracks {
-					if t.Type == "audio" {
-						if normalizeLanguage(t.Properties.Language) == "und" {
-							localUnd = append(localUnd, undAudioCandidate{path: p, trackID: t.ID})
-							fmt.Fprintf(&buf, "[UND]    %s: first audio track language is 'und'\n", basename)
-						}
-						break
-					}
-				}
-			}
-
 			mu.Lock()
 			fmt.Print(buf.String())
 			stats.Scanned++
@@ -396,7 +468,6 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				unknownCodecs[c] = true
 			}
 			langMismatches = append(langMismatches, localMismatches...)
-			undCandidates = append(undCandidates, localUnd...)
 			if remuxer != nil && info != nil && !res.Failed {
 				trimCandidates = append(trimCandidates, trimCandidate{
 					path:       p,
@@ -442,48 +513,6 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				stats.FailedPaths = append(stats.FailedPaths, lm.path)
 			} else {
 				fmt.Printf("[LANGFIX] %s: language set to %s\n", basename, lm.fixes[0].targetLang)
-				stats.LangFixes++
-			}
-		}
-	}
-
-	// Sequential und-audio fix phase: prompt for language, then apply.
-	if len(undCandidates) > 0 {
-		// Build reverse map from IETF tag (lowercase) → ISO 639-2 code.
-		ietfToISO := make(map[string]string, len(ietfMap))
-		for iso, ietf := range ietfMap {
-			ietfToISO[strings.ToLower(ietf)] = iso
-		}
-		autoAll := false
-		ietfAll := "en-US"
-		for _, uc := range undCandidates {
-			basename := filepath.Base(uc.path)
-			ietfChoice := ietfAll
-			if !autoAll {
-				ans, _ := prompter.Ask(fmt.Sprintf("[UND]    %s: audio track language is 'und'. Enter IETF language [en-US]: ", basename))
-				ans = strings.TrimSpace(ans)
-				if ans == "" || strings.EqualFold(ans, "a") {
-					if strings.EqualFold(ans, "a") {
-						autoAll = true
-					}
-					ietfChoice = "en-US"
-				} else {
-					ietfChoice = ans
-				}
-			}
-			isoCode, ok := ietfToISO[strings.ToLower(ietfChoice)]
-			if !ok {
-				fmt.Printf("[SKIP]   %s (unknown language %q)\n", basename, ietfChoice)
-				continue
-			}
-			canonicalIETF := ietfMap[isoCode]
-			edits := trackEdit(uc.trackID, "language", isoCode, "language-ietf", canonicalIETF)
-			if err := editor.Apply(uc.path, edits); err != nil {
-				fmt.Printf("[ERR]    %s: und fix: %v\n", basename, err)
-				stats.Failed++
-				stats.FailedPaths = append(stats.FailedPaths, uc.path)
-			} else {
-				fmt.Printf("[LANGFIX] %s: audio language 'und' → %s (%s)\n", basename, isoCode, canonicalIETF)
 				stats.LangFixes++
 			}
 		}
