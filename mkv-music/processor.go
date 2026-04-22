@@ -44,6 +44,8 @@ type Processor struct {
 	tagger          MusicVideoTagger // nil = tag copying disabled
 	timer           FileTimer        // nil = timestamp syncing disabled
 	cutoffDate      time.Time
+	plex            PlexClient          // nil = Plex refresh disabled
+	touchedArtists  map[string]struct{} // artist dir names touched this run
 }
 
 // NewProcessor creates a Processor for the given root directory.
@@ -56,6 +58,46 @@ func NewProcessor(root, ignoreFile string, prompter Prompter) *Processor {
 		prompter:        prompter,
 		renamer:         os.Rename,
 		patternAppender: defaultPatternAppender,
+		touchedArtists:  make(map[string]struct{}),
+	}
+}
+
+// markArtistTouched records that the artist whose folder contains dir was
+// modified this run, so a Plex refresh can be triggered at the end.
+func (p *Processor) markArtistTouched(dir string) {
+	rel, err := filepath.Rel(p.root, dir)
+	if err != nil {
+		return
+	}
+	parts := strings.SplitN(filepath.ToSlash(rel), "/", 2)
+	artist := parts[0]
+	if artist == "" || artist == "." {
+		return
+	}
+	p.touchedArtists[artist] = struct{}{}
+}
+
+// refreshPlexArtists triggers a Plex metadata refresh for every artist dir
+// that was touched during this run. No-op when Plex is not configured.
+func (p *Processor) refreshPlexArtists() {
+	if p.plex == nil || len(p.touchedArtists) == 0 {
+		return
+	}
+	for artist := range p.touchedArtists {
+		ratingKey, err := p.plex.FindArtistByTitle(artist)
+		if err != nil {
+			if err == ErrArtistNotFound {
+				fmt.Printf("  [Plex] Artist not found in library: %q\n", artist)
+			} else {
+				fmt.Printf("  [Plex] Error finding artist %q: %v\n", artist, err)
+			}
+			continue
+		}
+		if err := p.plex.RefreshMetadata(ratingKey); err != nil {
+			fmt.Printf("  [Plex] Refresh failed for %q: %v\n", artist, err)
+		} else {
+			fmt.Printf("  [Plex] Refreshed artist: %q\n", artist)
+		}
 	}
 }
 
@@ -251,6 +293,7 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 		fmt.Printf("    [WARN] tag copy failed for %s: %v\n", filepath.Base(mkvPath), err)
 	} else {
 		fmt.Printf("    [TAG] Copied tags from %s\n", audioFilename)
+		p.markArtistTouched(videoDir)
 		p.syncTimestamps(mkvPath)
 	}
 }
@@ -325,6 +368,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			fmt.Printf("    [ERROR] Could not rename: %v\n", err)
 		} else {
 			fmt.Printf("    [OK] Renamed to: %s%s\n", targetName, ext)
+			p.markArtistTouched(videoDir)
 			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile, audioPaths)
 			return "renamed"
 		}
@@ -415,5 +459,6 @@ func (p *Processor) Run() (Stats, []string, []string) {
 			}
 		}
 	}
+	p.refreshPlexArtists()
 	return stats, skippedVideos, unmatchedVideos
 }

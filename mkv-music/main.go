@@ -51,9 +51,15 @@ func main() {
 	}
 	ignoreFile := filepath.Join(cfgDir, "ignore_patterns.json")
 
+	plexURL := os.Getenv("PLEX_URL")
+	plexToken := os.Getenv("PLEX_TOKEN")
+
 	prompter := newStdinPrompter()
 	processor := NewProcessor(root, ignoreFile, prompter)
 	processor.timer = &win32FileTimer{}
+	if plexURL != "" && plexToken != "" {
+		processor.plex = newHTTPPlexClient(plexURL, plexToken)
+	}
 
 	if err := processor.LoadIgnorePatterns(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not load ignore patterns: %v\n", err)
