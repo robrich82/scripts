@@ -1,8 +1,6 @@
 ---
 name: finish
 description: Full done-with-a-feature pipeline: vet, build affected tool(s), test, then commit. Use this skill whenever a feature or fix is ready to wrap up — it handles the vet/build/test/commit sequence so nothing gets skipped.
-disable-model-invocation: true
-allowed-tools: Bash(make *) Bash(git *) Read Edit Write Glob Grep
 ---
 
 Run the complete end-of-feature pipeline for this repo.

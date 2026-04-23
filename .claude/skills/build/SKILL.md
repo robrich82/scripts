@@ -1,8 +1,6 @@
 ---
 name: build
 description: Build one or more tools in this repo using make after code changes. Use this skill whenever code has been edited and a build is needed — don't invoke `go build` directly, always go through this skill.
-disable-model-invocation: true
-allowed-tools: Bash(make *) Bash(git *)
 ---
 
 Build the tool(s) affected by recent changes using the correct make target(s).
