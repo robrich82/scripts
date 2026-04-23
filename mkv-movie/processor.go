@@ -364,6 +364,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					fmt.Printf("  [!] Plex audio language update failed: %v\n", err)
 				} else {
 					cache.SetLanguageApplied(tmdbID, details.OriginalLanguage)
+					fmt.Printf("  [i] Plex: audio language set to %q\n", details.OriginalLanguage)
 				}
 			}
 		}
