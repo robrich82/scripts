@@ -1174,6 +1174,45 @@ func TestRunLanguageOnly_ShowNotInPlex_Skipped(t *testing.T) {
 	}
 }
 
+func TestRunLanguageOnly_UsesCachedPlexKey(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+	rc.SetPlexKey("111", "plex-cached")
+
+	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
+	// findErr would normally block the lookup — but the cached key should bypass it.
+	plexClient := &fakePlexClient{findErr: ErrPlexNotFound, findTitleErr: ErrPlexNotFound}
+	cache := cacheWith(t, map[string]string{"Show A": "111"})
+
+	p := NewProcessor(Config{}, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	p.RunLanguageOnly()
+
+	if len(plexClient.setLangCalls) != 1 || plexClient.setLangCalls[0].ratingKey != "plex-cached" {
+		t.Errorf("expected SetAudioLanguage on cached key, got %+v", plexClient.setLangCalls)
+	}
+}
+
+func TestRunLanguageOnly_TitleFallbackStripsYear(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+
+	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
+	// TMDB GUID lookup fails; title lookup succeeds only for the stripped name.
+	plexClient := &fakePlexClient{findErr: ErrPlexNotFound, titleRatingKey: "plex-title"}
+	// Folder name includes a year — cleanSearchQuery should strip it before matching.
+	cache := cacheWith(t, map[string]string{"Kill la Kill (2013)": "111"})
+
+	p := NewProcessor(Config{}, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	p.RunLanguageOnly()
+
+	if len(plexClient.setLangCalls) != 1 {
+		t.Fatalf("expected 1 SetAudioLanguage call, got %d", len(plexClient.setLangCalls))
+	}
+	if plexClient.setLangCalls[0].ratingKey != "plex-title" {
+		t.Errorf("expected ratingKey plex-title, got %q", plexClient.setLangCalls[0].ratingKey)
+	}
+}
+
 // containsAll returns true if all of the given values appear in haystack
 // (as individual elements, in any order).
 func containsAll(haystack []string, needles ...string) bool {

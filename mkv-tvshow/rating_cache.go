@@ -19,6 +19,9 @@ type RatingCacheData struct {
 	// preferred audio language in Plex for that show. Used to apply the setting only
 	// once so the user can override it per-show inside Plex.
 	LanguageApplied map[string]string `json:"language_applied,omitempty"`
+	// PlexKeys maps TMDB show ID → Plex ratingKey. Populated during normal runs so
+	// --language-only can find shows without scanning files.
+	PlexKeys map[string]string `json:"plex_keys,omitempty"`
 }
 
 // RatingCache persists NZ ratings across runs so slow scrapes and user-entered
@@ -134,6 +137,26 @@ func (c *RatingCache) SetLanguageApplied(tmdbID, lang string) {
 	if lang != "" {
 		c.data.LanguageApplied[tmdbID] = lang
 	}
+}
+
+// GetPlexKey returns the cached Plex ratingKey for the given TMDB show ID.
+func (c *RatingCache) GetPlexKey(tmdbID string) (string, bool) {
+	if c.data.PlexKeys == nil {
+		return "", false
+	}
+	key, ok := c.data.PlexKeys[tmdbID]
+	return key, ok && key != ""
+}
+
+// SetPlexKey records the Plex ratingKey for the given TMDB show ID.
+func (c *RatingCache) SetPlexKey(tmdbID, key string) {
+	if key == "" {
+		return
+	}
+	if c.data.PlexKeys == nil {
+		c.data.PlexKeys = make(map[string]string)
+	}
+	c.data.PlexKeys[tmdbID] = key
 }
 
 // AllShowIDs returns all TMDB show IDs present in the cache.

@@ -813,6 +813,10 @@ func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool) {
 	if showKey == "" {
 		return
 	}
+	// Persist the resolved key so --language-only can find this show without scanning files.
+	if p.ratingCache != nil {
+		p.ratingCache.SetPlexKey(tmdbID, showKey)
+	}
 
 	seasons, err := p.plex.GetSeasons(showKey)
 	if err != nil {
@@ -900,14 +904,23 @@ func (p *Processor) RunLanguageOnly() {
 	for _, tmdbID := range p.ratingCache.AllShowIDs() {
 		showName := tmdbToName[tmdbID]
 
-		showKey, err := p.plex.FindShowByTMDBID(tmdbID)
-		if err == ErrPlexNotFound && showName != "" {
-			showKey, err = p.plex.FindShowByTitle(showName)
+		// Use the Plex key cached by a previous normal run if available.
+		showKey, _ := p.ratingCache.GetPlexKey(tmdbID)
+
+		if showKey == "" {
+			var err error
+			showKey, err = p.plex.FindShowByTMDBID(tmdbID)
+			if err == ErrPlexNotFound && showName != "" {
+				// Strip the year suffix and Unicode lookalikes from the folder name
+				// before title-matching — Plex display titles don't include years.
+				showKey, err = p.plex.FindShowByTitle(cleanSearchQuery(showName))
+			}
+			if err != nil && err != ErrPlexNotFound {
+				fmt.Printf("  [!] Plex: lookup TMDB %s: %v\n", tmdbID, err)
+				continue
+			}
 		}
-		if err != nil && err != ErrPlexNotFound {
-			fmt.Printf("  [!] Plex: lookup TMDB %s: %v\n", tmdbID, err)
-			continue
-		}
+
 		if showKey == "" {
 			if showName != "" {
 				fmt.Printf("  [!] Plex: show %q not found\n", showName)
