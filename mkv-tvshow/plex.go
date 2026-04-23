@@ -522,12 +522,11 @@ func (c *httpPlexClient) RefreshMetadata(ratingKey string) error {
 	return nil
 }
 
-// SetAudioLanguage implements PlexClient. It sends a PUT to the metadata
-// endpoint setting the preferred audio language on the show. The field is
-// intentionally not locked so the user can override it per-show inside Plex.
+// SetAudioLanguage implements PlexClient. It uses the per-item prefs endpoint
+// so the preference is stored per-user for this show only.
 func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langCode string) error {
-	path := fmt.Sprintf("/library/metadata/%s?type=%d&id=%s&audioLanguage.value=%s&X-Plex-Token=%s",
-		ratingKey, int(PlexTypeShow), ratingKey, url.QueryEscape(langCode), url.QueryEscape(c.token))
+	path := fmt.Sprintf("/library/metadata/%s/prefs?audioLanguage=%s&X-Plex-Token=%s",
+		ratingKey, url.QueryEscape(langCode), url.QueryEscape(c.token))
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {

@@ -325,12 +325,11 @@ func (c *httpPlexMovieClient) RefreshLibraries() error {
 	return nil
 }
 
-// SetAudioLanguage implements PlexMovieClient. It sends a PUT to the metadata
-// endpoint setting the preferred audio language on the movie. Not locked so
-// the user can override per-movie inside Plex.
+// SetAudioLanguage implements PlexMovieClient. It uses the per-item prefs
+// endpoint so the preference is stored per-user for this movie only.
 func (c *httpPlexMovieClient) SetAudioLanguage(ratingKey string, langCode string) error {
-	path := fmt.Sprintf("/library/metadata/%s?type=1&id=%s&audioLanguage.value=%s&X-Plex-Token=%s",
-		ratingKey, ratingKey, url.QueryEscape(langCode), url.QueryEscape(c.token))
+	path := fmt.Sprintf("/library/metadata/%s/prefs?audioLanguage=%s&X-Plex-Token=%s",
+		ratingKey, url.QueryEscape(langCode), url.QueryEscape(c.token))
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {

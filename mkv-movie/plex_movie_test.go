@@ -151,10 +151,12 @@ func TestHTTPPlexMovieClient_SetContentRating_SendsCorrectParams(t *testing.T) {
 }
 
 func TestHTTPPlexMovieClient_SetAudioLanguage_SendsCorrectParams(t *testing.T) {
+	var gotPath string
 	var gotQuery url.Values
 	var gotMethod string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
+		gotPath = r.URL.Path
 		gotQuery = r.URL.Query()
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -168,11 +170,11 @@ func TestHTTPPlexMovieClient_SetAudioLanguage_SendsCorrectParams(t *testing.T) {
 	if gotMethod != http.MethodPut {
 		t.Errorf("method = %q; want PUT", gotMethod)
 	}
-	if gotQuery.Get("audioLanguage.value") != "ja" {
-		t.Errorf("audioLanguage.value = %q; want ja", gotQuery.Get("audioLanguage.value"))
+	if gotPath != "/library/metadata/42/prefs" {
+		t.Errorf("path = %q; want /library/metadata/42/prefs", gotPath)
 	}
-	if gotQuery.Get("type") != "1" {
-		t.Errorf("type = %q; want 1 (movie)", gotQuery.Get("type"))
+	if gotQuery.Get("audioLanguage") != "ja" {
+		t.Errorf("audioLanguage = %q; want ja", gotQuery.Get("audioLanguage"))
 	}
 }
 
