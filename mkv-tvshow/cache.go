@@ -56,6 +56,15 @@ func (c *ShowCache) Set(folder, id string) {
 	c.data[folder] = id
 }
 
+// AllEntries returns a copy of all folder→tmdbID mappings in the cache.
+func (c *ShowCache) AllEntries() map[string]string {
+	out := make(map[string]string, len(c.data))
+	for k, v := range c.data {
+		out[k] = v
+	}
+	return out
+}
+
 // Save writes the cache to disk as indented JSON.
 func (c *ShowCache) Save() error {
 	data, err := json.MarshalIndent(c.data, "", "    ")

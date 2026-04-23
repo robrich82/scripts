@@ -883,6 +883,46 @@ func (p *Processor) resolveOriginalLang(tmdbID string) string {
 	return ""
 }
 
+// RunLanguageOnly iterates all shows in the rating cache and applies the Plex
+// audio language preference for each, without scanning any MKV files.
+func (p *Processor) RunLanguageOnly() {
+	if p.plex == nil {
+		fmt.Fprintln(os.Stderr, "Plex not configured (PLEX_URL / PLEX_TOKEN not set)")
+		return
+	}
+
+	// Build a reverse map: tmdbID → show folder name for title-fallback lookups.
+	tmdbToName := make(map[string]string)
+	for folder, id := range p.cache.AllEntries() {
+		tmdbToName[id] = folder
+	}
+
+	for _, tmdbID := range p.ratingCache.AllShowIDs() {
+		showName := tmdbToName[tmdbID]
+
+		showKey, err := p.plex.FindShowByTMDBID(tmdbID)
+		if err == ErrPlexNotFound && showName != "" {
+			showKey, err = p.plex.FindShowByTitle(showName)
+		}
+		if err != nil && err != ErrPlexNotFound {
+			fmt.Printf("  [!] Plex: lookup TMDB %s: %v\n", tmdbID, err)
+			continue
+		}
+		if showKey == "" {
+			if showName != "" {
+				fmt.Printf("  [!] Plex: show %q not found\n", showName)
+			}
+			continue
+		}
+
+		p.applyPlexAudioLanguage(showKey, tmdbID, showName)
+	}
+
+	if err := p.ratingCache.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to save rating cache: %v\n", err)
+	}
+}
+
 // applyPlexAudioLanguage sets the show's preferred audio language in Plex to
 // the TMDB original language, but only once per show unless OverwriteLanguage
 // is set. This lets the user override the preference inside Plex on a

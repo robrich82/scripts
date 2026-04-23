@@ -357,6 +357,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--ratings-only` | false | Only update NZ content ratings; skip all other metadata |
 | `--overwrite-ratings` | false | Re-fetch all ratings, ignoring cached values |
 | `--overwrite-language` | false | Re-apply Plex audio language preference even if already set for a show |
+| `--language-only` | false | Apply Plex audio language preference for all cached shows without scanning files |
 | `--missing` | false | Check for missing episodes (see below) |
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
 

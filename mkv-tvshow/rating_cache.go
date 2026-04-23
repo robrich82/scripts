@@ -135,3 +135,12 @@ func (c *RatingCache) SetLanguageApplied(tmdbID, lang string) {
 		c.data.LanguageApplied[tmdbID] = lang
 	}
 }
+
+// AllShowIDs returns all TMDB show IDs present in the cache.
+func (c *RatingCache) AllShowIDs() []string {
+	ids := make([]string, 0, len(c.data.Shows))
+	for id := range c.data.Shows {
+		ids = append(ids, id)
+	}
+	return ids
+}

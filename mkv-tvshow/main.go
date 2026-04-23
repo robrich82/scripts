@@ -14,6 +14,7 @@ func main() {
 	ratingsOnly := flag.Bool("ratings-only", false, "Only update NZ content ratings; skip all other metadata processing.")
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
 	overwriteLanguage := flag.Bool("overwrite-language", false, "Re-apply Plex audio language preference even if already set for a show.")
+	languageOnly := flag.Bool("language-only", false, "Apply Plex audio language preference for all cached shows without scanning files.")
 	missingMode := flag.Bool("missing", false, "Check for episodes that have aired on TMDB but are not present locally.")
 	titleCheckMode := flag.Bool("title-check", false, "Check episode titles in filenames against TMDB and offer to rename.")
 	flag.Parse()
@@ -95,6 +96,23 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading title_cache.json: %v\n", err)
 		os.Exit(1)
+	}
+
+	// --language-only mode: apply Plex audio language preference for all cached shows.
+	if *languageOnly {
+		ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading rating_cache.json: %v\n", err)
+			os.Exit(1)
+		}
+		var plexClient PlexClient
+		if plexURL != "" && plexToken != "" {
+			plexClient = newHTTPPlexClient(plexURL, plexToken)
+		}
+		cfg := Config{OverwriteLanguage: *overwriteLanguage}
+		processor := NewProcessor(cfg, cache, nil, tmdb, nil, nil, nil, nil, ratingCache, nil, plexClient, nil)
+		processor.RunLanguageOnly()
+		return
 	}
 
 	// --title-check mode: compare filename titles against TMDB and offer to rename.

@@ -1100,6 +1100,80 @@ func TestProcessorRun_ManualExtra_NoEntry_Skipped(t *testing.T) {
 	}
 }
 
+// --- RunLanguageOnly ---
+
+func TestRunLanguageOnly_SetsLanguageForCachedShows(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+	rc.SetShowRating("222", RatingM)
+
+	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
+	plexClient := &fakePlexClient{showRatingKey: "plex-99"}
+	cache := cacheWith(t, map[string]string{"Show A": "111", "Show B": "222"})
+
+	p := NewProcessor(Config{}, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	p.RunLanguageOnly()
+
+	if len(plexClient.setLangCalls) != 2 {
+		t.Fatalf("expected 2 SetAudioLanguage calls, got %d", len(plexClient.setLangCalls))
+	}
+	for _, call := range plexClient.setLangCalls {
+		if call.lang != "ja" {
+			t.Errorf("expected lang ja, got %q", call.lang)
+		}
+	}
+}
+
+func TestRunLanguageOnly_SkipsAlreadyApplied(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+	rc.SetLanguageApplied("111", "ja")
+
+	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
+	plexClient := &fakePlexClient{showRatingKey: "plex-99"}
+	cache := cacheWith(t, map[string]string{"Show A": "111"})
+
+	p := NewProcessor(Config{}, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	p.RunLanguageOnly()
+
+	if len(plexClient.setLangCalls) != 0 {
+		t.Errorf("expected no SetAudioLanguage calls (already applied), got %d", len(plexClient.setLangCalls))
+	}
+}
+
+func TestRunLanguageOnly_OverwriteLanguage_ReappliesAlreadySet(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+	rc.SetLanguageApplied("111", "ja")
+
+	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
+	plexClient := &fakePlexClient{showRatingKey: "plex-99"}
+	cache := cacheWith(t, map[string]string{"Show A": "111"})
+
+	p := NewProcessor(Config{OverwriteLanguage: true}, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	p.RunLanguageOnly()
+
+	if len(plexClient.setLangCalls) != 1 {
+		t.Fatalf("expected 1 SetAudioLanguage call with --overwrite-language, got %d", len(plexClient.setLangCalls))
+	}
+}
+
+func TestRunLanguageOnly_ShowNotInPlex_Skipped(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+
+	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
+	plexClient := &fakePlexClient{findErr: ErrPlexNotFound, findTitleErr: ErrPlexNotFound}
+	cache := cacheWith(t, map[string]string{"Show A": "111"})
+
+	p := NewProcessor(Config{}, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	p.RunLanguageOnly() // should not panic or error
+
+	if len(plexClient.setLangCalls) != 0 {
+		t.Errorf("expected no calls for show not in Plex, got %d", len(plexClient.setLangCalls))
+	}
+}
+
 // containsAll returns true if all of the given values appear in haystack
 // (as individual elements, in any order).
 func containsAll(haystack []string, needles ...string) bool {
