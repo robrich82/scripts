@@ -96,19 +96,19 @@ func main() {
 
 	fmt.Println("\n--- Scan Complete ---")
 	if len(unmatchedVideos) > 0 {
-		fmt.Printf("\n--- UNMATCHED MKV (%d) ---\n", len(unmatchedVideos))
+		fmt.Printf("\n--- UNMATCHED MUSIC VIDEOS (%d) ---\n", len(unmatchedVideos))
 		for _, path := range unmatchedVideos {
 			fmt.Println(path)
 		}
 	}
 	if len(skippedVideos) > 0 {
-		fmt.Printf("\n--- SKIPPED MKV (%d) ---\n", len(skippedVideos))
+		fmt.Printf("\n--- SKIPPED MUSIC VIDEOS (%d) ---\n", len(skippedVideos))
 		for _, path := range skippedVideos {
 			fmt.Println(path)
 		}
 	}
 	if len(unmatchedVideos) == 0 && len(skippedVideos) == 0 {
-		fmt.Println("\nNo MKV files were skipped or unmatched.")
+		fmt.Println("\nNo music videos were skipped or unmatched.")
 	}
 	if stats.SkippedOld > 0 {
 		fmt.Printf("\nSkipped (old): %d\n", stats.SkippedOld)
