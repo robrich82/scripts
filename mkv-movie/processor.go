@@ -346,6 +346,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 
 	// Push rating and audio language to Plex when either needs updating.
 	// Both are independent of needsApply so corrected cache entries are always propagated.
+	var langSet string
 	if plexRatingNeedsUpdate(rating) || plexLanguageNeedsSet(details.OriginalLanguage) {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
 		if plexErr != nil {
@@ -364,7 +365,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					fmt.Printf("  [!] Plex audio language update failed: %v\n", err)
 				} else {
 					cache.SetLanguageApplied(tmdbID, details.OriginalLanguage)
-					fmt.Printf("  [i] Plex: audio language set to %q\n", details.OriginalLanguage)
+					langSet = details.OriginalLanguage
 				}
 			}
 		}
@@ -392,6 +393,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	fmt.Printf("[UPDATED] %s -> %s", basename, details.ReleaseDate)
 	if rating != RatingNone {
 		fmt.Printf(" (rating: %s)", rating)
+	}
+	if langSet != "" {
+		fmt.Printf(" (lang: %s)", langSet)
 	}
 	fmt.Println()
 	return ResultUpdated
