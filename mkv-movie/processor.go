@@ -109,28 +109,31 @@ const (
 // MovieRatingResolver resolves an NZ content rating for a movie, trying
 // external sources, cache, and finally a user prompt.
 type MovieRatingResolver struct {
-	sources         []RatingSource
-	cache           *MovieRatingCache
-	overwrite       bool
-	plex            PlexMovieClient // nil if not configured
-	prompter        func(string) (string, error)
-	sessionPrompted map[string]NZRating // key → rating already prompted this run
+	sources           []RatingSource
+	cache             *MovieRatingCache
+	overwrite         bool
+	overwriteLanguage bool
+	plex              PlexMovieClient // nil if not configured
+	prompter          func(string) (string, error)
+	sessionPrompted   map[string]NZRating // key → rating already prompted this run
 }
 
 func newMovieRatingResolver(
 	sources []RatingSource,
 	cache *MovieRatingCache,
 	overwrite bool,
+	overwriteLanguage bool,
 	plex PlexMovieClient,
 	prompter func(string) (string, error),
 ) *MovieRatingResolver {
 	return &MovieRatingResolver{
-		sources:         sources,
-		cache:           cache,
-		overwrite:       overwrite,
-		plex:            plex,
-		prompter:        prompter,
-		sessionPrompted: make(map[string]NZRating),
+		sources:           sources,
+		cache:             cache,
+		overwrite:         overwrite,
+		overwriteLanguage: overwriteLanguage,
+		plex:              plex,
+		prompter:          prompter,
+		sessionPrompted:   make(map[string]NZRating),
 	}
 }
 
@@ -296,13 +299,21 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		return !ok || last != rating
 	}
 
+	plexLanguageNeedsSet := func(originalLang string) bool {
+		if rr == nil || rr.plex == nil || originalLang == "" {
+			return false
+		}
+		applied, ok := cache.GetLanguageApplied(tmdbID)
+		return !ok || applied != originalLang || rr.overwriteLanguage
+	}
+
 	// 5. Resolve NZ rating early so we can include it in the needs-update check.
 	var rating NZRating
 	if rr != nil {
 		rating = rr.ResolveMovieRating(tmdbID, details.Title)
 	}
 
-	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) {
+	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) && !plexLanguageNeedsSet(details.OriginalLanguage) {
 		fmt.Printf("[OK]      %s (no changes needed)\n", basename)
 		return ResultOK
 	}
@@ -333,19 +344,27 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		}
 	}
 
-	// Push rating to Plex whenever it differs from what was last pushed — this
-	// is independent of needsApply so that a manually corrected cache entry is
-	// always propagated to Plex on the next run.
-	if plexRatingNeedsUpdate(rating) {
+	// Push rating and audio language to Plex when either needs updating.
+	// Both are independent of needsApply so corrected cache entries are always propagated.
+	if plexRatingNeedsUpdate(rating) || plexLanguageNeedsSet(details.OriginalLanguage) {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
 		if plexErr != nil {
 			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
 		}
 		if plexErr == nil {
-			if err := rr.plex.SetContentRating(rk, rating); err != nil {
-				fmt.Printf("  [!] Plex rating update failed: %v\n", err)
-			} else {
-				cache.SetPlexRating(tmdbID, rating)
+			if plexRatingNeedsUpdate(rating) {
+				if err := rr.plex.SetContentRating(rk, rating); err != nil {
+					fmt.Printf("  [!] Plex rating update failed: %v\n", err)
+				} else {
+					cache.SetPlexRating(tmdbID, rating)
+				}
+			}
+			if plexLanguageNeedsSet(details.OriginalLanguage) {
+				if err := rr.plex.SetAudioLanguage(rk, details.OriginalLanguage); err != nil {
+					fmt.Printf("  [!] Plex audio language update failed: %v\n", err)
+				} else {
+					cache.SetLanguageApplied(tmdbID, details.OriginalLanguage)
+				}
 			}
 		}
 	}

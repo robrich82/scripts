@@ -14,11 +14,12 @@ const tmdbImageBase = "https://image.tmdb.org/t/p/w500"
 
 // MovieDetails holds the full metadata fetched from TMDB for a movie.
 type MovieDetails struct {
-	TMDBID      string
-	Title       string
-	Overview    string
-	ReleaseDate string // "YYYY-MM-DD" or ""
-	PosterPath  string // e.g. "/abc123.jpg"
+	TMDBID           string
+	Title            string
+	Overview         string
+	ReleaseDate      string // "YYYY-MM-DD" or ""
+	PosterPath       string // e.g. "/abc123.jpg"
+	OriginalLanguage string // ISO 639-1 code, e.g. "ja", "en"
 }
 
 // PosterURL returns the full image URL for the poster, or "" if none.
@@ -180,20 +181,22 @@ func (t *tmdbMovieSource) GetMovieDetails(tmdbID string) (MovieDetails, error) {
 	defer resp.Body.Close()
 
 	var result struct {
-		Title       string `json:"title"`
-		Overview    string `json:"overview"`
-		ReleaseDate string `json:"release_date"`
-		PosterPath  string `json:"poster_path"`
+		Title            string `json:"title"`
+		Overview         string `json:"overview"`
+		ReleaseDate      string `json:"release_date"`
+		PosterPath       string `json:"poster_path"`
+		OriginalLanguage string `json:"original_language"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return MovieDetails{}, fmt.Errorf("decode movie details: %w", err)
 	}
 	return MovieDetails{
-		TMDBID:      tmdbID,
-		Title:       result.Title,
-		Overview:    result.Overview,
-		ReleaseDate: result.ReleaseDate,
-		PosterPath:  result.PosterPath,
+		TMDBID:           tmdbID,
+		Title:            result.Title,
+		Overview:         result.Overview,
+		ReleaseDate:      result.ReleaseDate,
+		PosterPath:       result.PosterPath,
+		OriginalLanguage: result.OriginalLanguage,
 	}, nil
 }
 

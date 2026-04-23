@@ -150,6 +150,44 @@ func TestHTTPPlexMovieClient_SetContentRating_SendsCorrectParams(t *testing.T) {
 	}
 }
 
+func TestHTTPPlexMovieClient_SetAudioLanguage_SendsCorrectParams(t *testing.T) {
+	var gotQuery url.Values
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotQuery = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "mytoken")
+	err := c.SetAudioLanguage("42", "ja")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method = %q; want PUT", gotMethod)
+	}
+	if gotQuery.Get("audioLanguage.value") != "ja" {
+		t.Errorf("audioLanguage.value = %q; want ja", gotQuery.Get("audioLanguage.value"))
+	}
+	if gotQuery.Get("type") != "1" {
+		t.Errorf("type = %q; want 1 (movie)", gotQuery.Get("type"))
+	}
+}
+
+func TestHTTPPlexMovieClient_SetAudioLanguage_ErrorOnNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "bad-token")
+	if err := c.SetAudioLanguage("1", "en"); err == nil {
+		t.Error("expected error for non-2xx response")
+	}
+}
+
 func plexMetadataJSON(contentRating string) string {
 	return `{"MediaContainer":{"Metadata":[{"contentRating":"` + contentRating + `"}]}}`
 }

@@ -258,7 +258,7 @@ func TestProcessFile_Overwrite_ReappliesEvenIfApplied(t *testing.T) {
 	cache.MarkMetaApplied(path, "12345")
 
 	prompter := func(string) (string, error) { return "", nil }
-	rr := newMovieRatingResolver(nil, cache, true /* overwrite */, nil, prompter)
+	rr := newMovieRatingResolver(nil, cache, true /* overwrite */, false, nil, prompter)
 
 	result := processFile(path, tmdb, applier, timer, rr, cache, false)
 	if result != ResultUpdated {
@@ -299,7 +299,7 @@ func TestProcessFile_WithRating_TagsPathSet(t *testing.T) {
 	cache.Set("12345", RatingM)
 
 	prompter := func(string) (string, error) { return "", nil }
-	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
+	rr := newMovieRatingResolver(nil, cache, false, false, nil, prompter)
 
 	result := processFile(path, tmdb, applier, timer, rr, cache, false)
 	if result != ResultUpdated {
@@ -331,13 +331,14 @@ func (f *fakePlexMovieClient) GetContentRating(_ string) (NZRating, error) {
 }
 
 func (f *fakePlexMovieClient) SetContentRating(_ string, _ NZRating) error { return nil }
+func (f *fakePlexMovieClient) SetAudioLanguage(_ string, _ string) error   { return nil }
 func (f *fakePlexMovieClient) RefreshLibraries() error                     { return nil }
 
 func TestResolveMovieRating_BlankAcceptsPlexDefault(t *testing.T) {
 	cache := makeCache(t)
 	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingR16}
 	prompter := func(string) (string, error) { return "", nil }
-	rr := newMovieRatingResolver(nil, cache, false, plex, prompter)
+	rr := newMovieRatingResolver(nil, cache, false, false, plex, prompter)
 
 	rating := rr.ResolveMovieRating("Some Film:2022", "Some Film")
 	if rating != RatingR16 {
@@ -353,7 +354,7 @@ func TestResolveMovieRating_BlankWithNoPlexDefault_Skips(t *testing.T) {
 	cache := makeCache(t)
 	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingNone}
 	prompter := func(string) (string, error) { return "", nil }
-	rr := newMovieRatingResolver(nil, cache, false, plex, prompter)
+	rr := newMovieRatingResolver(nil, cache, false, false, plex, prompter)
 
 	rating := rr.ResolveMovieRating("Some Film:2022", "Some Film")
 	if rating != RatingNone {
@@ -371,7 +372,7 @@ func TestResolveMovieRating_InvalidInput_RePrompts(t *testing.T) {
 		}
 		return "R16", nil
 	}
-	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
+	rr := newMovieRatingResolver(nil, cache, false, false, nil, prompter)
 
 	rating := rr.ResolveMovieRating("title:2020", "Some Movie")
 	if rating != RatingR16 {

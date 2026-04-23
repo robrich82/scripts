@@ -329,7 +329,7 @@ func TestResolveMovieRating_CachedRating_ReturnedWithoutPrompt(t *testing.T) {
 		promptCalled = true
 		return "", nil
 	}
-	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
+	rr := newMovieRatingResolver(nil, cache, false, false, nil, prompter)
 	rating := rr.ResolveMovieRating("99999", "Some Film")
 	if rating != RatingPG {
 		t.Errorf("got %q, want PG from cache", rating)
@@ -346,7 +346,7 @@ func TestResolveMovieRating_SessionDedup_PromptsOnce(t *testing.T) {
 		calls++
 		return "M", nil
 	}
-	rr := newMovieRatingResolver(nil, cache, false, nil, prompter)
+	rr := newMovieRatingResolver(nil, cache, false, false, nil, prompter)
 
 	r1 := rr.ResolveMovieRating("film:2020", "Film")
 	r2 := rr.ResolveMovieRating("film:2020", "Film")
@@ -366,7 +366,7 @@ func TestResolveMovieRating_ExternalSourceError_ContinuesToNext(t *testing.T) {
 	goodSource := &fakeRatingSource{name: "GoodSource", rating: RatingG}
 
 	prompter := func(string) (string, error) { return "", nil }
-	rr := newMovieRatingResolver([]RatingSource{errSource, goodSource}, cache, false, nil, prompter)
+	rr := newMovieRatingResolver([]RatingSource{errSource, goodSource}, cache, false, false, nil, prompter)
 
 	rating := rr.ResolveMovieRating("film:2021", "Film")
 	if rating != RatingG {

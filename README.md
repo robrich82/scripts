@@ -252,6 +252,7 @@ Flags:
 | Flag | Description |
 |------|-------------|
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values |
+| `--overwrite-language` | Re-apply Plex audio language preference even if already set for a movie |
 | `--force` | Re-apply all metadata even if already cached |
 
 Output:
@@ -264,7 +265,9 @@ Updated: 8  OK: 42  Skipped: 3  Errors: 0
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
 - `mkvpropedit` — writes metadata to MKV files (optional; a warning is shown if missing)
-- `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex
+- `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
+
+When Plex is configured, after processing each movie the tool pushes the resolved NZ content rating and sets the movie's preferred audio language to the TMDB original language. The language is cached in `movie_rating_cache.json` and only applied once per movie; use `--overwrite-language` to force a re-apply.
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` is available.
