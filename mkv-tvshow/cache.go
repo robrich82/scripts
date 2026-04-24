@@ -19,10 +19,10 @@ type ShowCache struct {
 // cache is returned without error.
 func LoadCache(path string) (*ShowCache, error) {
 	c := &ShowCache{path: path, data: make(map[string]string)}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
 		return c, nil
 	}
-	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
