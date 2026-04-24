@@ -409,6 +409,10 @@ func extractFileTitles(stem string) []string {
 	if raw == "" {
 		return nil
 	}
+	// Strip any trailing -partN before splitting so multi-part files compare
+	// correctly against TMDB titles (the suffix is a file-splitting convention,
+	// not part of the episode title).
+	raw, _ = stripPartSuffix(raw)
 	parts := strings.Split(raw, multiEpTitleSep)
 	var titles []string
 	for _, p := range parts {
@@ -422,6 +426,20 @@ func extractFileTitles(stem string) []string {
 		titles = append(titles, p)
 	}
 	return titles
+}
+
+// partSuffixRe matches a trailing -partN suffix (case-insensitive) used when
+// an episode spans multiple files (e.g. "-part1", "-Part2").
+var partSuffixRe = regexp.MustCompile(`(?i)(-part\d+)$`)
+
+// stripPartSuffix returns s with any trailing -partN removed and the suffix
+// itself (empty string when absent).
+func stripPartSuffix(s string) (string, string) {
+	m := partSuffixRe.FindStringIndex(s)
+	if m == nil {
+		return s, ""
+	}
+	return s[:m[0]], s[m[0]:]
 }
 
 // placeholderTitleRe matches TMDB placeholder episode titles like "Episode 2".
@@ -485,18 +503,22 @@ func buildNewStemFromFS(oldStem, fsTitlePart, dir string) (string, bool) {
 		return oldStem, false
 	}
 	prefix := oldStem[:m[1]]
-	newStem := prefix + " - " + fsTitlePart
+
+	// Carry forward any -partN suffix from the old stem (file-splitting marker).
+	_, partSuffix := stripPartSuffix(oldStem)
+
+	newStem := prefix + " - " + fsTitlePart + partSuffix
 
 	if len(filepath.Join(dir, newStem+".mkv")) <= windowsMaxPath {
 		return newStem, false
 	}
 
-	overhead := len(filepath.Join(dir, prefix+" - .mkv")) + 1 // +1 for null terminator
+	overhead := len(filepath.Join(dir, prefix+" - .mkv")) + len(partSuffix) + 1 // +1 for null terminator
 	maxTitle := windowsMaxPath - overhead
 	if maxTitle <= 0 {
 		return oldStem, false
 	}
-	return prefix + " - " + truncateTitleToBytes(fsTitlePart, maxTitle), true
+	return prefix + " - " + truncateTitleToBytes(fsTitlePart, maxTitle) + partSuffix, true
 }
 
 // truncateTitleToBytes shortens s to fit within maxBytes, preferring a word

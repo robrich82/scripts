@@ -3,9 +3,91 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestStripPartSuffix(t *testing.T) {
+	cases := []struct {
+		input      string
+		wantBase   string
+		wantSuffix string
+	}{
+		{"Some Title-part1", "Some Title", "-part1"},
+		{"Some Title-part2", "Some Title", "-part2"},
+		{"Some Title-Part1", "Some Title", "-Part1"},
+		{"Some Title", "Some Title", ""},
+		{"Title-partial", "Title-partial", ""}, // word "partial" must not match
+		{"Title-part10", "Title", "-part10"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			base, suffix := stripPartSuffix(tc.input)
+			if base != tc.wantBase || suffix != tc.wantSuffix {
+				t.Errorf("stripPartSuffix(%q) = (%q, %q), want (%q, %q)",
+					tc.input, base, suffix, tc.wantBase, tc.wantSuffix)
+			}
+		})
+	}
+}
+
+func TestExtractFileTitles_PartSuffix(t *testing.T) {
+	cases := []struct {
+		stem string
+		want []string
+	}{
+		// Single episode, part suffix stripped before comparison.
+		{"Show - S01E05 - Some Episode-part1", []string{"Some Episode"}},
+		{"Show - S01E05 - Some Episode-part2", []string{"Some Episode"}},
+		{"Show - S01E05 - Some Episode-Part1", []string{"Some Episode"}},
+		// Multi-episode: suffix on the last title only.
+		{"Show - S01E05E06 - Title A﹢Title B-part1", []string{"Title A", "Title B"}},
+		// No suffix: unchanged.
+		{"Show - S01E05 - Some Episode", []string{"Some Episode"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.stem, func(t *testing.T) {
+			got := extractFileTitles(tc.stem)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("extractFileTitles(%q) = %v, want %v", tc.stem, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildNewStemFromFS_PartSuffix(t *testing.T) {
+	cases := []struct {
+		oldStem     string
+		fsTitlePart string
+		wantStem    string
+	}{
+		{
+			"Show - S01E05 - Old Title-part1",
+			"New Title",
+			"Show - S01E05 - New Title-part1",
+		},
+		{
+			"Show - S01E05 - Old Title-part2",
+			"New Title",
+			"Show - S01E05 - New Title-part2",
+		},
+		{
+			"Show - S01E05 - Old Title",
+			"New Title",
+			"Show - S01E05 - New Title",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.oldStem, func(t *testing.T) {
+			got, _ := buildNewStemFromFS(tc.oldStem, tc.fsTitlePart, `C:\Media\Show`)
+			if got != tc.wantStem {
+				t.Errorf("buildNewStemFromFS(%q, %q) = %q, want %q",
+					tc.oldStem, tc.fsTitlePart, got, tc.wantStem)
+			}
+		})
+	}
+}
 
 func TestAllPlaceholders(t *testing.T) {
 	cases := []struct {
