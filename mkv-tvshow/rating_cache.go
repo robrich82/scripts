@@ -41,6 +41,7 @@ func LoadRatingCache(path string) (*RatingCache, error) {
 			Episodes:        make(map[string]string),
 			Applied:         make(map[string]string),
 			LanguageApplied: make(map[string]string),
+			PlexKeys:        make(map[string]string),
 		},
 	}
 	data, err := os.ReadFile(path)
@@ -64,6 +65,9 @@ func LoadRatingCache(path string) (*RatingCache, error) {
 	}
 	if c.data.LanguageApplied == nil {
 		c.data.LanguageApplied = make(map[string]string)
+	}
+	if c.data.PlexKeys == nil {
+		c.data.PlexKeys = make(map[string]string)
 	}
 	return c, nil
 }
@@ -141,22 +145,15 @@ func (c *RatingCache) SetLanguageApplied(tmdbID, lang string) {
 
 // GetPlexKey returns the cached Plex ratingKey for the given TMDB show ID.
 func (c *RatingCache) GetPlexKey(tmdbID string) (string, bool) {
-	if c.data.PlexKeys == nil {
-		return "", false
-	}
 	key, ok := c.data.PlexKeys[tmdbID]
 	return key, ok && key != ""
 }
 
 // SetPlexKey records the Plex ratingKey for the given TMDB show ID.
 func (c *RatingCache) SetPlexKey(tmdbID, key string) {
-	if key == "" {
-		return
+	if key != "" {
+		c.data.PlexKeys[tmdbID] = key
 	}
-	if c.data.PlexKeys == nil {
-		c.data.PlexKeys = make(map[string]string)
-	}
-	c.data.PlexKeys[tmdbID] = key
 }
 
 // AllShowIDs returns all TMDB show IDs present in the cache.
