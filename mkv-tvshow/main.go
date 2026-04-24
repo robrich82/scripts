@@ -10,7 +10,7 @@ import (
 
 func main() {
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
-	processAll := flag.Bool("all", false, "Process all cached shows without prompting.")
+	promptEach := flag.Bool("prompt-each", false, "Prompt before processing each cached show.")
 	ratingsOnly := flag.Bool("ratings-only", false, "Only update NZ content ratings; skip all other metadata processing.")
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
 	overwriteLanguage := flag.Bool("overwrite-language", false, "Re-apply Plex audio language preference even if already set for a show.")
@@ -133,13 +133,7 @@ func main() {
 	}
 
 	// Normal tagging mode.
-	shouldProcessAll := *processAll
-	if !shouldProcessAll {
-		ans, err := prompter.Ask("Process all cached shows without prompting? [y/n]: ")
-		if err == nil && ans == "y" {
-			shouldProcessAll = true
-		}
-	}
+	shouldProcessAll := !*promptEach
 
 	manualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
 	if err != nil {

@@ -353,7 +353,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--cutoff-date YYYY-MM-DD` | today | Only process files modified on or after this date |
-| `--all` | false | Process all cached shows without prompting |
+| `--prompt-each` | false | Prompt before processing each cached show (default: process all) |
 | `--ratings-only` | false | Only update NZ content ratings; skip all other metadata |
 | `--overwrite-ratings` | false | Re-fetch all ratings, ignoring cached values |
 | `--overwrite-language` | false | Re-apply Plex audio language preference even if already set for a show |
