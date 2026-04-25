@@ -150,6 +150,7 @@ func (p *Processor) Run() Stats {
 	})
 
 	// Phase 2: process each show that has at least one qualifying file.
+	extrasProcessed := false
 	for _, showFolder := range showOrder {
 		showID := p.resolveShowID(showFolder)
 		if showID == "SKIP" {
@@ -257,6 +258,7 @@ func (p *Processor) Run() Stats {
 								p.retryList.Add(filePath)
 							}
 							showTouched = true
+							extrasProcessed = true
 							fmt.Printf("[✓] Processed (extra): %s\n", file)
 							stats.Success++
 						} else {
@@ -369,6 +371,17 @@ func (p *Processor) Run() Stats {
 
 	if err := p.retryList.Save(); err != nil {
 		fmt.Printf("[!] Failed to save retry list: %v\n", err)
+	}
+
+	// After all shows are processed, trigger a full library scan when extras were
+	// processed. The startup RefreshLibraries fires before tagging, so extras get
+	// untagged metadata on first discovery; this post-run scan picks up the tags.
+	if extrasProcessed && p.plex != nil {
+		if err := p.plex.RefreshLibraries(); err != nil {
+			fmt.Printf("[!] Plex library refresh failed: %v\n", err)
+		} else {
+			fmt.Println("  [i] Plex: library re-scanned for extras.")
+		}
 	}
 
 	return stats
