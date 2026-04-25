@@ -15,6 +15,24 @@ import (
 // exists in any Plex library section.
 var ErrPlexMovieNotFound = errors.New("plex: movie not found")
 
+// flexBool unmarshals JSON booleans (true/false) or integers (0/1) into a bool.
+// Plex API versions differ: some return selected/forced as int, others as bool.
+type flexBool bool
+
+func (f *flexBool) UnmarshalJSON(data []byte) error {
+	var b bool
+	if err := json.Unmarshal(data, &b); err == nil {
+		*f = flexBool(b)
+		return nil
+	}
+	var i int
+	if err := json.Unmarshal(data, &i); err == nil {
+		*f = flexBool(i != 0)
+		return nil
+	}
+	return fmt.Errorf("flexBool: cannot unmarshal %s", data)
+}
+
 // PlexMovieClient is the interface for Plex API calls needed by the movie
 // rating pipeline.
 type PlexMovieClient interface {
@@ -344,11 +362,11 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (a
 					Part []struct {
 						ID     int `json:"id"`
 						Stream []struct {
-							ID          int    `json:"id"`
-							StreamType  int    `json:"streamType"`
-							Selected    int    `json:"selected"`
-							Forced      int    `json:"forced"`
-							LanguageTag string `json:"languageTag"`
+							ID          int      `json:"id"`
+							StreamType  int      `json:"streamType"`
+							Selected    flexBool `json:"selected"`
+							Forced      flexBool `json:"forced"`
+							LanguageTag string   `json:"languageTag"`
 						} `json:"Stream"`
 					} `json:"Part"`
 				} `json:"Media"`
@@ -372,7 +390,7 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (a
 		if s.StreamType != 2 || s.LanguageTag != audioLangTag {
 			continue
 		}
-		if s.Selected == 1 {
+		if bool(s.Selected) {
 			audioOK = true
 			break
 		}
@@ -394,10 +412,10 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (a
 	var subtitleID int
 	subtitleOK := false
 	for _, s := range part.Stream {
-		if s.StreamType != 3 || s.LanguageTag != "en" || s.Forced == 1 {
+		if s.StreamType != 3 || s.LanguageTag != "en" || bool(s.Forced) {
 			continue
 		}
-		if s.Selected == 1 {
+		if bool(s.Selected) {
 			subtitleOK = true
 			break
 		}

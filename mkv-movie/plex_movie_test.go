@@ -151,12 +151,12 @@ func TestHTTPPlexMovieClient_SetContentRating_SendsCorrectParams(t *testing.T) {
 	}
 }
 
-func streamsMetaJSON(audioLangTag string, audioSelected int, subSelected int) string {
+func streamsMetaJSON(audioLangTag string, audioSelected bool, subSelected bool) string {
 	return `{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"id":100,"Stream":[` +
-		`{"id":201,"streamType":2,"languageTag":"` + audioLangTag + `","selected":` + fmt.Sprintf("%d", audioSelected) + `},` +
-		`{"id":202,"streamType":2,"languageTag":"en","selected":0},` +
-		`{"id":301,"streamType":3,"languageTag":"en","selected":` + fmt.Sprintf("%d", subSelected) + `},` +
-		`{"id":302,"streamType":3,"languageTag":"en","forced":1}` +
+		`{"id":201,"streamType":2,"languageTag":"` + audioLangTag + `","selected":` + fmt.Sprintf("%t", audioSelected) + `},` +
+		`{"id":202,"streamType":2,"languageTag":"en","selected":false},` +
+		`{"id":301,"streamType":3,"languageTag":"en","selected":` + fmt.Sprintf("%t", subSelected) + `},` +
+		`{"id":302,"streamType":3,"languageTag":"en","forced":true}` +
 		`]}]}]}]}}`
 }
 
@@ -166,7 +166,7 @@ func TestHTTPPlexMovieClient_SetMovieStreams_SelectsAudioAndSubtitle(t *testing.
 		reqs = append(reqs, struct{ method, path string }{r.Method, r.URL.Path})
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, streamsMetaJSON("ja", 0, 0))
+			fmt.Fprint(w, streamsMetaJSON("ja", false, false))
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
@@ -202,7 +202,7 @@ func TestHTTPPlexMovieClient_SetMovieStreams_SkipsAlreadySelected(t *testing.T) 
 			putCount++
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, streamsMetaJSON("ja", 1, 1))
+		fmt.Fprint(w, streamsMetaJSON("ja", true, true))
 	}))
 	defer srv.Close()
 
