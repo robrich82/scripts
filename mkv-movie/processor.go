@@ -109,31 +109,31 @@ const (
 // MovieRatingResolver resolves an NZ content rating for a movie, trying
 // external sources, cache, and finally a user prompt.
 type MovieRatingResolver struct {
-	sources           []RatingSource
-	cache             *MovieRatingCache
-	overwrite         bool
-	overwriteLanguage bool
-	plex              PlexMovieClient // nil if not configured
-	prompter          func(string) (string, error)
-	sessionPrompted   map[string]NZRating // key → rating already prompted this run
+	sources          []RatingSource
+	cache            *MovieRatingCache
+	overwrite        bool
+	overwriteStreams bool
+	plex             PlexMovieClient // nil if not configured
+	prompter         func(string) (string, error)
+	sessionPrompted  map[string]NZRating // key → rating already prompted this run
 }
 
 func newMovieRatingResolver(
 	sources []RatingSource,
 	cache *MovieRatingCache,
 	overwrite bool,
-	overwriteLanguage bool,
+	overwriteStreams bool,
 	plex PlexMovieClient,
 	prompter func(string) (string, error),
 ) *MovieRatingResolver {
 	return &MovieRatingResolver{
-		sources:           sources,
-		cache:             cache,
-		overwrite:         overwrite,
-		overwriteLanguage: overwriteLanguage,
-		plex:              plex,
-		prompter:          prompter,
-		sessionPrompted:   make(map[string]NZRating),
+		sources:          sources,
+		cache:            cache,
+		overwrite:        overwrite,
+		overwriteStreams: overwriteStreams,
+		plex:             plex,
+		prompter:         prompter,
+		sessionPrompted:  make(map[string]NZRating),
 	}
 }
 
@@ -299,12 +299,12 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		return !ok || last != rating
 	}
 
-	plexLanguageNeedsSet := func(originalLang string) bool {
+	plexStreamsNeedSet := func(originalLang string) bool {
 		if rr == nil || rr.plex == nil || originalLang == "" {
 			return false
 		}
-		applied, ok := cache.GetLanguageApplied(tmdbID)
-		return !ok || applied != originalLang || rr.overwriteLanguage
+		applied, ok := cache.GetStreamsApplied(tmdbID)
+		return !ok || applied != originalLang || rr.overwriteStreams
 	}
 
 	// 5. Resolve NZ rating early so we can include it in the needs-update check.
@@ -313,7 +313,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		rating = rr.ResolveMovieRating(tmdbID, details.Title)
 	}
 
-	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) && !plexLanguageNeedsSet(details.OriginalLanguage) {
+	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) && !plexStreamsNeedSet(details.OriginalLanguage) {
 		fmt.Printf("[OK]      %s (no changes needed)\n", basename)
 		return ResultOK
 	}
@@ -344,10 +344,10 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		}
 	}
 
-	// Push rating and audio language to Plex when either needs updating.
+	// Push rating and stream selection to Plex when either needs updating.
 	// Both are independent of needsApply so corrected cache entries are always propagated.
 	var langSet string
-	if plexRatingNeedsUpdate(rating) || plexLanguageNeedsSet(details.OriginalLanguage) {
+	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet(details.OriginalLanguage) {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
 		if plexErr != nil {
 			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
@@ -360,12 +360,15 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					cache.SetPlexRating(tmdbID, rating)
 				}
 			}
-			if plexLanguageNeedsSet(details.OriginalLanguage) {
-				if err := rr.plex.SetAudioLanguage(rk, details.OriginalLanguage); err != nil {
-					fmt.Printf("  [!] Plex audio language update failed (key=%s lang=%s): %v\n", rk, details.OriginalLanguage, err)
+			if plexStreamsNeedSet(details.OriginalLanguage) {
+				audioSet, subtitleSet, err := rr.plex.SetMovieStreams(rk, details.OriginalLanguage)
+				if err != nil {
+					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, details.OriginalLanguage, err)
 				} else {
-					cache.SetLanguageApplied(tmdbID, details.OriginalLanguage)
-					langSet = details.OriginalLanguage
+					cache.SetStreamsApplied(tmdbID, details.OriginalLanguage)
+					if audioSet || subtitleSet {
+						langSet = details.OriginalLanguage
+					}
 				}
 			}
 		}

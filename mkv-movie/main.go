@@ -10,7 +10,7 @@ import (
 
 func main() {
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
-	overwriteLanguage := flag.Bool("overwrite-language", false, "Re-apply Plex audio language preference even if already set for a movie.")
+	overwriteStreams := flag.Bool("overwrite-streams", false, "Re-select Plex audio/subtitle streams even if already applied for a movie.")
 	force := flag.Bool("force", false, "Re-apply all metadata even if already cached.")
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	flag.Parse()
@@ -78,7 +78,7 @@ func main() {
 		tmdb,
 		newClassificationSource(),
 	}
-	rr := newMovieRatingResolver(sources, cache, *overwriteRatings, *overwriteLanguage, plex, stdinPrompter)
+	rr := newMovieRatingResolver(sources, cache, *overwriteRatings, *overwriteStreams, plex, stdinPrompter)
 
 	if plex != nil {
 		if err := plex.RefreshLibraries(); err != nil {

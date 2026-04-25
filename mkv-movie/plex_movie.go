@@ -32,10 +32,10 @@ type PlexMovieClient interface {
 	// SetContentRating updates the contentRating field on a Plex movie item and
 	// locks it to prevent automatic overwriting.
 	SetContentRating(ratingKey string, rating NZRating) error
-	// SetAudioLanguage sets the preferred audio language on the movie identified
-	// by ratingKey. langCode is a BCP-47/ISO 639-1 tag (e.g. "ja", "en").
-	// Not locked so the user can override it inside Plex.
-	SetAudioLanguage(ratingKey string, langCode string) error
+	// SetMovieStreams selects the audio stream matching audioLangTag (ISO 639-1,
+	// e.g. "ja") and the first non-forced English subtitle stream on the movie's
+	// first media Part. Returns whether audio and/or subtitle were changed.
+	SetMovieStreams(ratingKey, audioLangTag string) (audioSet, subtitleSet bool, err error)
 	// RefreshLibraries triggers a metadata scan of all Plex movie library
 	// sections so that newly processed files are picked up without manual
 	// intervention.
@@ -326,27 +326,111 @@ func (c *httpPlexMovieClient) RefreshLibraries() error {
 	return nil
 }
 
-// SetAudioLanguage implements PlexMovieClient. It uses the per-item prefs
-// endpoint so the preference is stored per-user for this movie only.
-func (c *httpPlexMovieClient) SetAudioLanguage(ratingKey string, langCode string) error {
-	path := fmt.Sprintf("/library/metadata/%s/prefs?audioLanguage=%s&X-Plex-Token=%s",
-		ratingKey, url.QueryEscape(langCode), url.QueryEscape(c.token))
-
-	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
+// SetMovieStreams implements PlexMovieClient. It fetches the movie's first
+// media Part, selects the audio stream matching audioLangTag (e.g. "ja"),
+// and selects the first non-forced English subtitle stream. Only calls the
+// Plex API when the desired stream is not already selected.
+func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (audioSet, subtitleSet bool, err error) {
+	resp, err := c.plexGet("/library/metadata/" + ratingKey)
 	if err != nil {
-		return fmt.Errorf("plex: build put request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("plex: set audio language: %w", err)
+		return false, false, fmt.Errorf("plex: get streams %s: %w", ratingKey, err)
 	}
 	defer resp.Body.Close()
 
+	var meta struct {
+		MediaContainer struct {
+			Metadata []struct {
+				Media []struct {
+					Part []struct {
+						ID     int `json:"id"`
+						Stream []struct {
+							ID          int    `json:"id"`
+							StreamType  int    `json:"streamType"`
+							Selected    int    `json:"selected"`
+							Forced      int    `json:"forced"`
+							LanguageTag string `json:"languageTag"`
+						} `json:"Stream"`
+					} `json:"Part"`
+				} `json:"Media"`
+			} `json:"Metadata"`
+		} `json:"MediaContainer"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+		return false, false, fmt.Errorf("plex: decode streams %s: %w", ratingKey, err)
+	}
+	if len(meta.MediaContainer.Metadata) == 0 ||
+		len(meta.MediaContainer.Metadata[0].Media) == 0 ||
+		len(meta.MediaContainer.Metadata[0].Media[0].Part) == 0 {
+		return false, false, fmt.Errorf("plex: no media part for %s", ratingKey)
+	}
+	part := meta.MediaContainer.Metadata[0].Media[0].Part[0]
+
+	// Select audio stream matching audioLangTag (skip if already selected).
+	var audioID int
+	audioOK := false
+	for _, s := range part.Stream {
+		if s.StreamType != 2 || s.LanguageTag != audioLangTag {
+			continue
+		}
+		if s.Selected == 1 {
+			audioOK = true
+			break
+		}
+		if audioID == 0 {
+			audioID = s.ID
+		}
+	}
+	if !audioOK {
+		if audioID == 0 {
+			return false, false, fmt.Errorf("plex: no %s audio stream in %s", audioLangTag, ratingKey)
+		}
+		if err := c.plexSetStream(part.ID, "audioStreamID", audioID); err != nil {
+			return false, false, fmt.Errorf("plex: set audio stream: %w", err)
+		}
+		audioSet = true
+	}
+
+	// Select first non-forced English subtitle (skip if already selected).
+	var subtitleID int
+	subtitleOK := false
+	for _, s := range part.Stream {
+		if s.StreamType != 3 || s.LanguageTag != "en" || s.Forced == 1 {
+			continue
+		}
+		if s.Selected == 1 {
+			subtitleOK = true
+			break
+		}
+		if subtitleID == 0 {
+			subtitleID = s.ID
+		}
+	}
+	if !subtitleOK && subtitleID != 0 {
+		if err := c.plexSetStream(part.ID, "subtitleStreamID", subtitleID); err != nil {
+			return audioSet, false, fmt.Errorf("plex: set subtitle stream: %w", err)
+		}
+		subtitleSet = true
+	}
+
+	return audioSet, subtitleSet, nil
+}
+
+func (c *httpPlexMovieClient) plexSetStream(partID int, param string, streamID int) error {
+	u := fmt.Sprintf("%s/library/parts/%d?%s=%d&X-Plex-Token=%s",
+		c.baseURL, partID, param, streamID, url.QueryEscape(c.token))
+	req, err := http.NewRequest(http.MethodPut, u, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("plex: set audio language got status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

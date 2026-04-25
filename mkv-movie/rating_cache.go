@@ -16,12 +16,12 @@ type MovieRatingCache struct {
 }
 
 type movieRatingCacheData struct {
-	Movies          map[string]string `json:"movies"`
-	Applied         map[string]string `json:"applied,omitempty"`          // absFilePath → rating already written
-	TMDBIDs         map[string]string `json:"tmdb_ids,omitempty"`         // "title:YEAR" → tmdbID
-	MetaApplied     map[string]string `json:"meta_applied,omitempty"`     // absFilePath → tmdbID (full metadata written)
-	PlexRatings     map[string]string `json:"plex_ratings,omitempty"`     // tmdbID → rating last pushed to Plex
-	LanguageApplied map[string]string `json:"language_applied,omitempty"` // tmdbID → BCP-47 lang code set in Plex
+	Movies         map[string]string `json:"movies"`
+	Applied        map[string]string `json:"applied,omitempty"`         // absFilePath → rating already written
+	TMDBIDs        map[string]string `json:"tmdb_ids,omitempty"`        // "title:YEAR" → tmdbID
+	MetaApplied    map[string]string `json:"meta_applied,omitempty"`    // absFilePath → tmdbID (full metadata written)
+	PlexRatings    map[string]string `json:"plex_ratings,omitempty"`    // tmdbID → rating last pushed to Plex
+	StreamsApplied map[string]string `json:"streams_applied,omitempty"` // tmdbID → audio lang tag when streams were last set
 }
 
 // LoadMovieRatingCache loads the cache from path. If the file does not exist an
@@ -30,12 +30,12 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	c := &MovieRatingCache{
 		path: path,
 		data: movieRatingCacheData{
-			Movies:          make(map[string]string),
-			Applied:         make(map[string]string),
-			TMDBIDs:         make(map[string]string),
-			MetaApplied:     make(map[string]string),
-			PlexRatings:     make(map[string]string),
-			LanguageApplied: make(map[string]string),
+			Movies:         make(map[string]string),
+			Applied:        make(map[string]string),
+			TMDBIDs:        make(map[string]string),
+			MetaApplied:    make(map[string]string),
+			PlexRatings:    make(map[string]string),
+			StreamsApplied: make(map[string]string),
 		},
 	}
 	b, err := os.ReadFile(path)
@@ -63,8 +63,8 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	if c.data.PlexRatings == nil {
 		c.data.PlexRatings = make(map[string]string)
 	}
-	if c.data.LanguageApplied == nil {
-		c.data.LanguageApplied = make(map[string]string)
+	if c.data.StreamsApplied == nil {
+		c.data.StreamsApplied = make(map[string]string)
 	}
 	return c, nil
 }
@@ -129,18 +129,18 @@ func (c *MovieRatingCache) SetPlexRating(key string, r NZRating) {
 	c.data.PlexRatings[key] = string(r)
 }
 
-// GetLanguageApplied returns the BCP-47 language code previously set in Plex
-// for the given TMDB ID, and whether any value was recorded.
-func (c *MovieRatingCache) GetLanguageApplied(tmdbID string) (string, bool) {
-	lang, ok := c.data.LanguageApplied[tmdbID]
+// GetStreamsApplied returns the audio language tag that was used when Plex
+// streams were last selected for the given TMDB ID, and whether any value was recorded.
+func (c *MovieRatingCache) GetStreamsApplied(tmdbID string) (string, bool) {
+	lang, ok := c.data.StreamsApplied[tmdbID]
 	return lang, ok && lang != ""
 }
 
-// SetLanguageApplied records that the given BCP-47 language code has been set
-// as the preferred audio language in Plex for the movie identified by tmdbID.
-func (c *MovieRatingCache) SetLanguageApplied(tmdbID, lang string) {
+// SetStreamsApplied records that Plex streams were selected for the movie
+// identified by tmdbID using the given audio language tag.
+func (c *MovieRatingCache) SetStreamsApplied(tmdbID, lang string) {
 	if lang != "" {
-		c.data.LanguageApplied[tmdbID] = lang
+		c.data.StreamsApplied[tmdbID] = lang
 	}
 }
 

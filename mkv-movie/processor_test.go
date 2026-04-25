@@ -331,8 +331,10 @@ func (f *fakePlexMovieClient) GetContentRating(_ string) (NZRating, error) {
 }
 
 func (f *fakePlexMovieClient) SetContentRating(_ string, _ NZRating) error { return nil }
-func (f *fakePlexMovieClient) SetAudioLanguage(_ string, _ string) error   { return nil }
-func (f *fakePlexMovieClient) RefreshLibraries() error                     { return nil }
+func (f *fakePlexMovieClient) SetMovieStreams(_ string, _ string) (bool, bool, error) {
+	return false, false, nil
+}
+func (f *fakePlexMovieClient) RefreshLibraries() error { return nil }
 
 func TestResolveMovieRating_BlankAcceptsPlexDefault(t *testing.T) {
 	cache := makeCache(t)

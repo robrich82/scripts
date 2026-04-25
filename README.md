@@ -252,7 +252,7 @@ Flags:
 | Flag | Description |
 |------|-------------|
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values |
-| `--overwrite-language` | Re-apply Plex audio language preference even if already set for a movie |
+| `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--force` | Re-apply all metadata even if already cached |
 
 Output:
@@ -267,7 +267,7 @@ Updated: 8  OK: 42  Skipped: 3  Errors: 0
 - `mkvpropedit` — writes metadata to MKV files (optional; a warning is shown if missing)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
 
-When Plex is configured, after processing each movie the tool pushes the resolved NZ content rating and sets the movie's preferred audio language to the TMDB original language. The language is cached in `movie_rating_cache.json` and only applied once per movie; use `--overwrite-language` to force a re-apply.
+When Plex is configured, after processing each movie the tool pushes the resolved NZ content rating and selects the appropriate audio and subtitle streams: the audio track matching the TMDB original language (e.g. Japanese for anime) and the first non-forced English subtitle. Stream selection is cached in `movie_rating_cache.json` and only applied once per movie; use `--overwrite-streams` to force a re-apply.
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` is available.

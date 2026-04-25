@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -150,43 +151,71 @@ func TestHTTPPlexMovieClient_SetContentRating_SendsCorrectParams(t *testing.T) {
 	}
 }
 
-func TestHTTPPlexMovieClient_SetAudioLanguage_SendsCorrectParams(t *testing.T) {
-	var gotPath string
-	var gotQuery url.Values
-	var gotMethod string
+func streamsMetaJSON(audioLangTag string, audioSelected int, subSelected int) string {
+	return `{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"id":100,"Stream":[` +
+		`{"id":201,"streamType":2,"languageTag":"` + audioLangTag + `","selected":` + fmt.Sprintf("%d", audioSelected) + `},` +
+		`{"id":202,"streamType":2,"languageTag":"en","selected":0},` +
+		`{"id":301,"streamType":3,"languageTag":"en","selected":` + fmt.Sprintf("%d", subSelected) + `},` +
+		`{"id":302,"streamType":3,"languageTag":"en","forced":1}` +
+		`]}]}]}]}}`
+}
+
+func TestHTTPPlexMovieClient_SetMovieStreams_SelectsAudioAndSubtitle(t *testing.T) {
+	var reqs []struct{ method, path string }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotPath = r.URL.Path
-		gotQuery = r.URL.Query()
-		w.WriteHeader(http.StatusOK)
+		reqs = append(reqs, struct{ method, path string }{r.Method, r.URL.Path})
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, streamsMetaJSON("ja", 0, 0))
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
 	}))
 	defer srv.Close()
 
-	c := newHTTPPlexMovieClient(srv.URL, "mytoken")
-	err := c.SetAudioLanguage("42", "ja")
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+	audioSet, subtitleSet, err := c.SetMovieStreams("42", "ja")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if gotMethod != http.MethodPut {
-		t.Errorf("method = %q; want PUT", gotMethod)
+	if !audioSet {
+		t.Error("expected audioSet=true")
 	}
-	if gotPath != "/library/metadata/42/prefs" {
-		t.Errorf("path = %q; want /library/metadata/42/prefs", gotPath)
+	if !subtitleSet {
+		t.Error("expected subtitleSet=true")
 	}
-	if gotQuery.Get("audioLanguage") != "ja" {
-		t.Errorf("audioLanguage = %q; want ja", gotQuery.Get("audioLanguage"))
+	if len(reqs) != 3 {
+		t.Fatalf("expected 3 requests (GET + 2 PUTs), got %d", len(reqs))
+	}
+	if reqs[1].path != "/library/parts/100" || reqs[1].method != http.MethodPut {
+		t.Errorf("req[1] = %+v; want PUT /library/parts/100", reqs[1])
+	}
+	if reqs[2].path != "/library/parts/100" || reqs[2].method != http.MethodPut {
+		t.Errorf("req[2] = %+v; want PUT /library/parts/100", reqs[2])
 	}
 }
 
-func TestHTTPPlexMovieClient_SetAudioLanguage_ErrorOnNon2xx(t *testing.T) {
+func TestHTTPPlexMovieClient_SetMovieStreams_SkipsAlreadySelected(t *testing.T) {
+	var putCount int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
+		if r.Method == http.MethodPut {
+			putCount++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, streamsMetaJSON("ja", 1, 1))
 	}))
 	defer srv.Close()
 
-	c := newHTTPPlexMovieClient(srv.URL, "bad-token")
-	if err := c.SetAudioLanguage("1", "en"); err == nil {
-		t.Error("expected error for non-2xx response")
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+	audioSet, subtitleSet, err := c.SetMovieStreams("42", "ja")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if audioSet || subtitleSet {
+		t.Error("expected no changes when streams already selected")
+	}
+	if putCount != 0 {
+		t.Errorf("expected 0 PUT requests, got %d", putCount)
 	}
 }
 
