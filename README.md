@@ -176,7 +176,7 @@ Config and state files are stored in `%APPDATA%\mkv-audit\` (Windows) or
 
 #### `config.json` (optional)
 
-Define named libraries with their root paths and per-directory IETF overrides.
+Define named libraries with their root paths and per-directory overrides.
 The tool auto-detects which library to use based on the current working directory
 (longest matching path wins).
 
@@ -191,6 +191,10 @@ The tool auto-detects which library to use based on the current working director
         {
           "path": "Agatha Christie's Poirot (1989)",
           "ietf": { "eng": "en-GB" }
+        },
+        {
+          "path": "Star Wars꞉ Visions (2021)",
+          "origin_lang": "jpn"
         }
       ]
     },
@@ -216,7 +220,16 @@ environment, mkv-audit looks up each show/movie on TMDB to determine its
    gets `eng → en-CA`).
 2. `flag-original=1` is set on all tracks whose language matches the original language.
 
-Manual `overrides` entries always take precedence over TMDB-derived values.
+**`overrides[].ietf`** (optional) — overrides the IETF/BCP-47 tag written for one or
+more ISO 639-2 language codes within a specific subdirectory. Useful for regional English
+variants (e.g. `"eng": "en-GB"` for a British show). Manual `ietf` overrides always take
+precedence over TMDB-derived values.
+
+**`overrides[].origin_lang`** (optional) — overrides the TMDB-reported original language
+for a specific subdirectory. Use this when TMDB has the wrong original language for a
+show (e.g. a Japanese anime incorrectly listed as English). Accepts any ISO 639-2/B code
+(`"jpn"`, `"kor"`, `"fre"`, etc.). This affects `flag-original` and track trimming but
+does not alter IETF tag mappings.
 
 Track names containing region keywords (e.g. `British`, `Australian`) also
 trigger automatic IETF overrides and always win over TMDB.

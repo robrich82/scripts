@@ -269,6 +269,60 @@ func TestResolveIETFMap_FileSpecificOverride(t *testing.T) {
 	}
 }
 
+func TestResolveOriginLang_NilLib_UsesOrigin(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "show", "ep01.mkv")
+	origin := OriginInfo{OrigLang: "en", OriginCountry: "US"}
+	got := resolveOriginLang(file, root, nil, origin)
+	if got != "eng" {
+		t.Errorf("expected eng, got %q", got)
+	}
+}
+
+func TestResolveOriginLang_Override_WinsOverTMDB(t *testing.T) {
+	root := t.TempDir()
+	lib := &Library{
+		Name: "TV",
+		Path: root,
+		Overrides: []DirOverride{
+			{Path: "Star Wars Visions (2021)", OriginLang: "jpn"},
+		},
+	}
+	// TMDB says English, but the override corrects it to Japanese.
+	file := filepath.Join(root, "Star Wars Visions (2021)", "S01E01.mkv")
+	origin := OriginInfo{OrigLang: "en", OriginCountry: "US"}
+	got := resolveOriginLang(file, root, lib, origin)
+	if got != "jpn" {
+		t.Errorf("expected jpn from override, got %q", got)
+	}
+}
+
+func TestResolveOriginLang_NoMatch_UsesOrigin(t *testing.T) {
+	root := t.TempDir()
+	lib := &Library{
+		Name: "TV",
+		Path: root,
+		Overrides: []DirOverride{
+			{Path: "Other Show", OriginLang: "jpn"},
+		},
+	}
+	file := filepath.Join(root, "Different Show", "ep.mkv")
+	origin := OriginInfo{OrigLang: "ko", OriginCountry: "KR"}
+	got := resolveOriginLang(file, root, lib, origin)
+	if got != "kor" {
+		t.Errorf("expected kor from TMDB, got %q", got)
+	}
+}
+
+func TestResolveOriginLang_EmptyOrigin(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "show", "ep.mkv")
+	got := resolveOriginLang(file, root, nil, OriginInfo{})
+	if got != "und" {
+		t.Errorf("expected und for empty origin, got %q", got)
+	}
+}
+
 // TestResolveIETFMap_NFDPath verifies that an override path in NFC matches a
 // filesystem path in NFD (and vice-versa) — both normalized to NFC before compare.
 func TestResolveIETFMap_NFDPath(t *testing.T) {

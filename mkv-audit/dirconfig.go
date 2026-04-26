@@ -47,11 +47,12 @@ type Library struct {
 	Overrides []DirOverride `json:"overrides,omitempty"`
 }
 
-// DirOverride specifies IETF tag overrides for files under a given subdirectory.
+// DirOverride specifies per-directory overrides for files under a given subdirectory.
 // Path is relative to the library root and matched case-insensitively.
 type DirOverride struct {
-	Path string            `json:"path"` // relative directory path (case-insensitive prefix match)
-	IETF map[string]string `json:"ietf"` // ISO 639-2/B code → IETF override, e.g. "eng": "en-GB"
+	Path       string            `json:"path"`                  // relative directory path (case-insensitive prefix match)
+	IETF       map[string]string `json:"ietf,omitempty"`        // ISO 639-2/B code → IETF override, e.g. "eng": "en-GB"
+	OriginLang string            `json:"origin_lang,omitempty"` // ISO 639-2/B code overriding TMDB original language, e.g. "jpn"
 }
 
 // loadGlobalConfig reads config.json from the mkv-audit config directory.
@@ -179,6 +180,35 @@ func matchedOverrideIETF(filePath, root string, lib *Library) map[string]string 
 		}
 	}
 	return merged
+}
+
+// resolveOriginLang returns the effective original-language ISO 639-2/B code for
+// a file. Any matching DirOverride.OriginLang wins over the TMDB-derived value,
+// letting you correct cases where TMDB reports the wrong original language
+// (e.g. a Japanese show incorrectly listed as English).
+func resolveOriginLang(filePath, root string, lib *Library, origin OriginInfo) string {
+	if lib != nil {
+		rel, err := filepath.Rel(root, filePath)
+		if err == nil {
+			rel = filepath.ToSlash(rel)
+			var overrideLang string
+			for _, override := range lib.Overrides {
+				if override.OriginLang == "" {
+					continue
+				}
+				overridePath := filepath.ToSlash(override.Path)
+				relLower := strings.ToLower(norm.NFC.String(rel))
+				ovLower := strings.ToLower(norm.NFC.String(overridePath))
+				if relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/") {
+					overrideLang = override.OriginLang
+				}
+			}
+			if overrideLang != "" {
+				return normalizeLanguage(overrideLang)
+			}
+		}
+	}
+	return origin.OrigLangISO()
 }
 
 // contentRootDir returns the first path component of filePath relative to
