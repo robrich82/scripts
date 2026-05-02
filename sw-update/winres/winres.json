@@ -1,0 +1,14 @@
+{
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": {
+        "minimum-os": "win7",
+        "execution-level": "as invoker",
+        "ui-access": false,
+        "auto-elevate": false,
+        "dpi-awareness": "system",
+        "long-path-aware": true
+      }
+    }
+  }
+}
