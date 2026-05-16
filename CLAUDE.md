@@ -11,3 +11,6 @@ When adding a new tool, changing a tool's commands/flags/config, or adding new f
 
 ## Build, Test & Lint
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
+
+## Plex API
+The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it when working with Plex API endpoints, request/response shapes, or authentication.
