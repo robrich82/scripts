@@ -13,7 +13,7 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "preview changes without modifying files")
 	verbose := flag.Bool("verbose", false, "print each file rename")
 	noBlank := flag.Bool("no-blank", false, "skip blank page insertion")
-	noBackup := flag.Bool("no-backup", false, "skip creating .bak file before overwriting")
+	backup := flag.Bool("backup", false, "create a .bak file before overwriting")
 	flag.Parse()
 
 	dir := "."
@@ -43,7 +43,7 @@ func main() {
 			fmt.Printf("%s\n", path)
 		}
 
-		skipped, processErr := processCBZ(path, impliedDryRun, *verbose, *noBlank, *noBackup)
+		skipped, processErr := processCBZ(path, impliedDryRun, *verbose, *noBlank, !*backup)
 		if processErr != nil {
 			if *check {
 				fmt.Printf("%s\n", path)

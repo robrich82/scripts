@@ -79,7 +79,7 @@ cbz-fix --check      # list files that need fixing; exit 1 if any found
 cbz-fix --dry-run    # preview without making changes
 cbz-fix --verbose    # show per-file rename details
 cbz-fix --no-blank   # rename and renumber without inserting a blank page
-cbz-fix --no-backup  # skip creating a .bak file before overwriting
+cbz-fix --backup     # create a .bak file before overwriting
 ```
 
 #### Flags
@@ -88,7 +88,7 @@ cbz-fix --no-backup  # skip creating a .bak file before overwriting
 |------|-------------|
 | `--check` | List files that need processing and exit 1 if any are found (implies `--dry-run`) |
 | `--dry-run` | Preview all changes without modifying any files |
-| `--no-backup` | Skip creating a `.bak` file before overwriting the original |
+| `--backup` | Create a `.bak` file before overwriting the original |
 | `--no-blank` | Skip blank page insertion (rename and renumber only) |
 | `--verbose` | Print each filename mapping for every CBZ processed |
 
