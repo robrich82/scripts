@@ -46,7 +46,7 @@ type pageInfo struct {
 // processCBZ processes a single CBZ file. It returns (true, nil) when the file
 // is already in the expected layout and no work is needed, (false, nil) on
 // success (real or dry-run), and (false, err) on failure.
-func processCBZ(path string, dryRun, verbose, noBlank bool) (skipped bool, err error) {
+func processCBZ(path string, dryRun, verbose, noBlank, noBackup bool) (skipped bool, err error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return false, fmt.Errorf("open: %w", err)
@@ -202,16 +202,18 @@ func processCBZ(path string, dryRun, verbose, noBlank bool) (skipped bool, err e
 	}
 
 	// ── Backup original ────────────────────────────────────────────────────
-	backupPath := path + ".bak"
-	if err := copyFile(path, backupPath); err != nil {
-		os.Remove(tmpPath)
-		return false, fmt.Errorf("backup: %w", err)
+	if !noBackup {
+		backupPath := path + ".bak"
+		if err := copyFile(path, backupPath); err != nil {
+			os.Remove(tmpPath)
+			return false, fmt.Errorf("backup: %w", err)
+		}
 	}
 
 	// ── Replace original with new zip ─────────────────────────────────────
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
-		return false, fmt.Errorf("replace original (backup at %s): %w", backupPath, err)
+		return false, fmt.Errorf("replace original: %w", err)
 	}
 
 	return false, nil
