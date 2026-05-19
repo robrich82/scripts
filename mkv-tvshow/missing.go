@@ -23,6 +23,7 @@ type missingItem struct {
 	season       int
 	episode      int    // 0 for whole-season items
 	episodeCount int    // number of aired episodes (whole-season items only)
+	episodes     []int  // individual episode numbers (whole-season items only)
 	title        string // episode name (episode items only)
 	airDate      string // first aired date for seasons; episode air date for episodes
 	tmdbURL      string
@@ -165,6 +166,10 @@ func (mc *MissingChecker) Run() error {
 
 			if len(missingEps) == len(aired) {
 				// Every aired episode is missing — report the whole season.
+				epNums := make([]int, len(missingEps))
+				for i, ep := range missingEps {
+					epNums[i] = ep.EpisodeNumber
+				}
 				missing = append(missing, missingItem{
 					kind:         "season",
 					showID:       showID,
@@ -172,6 +177,7 @@ func (mc *MissingChecker) Run() error {
 					showName:     showName,
 					season:       localSeason,
 					episodeCount: len(aired),
+					episodes:     epNums,
 					airDate:      aired[0].AirDate,
 					tmdbURL:      fmt.Sprintf("%s/%s/season/%d", tmdbWebBase, effectiveID, effectiveSeason),
 				})
@@ -245,7 +251,7 @@ func (mc *MissingChecker) Run() error {
 			items := missing
 			if ans != "all" {
 				items = nil
-				for _, part := range strings.Split(ans, ",") {
+				for part := range strings.SplitSeq(ans, ",") {
 					part = strings.TrimSpace(part)
 					if lo, hi, ok := parseRange(part, len(missing)); ok {
 						for i := lo; i <= hi; i++ {
@@ -258,8 +264,17 @@ func (mc *MissingChecker) Run() error {
 			}
 			for _, item := range items {
 				if item.kind == "season" {
-					mc.ignoreList.AddSeason(showID, item.season)
-					fmt.Printf("  Ignoring Season %d of %s\n", item.season, showName)
+					// Season 0 (specials) uses per-episode ignores so that newly
+					// added specials still surface in future checks.
+					if item.season == 0 {
+						for _, epNum := range item.episodes {
+							mc.ignoreList.AddEpisode(showID, 0, epNum)
+						}
+						fmt.Printf("  Ignoring %d current specials of %s (new specials will still be reported)\n", len(item.episodes), showName)
+					} else {
+						mc.ignoreList.AddSeason(showID, item.season)
+						fmt.Printf("  Ignoring Season %d of %s\n", item.season, showName)
+					}
 				} else {
 					mc.ignoreList.AddEpisode(showID, item.season, item.episode)
 					fmt.Printf("  Ignoring S%02dE%02d of %s\n", item.season, item.episode, showName)
