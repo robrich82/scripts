@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -66,13 +67,19 @@ type httpTMDBClient struct {
 	client  *http.Client
 }
 
-// bodyReader returns a reader for resp.Body, transparently decompressing gzip
-// when the server sent Content-Encoding: gzip without Go auto-decompressing it.
+// bodyReader returns a reader for resp.Body, transparently decompressing gzip.
+// It checks the Content-Encoding header first, then falls back to detecting
+// the gzip magic bytes (\x1f\x8b) for CDN responses that omit the header.
 func bodyReader(resp *http.Response) (io.Reader, error) {
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		return gzip.NewReader(resp.Body)
 	}
-	return resp.Body, nil
+	br := bufio.NewReader(resp.Body)
+	peek, err := br.Peek(2)
+	if err == nil && len(peek) == 2 && peek[0] == 0x1f && peek[1] == 0x8b {
+		return gzip.NewReader(br)
+	}
+	return br, nil
 }
 
 func newHTTPTMDBClient(apiKey, baseURL string) *httpTMDBClient {
