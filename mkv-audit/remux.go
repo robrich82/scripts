@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -17,7 +18,15 @@ type MKVRemuxer interface {
 // new file containing only the tracks in plan.KeepAudio and plan.KeepSubs, in
 // the desired order, then atomically replaces the original file.
 func (r *realMKVRunner) Remux(filePath string, plan *TrimPlan, info MKVInfo) error {
-	tmpPath := filePath + ".mkv-audit-tmp"
+	// Use a short-named temp file in the same directory so rename works across
+	// the same drive, but the path stays within MAX_PATH even for long filenames.
+	tmpFile, err := os.CreateTemp(filepath.Dir(filePath), "mkv-audit-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	os.Remove(tmpPath) // mkvmerge creates the output file itself
 
 	args := []string{"-o", tmpPath}
 
