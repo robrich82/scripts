@@ -1,8 +1,10 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 )
@@ -64,6 +66,15 @@ type httpTMDBClient struct {
 	client  *http.Client
 }
 
+// bodyReader returns a reader for resp.Body, transparently decompressing gzip
+// when the server sent Content-Encoding: gzip without Go auto-decompressing it.
+func bodyReader(resp *http.Response) (io.Reader, error) {
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		return gzip.NewReader(resp.Body)
+	}
+	return resp.Body, nil
+}
+
 func newHTTPTMDBClient(apiKey, baseURL string) *httpTMDBClient {
 	return &httpTMDBClient{
 		apiKey:  apiKey,
@@ -80,10 +91,14 @@ func (c *httpTMDBClient) SearchTV(query string) ([]ShowResult, error) {
 	}
 	defer resp.Body.Close()
 
+	r, err := bodyReader(resp)
+	if err != nil {
+		return nil, err
+	}
 	var data struct {
 		Results []ShowResult `json:"results"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(r).Decode(&data); err != nil {
 		return nil, err
 	}
 	return data.Results, nil
@@ -97,8 +112,12 @@ func (c *httpTMDBClient) GetShow(id string) (ShowDetails, error) {
 	}
 	defer resp.Body.Close()
 
+	r, err := bodyReader(resp)
+	if err != nil {
+		return ShowDetails{}, err
+	}
 	var d ShowDetails
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+	if err := json.NewDecoder(r).Decode(&d); err != nil {
 		return ShowDetails{}, err
 	}
 	return d, nil
@@ -114,13 +133,17 @@ func (c *httpTMDBClient) GetContentRatings(showID string) (NZRating, error) {
 	}
 	defer resp.Body.Close()
 
+	r, err := bodyReader(resp)
+	if err != nil {
+		return RatingNone, err
+	}
 	var data struct {
 		Results []struct {
 			ISO31661 string `json:"iso_3166_1"`
 			Rating   string `json:"rating"`
 		} `json:"results"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(r).Decode(&data); err != nil {
 		return RatingNone, err
 	}
 	for _, r := range data.Results {
@@ -156,8 +179,12 @@ func (c *httpTMDBClient) GetSeason(showID string, season int) (SeasonResult, err
 	}
 	defer resp.Body.Close()
 
+	r, err := bodyReader(resp)
+	if err != nil {
+		return SeasonResult{}, err
+	}
 	var sr SeasonResult
-	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
+	if err := json.NewDecoder(r).Decode(&sr); err != nil {
 		return SeasonResult{}, err
 	}
 	return sr, nil
