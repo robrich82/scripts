@@ -633,6 +633,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `none` | No local detection; update prompt is shown whenever a new version appears |
 | `exe` | Runs an executable with given args and extracts version from output |
 | `file-version` | Reads the Windows file-version resource from an exe/dll |
+| `filename` | Globs a path pattern and extracts version from the matched filename |
 
 ---
 

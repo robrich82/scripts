@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -35,6 +36,8 @@ func (d *detectorDispatch) InstalledVersion(app App) (string, error) {
 		if err == nil && app.Local.VersionRegex != "" {
 			ver, err = applyVersionRegex(ver, app.Local.VersionRegex)
 		}
+	case "filename":
+		ver, err = detectViaFilename(app.Local)
 	default:
 		return "", fmt.Errorf("unknown local detector type: %s", app.Local.Type)
 	}
@@ -68,6 +71,35 @@ func applyVersionRewrite(ver string, rewrite []string) (string, error) {
 		return "", fmt.Errorf("invalid version_rewrite regex: %w", err)
 	}
 	return re.ReplaceAllString(ver, rewrite[1]), nil
+}
+
+func detectViaFilename(cfg LocalConfig) (string, error) {
+	if cfg.Path == "" {
+		return "", fmt.Errorf("filename detector requires path")
+	}
+	if cfg.VersionRegex == "" {
+		return "", fmt.Errorf("filename detector requires version_regex")
+	}
+	matches, err := filepath.Glob(cfg.Path)
+	if err != nil {
+		return "", fmt.Errorf("filename glob: %w", err)
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no files matched %s", cfg.Path)
+	}
+	re, err := regexp.Compile(cfg.VersionRegex)
+	if err != nil {
+		return "", fmt.Errorf("invalid version_regex: %w", err)
+	}
+	name := filepath.Base(matches[0])
+	m := re.FindStringSubmatch(name)
+	if m == nil {
+		return "", fmt.Errorf("version_regex did not match filename %q", name)
+	}
+	if len(m) > 1 {
+		return strings.TrimSpace(m[1]), nil
+	}
+	return strings.TrimSpace(m[0]), nil
 }
 
 func detectViaExe(cfg LocalConfig) (string, error) {
