@@ -6,11 +6,11 @@ import (
 )
 
 // TrimPlan describes which audio/subtitle tracks to keep and the desired
-// audio track order for a single MKV file. Video tracks are always kept.
+// track order for a single MKV file. Video tracks are always kept.
 type TrimPlan struct {
 	// KeepAudio lists the audio tracks to retain, in the desired output order.
 	KeepAudio []Track
-	// KeepSubs lists the subtitle tracks to retain, in original order.
+	// KeepSubs lists the subtitle tracks to retain, in the desired output order.
 	KeepSubs []Track
 	// RemoveAudio lists the audio tracks that will be dropped.
 	RemoveAudio []Track
@@ -19,11 +19,14 @@ type TrimPlan struct {
 	// AudioReordered is true when KeepAudio is in a different order than the
 	// tracks appeared in the source file.
 	AudioReordered bool
+	// SubsReordered is true when KeepSubs is in a different order than the
+	// tracks appeared in the source file.
+	SubsReordered bool
 	// NeedsChange is true when any removal or reordering is required.
 	NeedsChange bool
 }
 
-// PlanTrim decides which tracks to keep/remove and how to order audio.
+// PlanTrim decides which tracks to keep/remove and how to order audio and subtitles.
 //
 // Audio keep rules (applied when originLang is non-empty and not "und"):
 //   - Keep if lang == originLang (the content's original language)
@@ -35,9 +38,15 @@ type TrimPlan struct {
 //   - Keep if lang == "eng" or lang == "und"
 //   - All other subtitle tracks are removed.
 //
-// Audio ordering (applied when originLang is known and not "eng"):
-//   - Original-language tracks first, then English tracks.
-//   - Within each group the original relative order is preserved.
+// Audio ordering:
+//   - Within each language group the best-quality track (most channels, then
+//     codec priority) is placed first, with commentary/SDH tracks last.
+//   - When originLang is known and non-English, the original-language group
+//     appears before English.
+//
+// Subtitle ordering:
+//   - Within each language group the best main subtitle (by region score and
+//     codec priority) is placed first, with forced/signs tracks last.
 func PlanTrim(info MKVInfo, originLang string) *TrimPlan {
 	plan := &TrimPlan{}
 
@@ -67,7 +76,7 @@ func PlanTrim(info MKVInfo, originLang string) *TrimPlan {
 	}
 	plan.KeepAudio = orderedAudio(keptAudio, originLang)
 
-	// Detect whether ordering actually changed.
+	// Detect whether audio ordering actually changed.
 	if len(plan.KeepAudio) == len(keptAudio) {
 		for i, t := range plan.KeepAudio {
 			if t.ID != keptAudio[i].ID {
@@ -77,44 +86,196 @@ func PlanTrim(info MKVInfo, originLang string) *TrimPlan {
 		}
 	}
 
-	// --- Subtitles: English + und only ---
+	// --- Subtitles: English + und only, with within-lang winner-first reordering ---
+	var keptSubs []Track
 	for _, t := range subTracks {
 		lang := normalizeLanguage(t.Properties.Language)
 		if lang == "eng" || lang == "und" {
-			plan.KeepSubs = append(plan.KeepSubs, t)
+			keptSubs = append(keptSubs, t)
 		} else {
 			plan.RemoveSubs = append(plan.RemoveSubs, t)
 		}
 	}
 
-	plan.NeedsChange = len(plan.RemoveAudio) > 0 || len(plan.RemoveSubs) > 0 || plan.AudioReordered
+	// Group kept subs by language and reorder within each group (winner first).
+	var subGroupOrder []string
+	seenSubGroup := map[string]bool{}
+	subGroups := map[string][]Track{}
+	for _, t := range keptSubs {
+		lang := normalizeLanguage(t.Properties.Language)
+		if !seenSubGroup[lang] {
+			seenSubGroup[lang] = true
+			subGroupOrder = append(subGroupOrder, lang)
+		}
+		subGroups[lang] = append(subGroups[lang], t)
+	}
+	for lang := range subGroups {
+		subGroups[lang] = subGroupWinnerFirst(lang, subGroups[lang])
+	}
+	for _, lang := range subGroupOrder {
+		plan.KeepSubs = append(plan.KeepSubs, subGroups[lang]...)
+	}
+
+	// Detect whether subtitle ordering actually changed.
+	for i, t := range plan.KeepSubs {
+		if t.ID != keptSubs[i].ID {
+			plan.SubsReordered = true
+			break
+		}
+	}
+
+	plan.NeedsChange = len(plan.RemoveAudio) > 0 || len(plan.RemoveSubs) > 0 || plan.AudioReordered || plan.SubsReordered
 	return plan
 }
 
-// orderedAudio returns audio tracks with original-language tracks first and
-// English tracks second. Within each group the original relative order is
-// preserved. When originLang is empty, "und", or "eng" the input slice is
-// returned unchanged.
-func orderedAudio(tracks []Track, originLang string) []Track {
-	if originLang == "" || originLang == "und" || originLang == "eng" {
-		return tracks
+// audioGroupWinnerFirst returns a copy of group with the best-quality audio
+// track moved to the front. Commentary and SDH tracks are placed after clean
+// tracks. Within clean or flagged tracks the original relative order is kept.
+// Selection criteria mirror AnalyzeFile: most channels, then codec priority.
+func audioGroupWinnerFirst(group []Track) []Track {
+	if len(group) <= 1 {
+		return group
 	}
-	var origGroup, engGroup, otherGroup []Track
-	for _, t := range tracks {
-		lang := normalizeLanguage(t.Properties.Language)
-		switch lang {
-		case originLang:
-			origGroup = append(origGroup, t)
-		case "eng":
-			engGroup = append(engGroup, t)
-		default:
-			otherGroup = append(otherGroup, t)
+	var clean, flagged []Track
+	for _, t := range group {
+		p := t.Properties
+		if !containsAny(p.TrackName, forbiddenKeywords) && !p.HearingImpaired && !p.Commentary {
+			clean = append(clean, t)
+		} else {
+			flagged = append(flagged, t)
 		}
 	}
+	candidates := clean
+	if len(candidates) == 0 {
+		candidates = group
+		flagged = nil
+	}
+
+	winnerPos := 0
+	for j := 1; j < len(candidates); j++ {
+		wp, cp := candidates[winnerPos].Properties, candidates[j].Properties
+		if cp.AudioChannels > wp.AudioChannels ||
+			(cp.AudioChannels == wp.AudioChannels &&
+				codecPriorityAudio[cp.CodecID] > codecPriorityAudio[wp.CodecID]) {
+			winnerPos = j
+		}
+	}
+
+	out := make([]Track, 0, len(group))
+	out = append(out, candidates[winnerPos])
+	for j, t := range candidates {
+		if j != winnerPos {
+			out = append(out, t)
+		}
+	}
+	out = append(out, flagged...)
+	return out
+}
+
+// subGroupWinnerFirst returns a copy of group with the best main subtitle track
+// moved to the front, followed by other main tracks, then forced/signs tracks.
+// Selection criteria mirror AnalyzeFile: region score (English only), then codec priority.
+func subGroupWinnerFirst(lang string, group []Track) []Track {
+	if len(group) <= 1 {
+		return group
+	}
+	var mainCands, forced []Track
+	for _, t := range group {
+		if containsAny(t.Properties.TrackName, forcedKeywords) {
+			forced = append(forced, t)
+		} else if !containsAny(t.Properties.TrackName, forbiddenKeywords) &&
+			!t.Properties.HearingImpaired && !t.Properties.Commentary {
+			mainCands = append(mainCands, t)
+		}
+	}
+	// Fallback: if no clean main candidates, use all non-forced tracks.
+	if len(mainCands) == 0 {
+		for _, t := range group {
+			if !containsAny(t.Properties.TrackName, forcedKeywords) {
+				mainCands = append(mainCands, t)
+			}
+		}
+	}
+	if len(mainCands) == 0 {
+		return group // only forced tracks
+	}
+
+	winnerPos := 0
+	for j := 1; j < len(mainCands); j++ {
+		wp, cp := mainCands[winnerPos].Properties, mainCands[j].Properties
+		wScore, cScore := 1, 1
+		if lang == "eng" {
+			wScore = engSubtitleRegionScore(wp.TrackName)
+			cScore = engSubtitleRegionScore(cp.TrackName)
+		}
+		if cScore > wScore || (cScore == wScore && subPriority[cp.CodecID] > subPriority[wp.CodecID]) {
+			winnerPos = j
+		}
+	}
+
+	out := make([]Track, 0, len(group))
+	out = append(out, mainCands[winnerPos])
+	for j, t := range mainCands {
+		if j != winnerPos {
+			out = append(out, t)
+		}
+	}
+	out = append(out, forced...)
+	return out
+}
+
+// orderedAudio returns audio tracks in the desired playback order:
+//   - Within each language group the best-quality track (by audioGroupWinnerFirst)
+//     is placed first.
+//   - When originLang is known and non-English, the original-language group
+//     appears before English, which appears before other languages.
+//   - When originLang is empty, "und", or "eng", groups retain their original
+//     appearance order from the source file.
+func orderedAudio(tracks []Track, originLang string) []Track {
+	if len(tracks) == 0 {
+		return tracks
+	}
+
+	// Group by language, recording first-appearance order.
+	var groupOrder []string
+	seenGroup := map[string]bool{}
+	groups := map[string][]Track{}
+	for _, t := range tracks {
+		lang := normalizeLanguage(t.Properties.Language)
+		if !seenGroup[lang] {
+			seenGroup[lang] = true
+			groupOrder = append(groupOrder, lang)
+		}
+		groups[lang] = append(groups[lang], t)
+	}
+
+	// Within each group, move the best-quality track to the front.
+	for lang := range groups {
+		groups[lang] = audioGroupWinnerFirst(groups[lang])
+	}
+
+	// When original language is known and non-English, reorder groups:
+	// original-language first, then English, then others.
+	if originLang != "" && originLang != "und" && originLang != "eng" {
+		var newOrder []string
+		if seenGroup[originLang] {
+			newOrder = append(newOrder, originLang)
+		}
+		if seenGroup["eng"] {
+			newOrder = append(newOrder, "eng")
+		}
+		for _, lang := range groupOrder {
+			if lang != originLang && lang != "eng" {
+				newOrder = append(newOrder, lang)
+			}
+		}
+		groupOrder = newOrder
+	}
+
 	out := make([]Track, 0, len(tracks))
-	out = append(out, origGroup...)
-	out = append(out, engGroup...)
-	out = append(out, otherGroup...)
+	for _, lang := range groupOrder {
+		out = append(out, groups[lang]...)
+	}
 	return out
 }
 
@@ -144,6 +305,16 @@ func TrimSummary(plan *TrimPlan) string {
 	if plan.AudioReordered {
 		sb.WriteString("  Reorder audio: ")
 		for i, t := range plan.KeepAudio {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(TrackDesc(t))
+		}
+		sb.WriteString("\n")
+	}
+	if plan.SubsReordered {
+		sb.WriteString("  Reorder subs:  ")
+		for i, t := range plan.KeepSubs {
 			if i > 0 {
 				sb.WriteString(", ")
 			}

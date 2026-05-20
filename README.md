@@ -117,7 +117,7 @@ Normalizes MKV/MKA track metadata in bulk:
 - `flag-hearing-impaired` on SDH/CC tracks; `flag-commentary` on commentary tracks
 - `flag-original` on tracks whose language matches the content's original language (requires TMDB)
 - Track ordering by codec quality (e.g. TrueHD before AC3)
-- **Track trimming** (with prompt): removes audio tracks not in the original or English language, removes non-English subtitles, and reorders audio so original-language tracks come first
+- **Track trimming** (with prompt): removes audio tracks not in the original or English language, removes non-English subtitles, and reorders tracks so that the best-quality track for each language is physically first (for Plex compatibility)
 
 ### Usage
 
@@ -167,7 +167,10 @@ removed or reordered. For each such file it prints what will change and prompts:
 Keep rules:
 - **Audio**: retain tracks in the original language and English; all others are removed. If the original language is unknown (no TMDB lookup), all audio is kept.
 - **Subtitles**: retain English and undetermined (`und`) tracks only.
-- **Audio order**: original-language tracks first, then English.
+
+Ordering rules (Plex uses the first track for a language, ignoring the default flag):
+- **Audio order**: within each language group, the best-quality track (most channels, then codec priority) is placed first, with commentary/SDH tracks last. When the original language is non-English, the original-language group precedes English.
+- **Subtitle order**: within each language group, the best main subtitle (by region score and codec priority) is placed first, with forced/signs tracks last.
 
 Tracks with undetermined (`und`) language are always kept.
 
