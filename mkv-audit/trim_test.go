@@ -163,6 +163,20 @@ func TestSubGroupWinnerFirst_EnglishRegionScore(t *testing.T) {
 	}
 }
 
+func TestSubGroupWinnerFirst_ForcedWinnerFirst(t *testing.T) {
+	// Two forced tracks; the one with higher codec priority should come first.
+	group := []Track{
+		subTrack(0, "eng", "S_TEXT/ASS", "", true, false),    // main
+		namedSubTrack(1, "eng", "S_HDMV/PGS", "Signs/Songs"), // forced, lower priority
+		namedSubTrack(2, "eng", "S_TEXT/ASS", "Signs/Songs"), // forced, higher priority
+	}
+	got := subGroupWinnerFirst("eng", group)
+	// main first (id=0), then forced winner (id=2), then other forced (id=1)
+	if !intsEqual(trackIDs(got), []int{0, 2, 1}) {
+		t.Errorf("want [0,2,1] got %v", trackIDs(got))
+	}
+}
+
 // --- orderedAudio ---
 
 func TestOrderedAudio_Empty(t *testing.T) {

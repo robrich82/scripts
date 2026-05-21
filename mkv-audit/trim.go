@@ -213,6 +213,30 @@ func subGroupWinnerFirst(lang string, group []Track) []Track {
 		}
 	}
 
+	// Within forced tracks, move the best one first (same region+codec criteria).
+	if len(forced) > 1 {
+		forcedWinner := 0
+		for j := 1; j < len(forced); j++ {
+			wp, cp := forced[forcedWinner].Properties, forced[j].Properties
+			wScore, cScore := 1, 1
+			if lang == "eng" {
+				wScore = engSubtitleRegionScore(wp.TrackName)
+				cScore = engSubtitleRegionScore(cp.TrackName)
+			}
+			if cScore > wScore || (cScore == wScore && subPriority[cp.CodecID] > subPriority[wp.CodecID]) {
+				forcedWinner = j
+			}
+		}
+		sortedForced := make([]Track, 0, len(forced))
+		sortedForced = append(sortedForced, forced[forcedWinner])
+		for j, t := range forced {
+			if j != forcedWinner {
+				sortedForced = append(sortedForced, t)
+			}
+		}
+		forced = sortedForced
+	}
+
 	out := make([]Track, 0, len(group))
 	out = append(out, mainCands[winnerPos])
 	for j, t := range mainCands {
