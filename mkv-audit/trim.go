@@ -200,30 +200,33 @@ func subGroupWinnerFirst(lang string, group []Track) []Track {
 		return group // only forced tracks
 	}
 
-	winnerPos := 0
-	for j := 1; j < len(mainCands); j++ {
-		wp, cp := mainCands[winnerPos].Properties, mainCands[j].Properties
+	subWinnerBetter := func(wp, cp TrackProperties, lang string) bool {
 		wScore, cScore := 1, 1
 		if lang == "eng" {
 			wScore = engSubtitleRegionScore(wp.TrackName)
 			cScore = engSubtitleRegionScore(cp.TrackName)
 		}
-		if cScore > wScore || (cScore == wScore && subPriority[cp.CodecID] > subPriority[wp.CodecID]) {
+		if cScore != wScore {
+			return cScore > wScore
+		}
+		if subPriority[cp.CodecID] != subPriority[wp.CodecID] {
+			return subPriority[cp.CodecID] > subPriority[wp.CodecID]
+		}
+		return cp.DefaultTrack && !wp.DefaultTrack
+	}
+
+	winnerPos := 0
+	for j := 1; j < len(mainCands); j++ {
+		if subWinnerBetter(mainCands[winnerPos].Properties, mainCands[j].Properties, lang) {
 			winnerPos = j
 		}
 	}
 
-	// Within forced tracks, move the best one first (same region+codec criteria).
+	// Within forced tracks, move the best one first (same region+codec+default criteria).
 	if len(forced) > 1 {
 		forcedWinner := 0
 		for j := 1; j < len(forced); j++ {
-			wp, cp := forced[forcedWinner].Properties, forced[j].Properties
-			wScore, cScore := 1, 1
-			if lang == "eng" {
-				wScore = engSubtitleRegionScore(wp.TrackName)
-				cScore = engSubtitleRegionScore(cp.TrackName)
-			}
-			if cScore > wScore || (cScore == wScore && subPriority[cp.CodecID] > subPriority[wp.CodecID]) {
+			if subWinnerBetter(forced[forcedWinner].Properties, forced[j].Properties, lang) {
 				forcedWinner = j
 			}
 		}

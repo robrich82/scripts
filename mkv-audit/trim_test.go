@@ -177,6 +177,23 @@ func TestSubGroupWinnerFirst_ForcedWinnerFirst(t *testing.T) {
 	}
 }
 
+func TestSubGroupWinnerFirst_ForcedWinnerByDefault(t *testing.T) {
+	// Three forced tracks with identical codec; the one with DefaultTrack=true should win.
+	t1 := namedSubTrack(1, "jpn", "S_HDMV/PGS", "Signs/Songs")
+	t2 := namedSubTrack(2, "jpn", "S_HDMV/PGS", "Signs/Songs")
+	t3 := namedSubTrack(3, "jpn", "S_HDMV/PGS", "Signs/Songs")
+	t3.Properties.DefaultTrack = true
+	group := []Track{
+		subTrack(0, "jpn", "S_TEXT/ASS", "", true, false), // main
+		t1, t2, t3,
+	}
+	got := subGroupWinnerFirst("jpn", group)
+	// main first, then forced winner (id=3, the default one), then id=1, id=2
+	if got[1].ID != 3 {
+		t.Errorf("want forced winner id=3 (DefaultTrack), got id=%d; order=%v", got[1].ID, trackIDs(got))
+	}
+}
+
 // --- orderedAudio ---
 
 func TestOrderedAudio_Empty(t *testing.T) {
