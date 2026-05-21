@@ -269,6 +269,8 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
+| `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
+| `--all` | Process all files regardless of modification date |
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values |
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--force` | Re-apply all metadata even if already cached |
