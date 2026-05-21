@@ -366,6 +366,21 @@ func TestAnalyzeFile_ForcedSubLanguageInferred_IsStable(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFile_TiedSubs_PreservesExistingDefault(t *testing.T) {
+	// Two equally-scored ASS English subtitle tracks: the second is currently
+	// default. The tiebreaker should keep the existing default rather than
+	// switching to the first-in-order track.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "eng", "A_AAC", 2, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "English [English Names]", false, false),
+		subTrack(2, "eng", "S_TEXT/ASS", "English [Japanese Names]", true, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if hasEdit(res.Edits, "flag-default=0") || hasEdit(res.Edits, "flag-default=1") {
+		t.Errorf("tied tracks: existing default should be preserved, no flag changes; edits: %v", res.Edits)
+	}
+}
+
 func TestAnalyzeFile_NoEditsWhenAlreadyCorrect(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
 		videoTrack(0, "eng"),

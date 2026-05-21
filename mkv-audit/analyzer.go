@@ -445,6 +445,27 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 					winnerIdx = i
 				}
 			}
+			// Tiebreaker: if the winner is not already the default, preserve the
+			// existing default when it scores equally — avoids unnecessary churn
+			// between tracks that are otherwise indistinguishable.
+			if !tracks[winnerIdx].Properties.DefaultTrack {
+				for _, i := range mainCands {
+					if !tracks[i].Properties.DefaultTrack {
+						continue
+					}
+					wp := tracks[winnerIdx].Properties
+					ip := tracks[i].Properties
+					wScore, iScore := 1, 1
+					if lang == "eng" {
+						wScore = engSubtitleRegionScore(wp.TrackName)
+						iScore = engSubtitleRegionScore(ip.TrackName)
+					}
+					if iScore == wScore && subPriority[ip.CodecID] == subPriority[wp.CodecID] {
+						winnerIdx = i
+						break
+					}
+				}
+			}
 			if boolToInt(tracks[winnerIdx].Properties.DefaultTrack) != 1 ||
 				boolToInt(tracks[winnerIdx].Properties.ForcedTrack) != 0 {
 				res.Edits = append(res.Edits, trackEdit(tracks[winnerIdx].ID,
