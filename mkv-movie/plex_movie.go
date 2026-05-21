@@ -187,13 +187,8 @@ func plexMovieItemHasTMDBID(guidRaw json.RawMessage, guidLower, wantGUID, tmdbID
 }
 
 func plexMovieGuidMatchesTMDBID(s, tmdbID string) bool {
-	target := "://" + tmdbID
-	idx := strings.Index(s, target)
-	if idx == -1 {
-		return false
-	}
-	rest := s[idx+len(target):]
-	return rest == "" || rest[0] < '0' || rest[0] > '9'
+	_, rest, ok := strings.Cut(s, "://"+tmdbID)
+	return ok && (rest == "" || rest[0] < '0' || rest[0] > '9')
 }
 
 // FindMovieByTitle implements PlexMovieClient.
@@ -362,11 +357,12 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (a
 					Part []struct {
 						ID     int `json:"id"`
 						Stream []struct {
-							ID          int      `json:"id"`
-							StreamType  int      `json:"streamType"`
-							Selected    flexBool `json:"selected"`
-							Forced      flexBool `json:"forced"`
-							LanguageTag string   `json:"languageTag"`
+							ID           int      `json:"id"`
+							StreamType   int      `json:"streamType"`
+							Selected     flexBool `json:"selected"`
+							Forced       flexBool `json:"forced"`
+							LanguageTag  string   `json:"languageTag"`
+							LanguageCode string   `json:"languageCode"`
 						} `json:"Stream"`
 					} `json:"Part"`
 				} `json:"Media"`
@@ -387,7 +383,7 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (a
 	var audioID int
 	audioOK := false
 	for _, s := range part.Stream {
-		if s.StreamType != 2 || s.LanguageTag != audioLangTag {
+		if s.StreamType != 2 || !streamLangMatches(s.LanguageTag, s.LanguageCode, audioLangTag) {
 			continue
 		}
 		if bool(s.Selected) {
@@ -412,7 +408,7 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (a
 	var subtitleID int
 	subtitleOK := false
 	for _, s := range part.Stream {
-		if s.StreamType != 3 || s.LanguageTag != "en" || bool(s.Forced) {
+		if s.StreamType != 3 || !streamLangMatches(s.LanguageTag, s.LanguageCode, "en") || bool(s.Forced) {
 			continue
 		}
 		if bool(s.Selected) {
@@ -431,6 +427,26 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (a
 	}
 
 	return audioSet, subtitleSet, nil
+}
+
+// iso6392ToTag maps ISO 639-2 three-letter codes to ISO 639-1 two-letter BCP 47 tags.
+var iso6392ToTag = map[string]string{
+	"eng": "en", "jpn": "ja", "kor": "ko",
+	"zho": "zh", "chi": "zh",
+	"fre": "fr", "fra": "fr",
+	"ger": "de", "deu": "de",
+	"spa": "es", "ita": "it", "por": "pt",
+	"rus": "ru", "ara": "ar",
+}
+
+// streamLangMatches reports whether a Plex stream matches the given ISO 639-1
+// tag. It checks languageTag (BCP 47, possibly with a region suffix like "ja-JP")
+// first, then falls back to languageCode (ISO 639-2) via iso6392ToTag.
+func streamLangMatches(languageTag, languageCode, want string) bool {
+	if languageTag != "" {
+		return languageTag == want || strings.HasPrefix(languageTag, want+"-")
+	}
+	return iso6392ToTag[languageCode] == want
 }
 
 func (c *httpPlexMovieClient) plexSetStream(partID int, param string, streamID int) error {
