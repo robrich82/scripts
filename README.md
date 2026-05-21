@@ -321,6 +321,13 @@ mkv-music
 
 The tool prompts for manual confirmation when a match is ambiguous.
 
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
+| `--all` | Process all files regardless of modification date |
+
 ### Configuration
 
 Config is stored in `%APPDATA%\mkv-music\` (Windows) or
@@ -373,6 +380,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--cutoff-date YYYY-MM-DD` | today | Only process files modified on or after this date |
+| `--all` | false | Process all files regardless of modification date |
 | `--prompt-each` | false | Prompt before processing each cached show (default: process all) |
 | `--ratings-only` | false | Only update NZ content ratings; skip all other metadata |
 | `--overwrite-ratings` | false | Re-fetch all ratings, ignoring cached values |

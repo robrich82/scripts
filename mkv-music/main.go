@@ -19,19 +19,22 @@ func configDir() (string, error) {
 
 func main() {
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
+	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
 	flag.Parse()
 
 	var cutoff time.Time
-	if *cutoffDateStr != "" {
-		var err error
-		cutoff, err = time.Parse("2006-01-02", *cutoffDateStr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid --cutoff-date %q, expected YYYY-MM-DD\n", *cutoffDateStr)
-			os.Exit(1)
+	if !*allFlag {
+		if *cutoffDateStr != "" {
+			var err error
+			cutoff, err = time.Parse("2006-01-02", *cutoffDateStr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: invalid --cutoff-date %q, expected YYYY-MM-DD\n", *cutoffDateStr)
+				os.Exit(1)
+			}
+		} else {
+			now := time.Now()
+			cutoff = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 		}
-	} else {
-		now := time.Now()
-		cutoff = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	}
 
 	root, err := os.Getwd()
