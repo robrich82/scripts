@@ -216,6 +216,48 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
+	// --- 1b. Infer language for "und" Signs/Songs subtitle tracks ---
+	// When all other subtitle tracks in the file share a single language, assign
+	// that language to any "und" Signs/Songs/Forced subtitle whose name doesn't
+	// contain a language keyword prefix (handled above by inferForcedSubLanguage).
+	{
+		subLangs := map[string]bool{}
+		for _, t := range tracks {
+			if t.Type == "subtitles" && t.Properties.Language != "und" {
+				subLangs[t.Properties.Language] = true
+			}
+		}
+		if len(subLangs) == 1 {
+			var inferredLang string
+			for k := range subLangs {
+				inferredLang = k
+			}
+			effMap := ietfMap
+			if opts.IETFMap != nil {
+				effMap = opts.IETFMap
+			}
+			for i := range tracks {
+				props := &tracks[i].Properties
+				if tracks[i].Type != "subtitles" || props.Language != "und" || !containsAny(props.TrackName, forcedKeywords) {
+					continue
+				}
+				normIETF := effectiveIETFTag(inferredLang, opts)
+				normIETF = applyRegionKeyword(normIETF, props.TrackName)
+				_, hasIETFMapping := effMap[inferredLang]
+				pairs := []string{"language", inferredLang}
+				if hasIETFMapping {
+					pairs = append(pairs, "language-ietf", normIETF)
+				}
+				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, pairs...)...)
+				props.Language = inferredLang
+				if hasIETFMapping {
+					props.LanguageIETF = normIETF
+				}
+				res.LocalFixes.Lang++
+			}
+		}
+	}
+
 	// --- 2. Hearing-impaired and commentary flag detection ---
 	// Set flag-hearing-impaired / flag-commentary on tracks whose name signals
 	// their purpose but whose MKV flag is not yet set. Tracks that already

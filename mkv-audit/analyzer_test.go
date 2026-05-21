@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -273,6 +274,70 @@ func TestAnalyzeFile_ForcedSubLanguageInferredFromName(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFile_UndForcedSubInheritsSubtitleLang(t *testing.T) {
+	// "und" Signs/Songs track should inherit "eng" from the other subtitle tracks
+	// when all other subtitles share a single language.
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "jpn", "A_DTS", 6, true),
+		audioTrack(1, "eng", "A_TRUEHD", 6, false),
+		subTrack(2, "eng", "S_TEXT/ASS", "Full Subtitles", true, false),
+		subTrack(3, "eng", "S_HDMV/PGS", "Full Subtitles [PGS]", false, false),
+		subTrack(4, "und", "S_TEXT/ASS", "Signs/Songs [Q]", false, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if !hasEdit(res.Edits, "language=eng") {
+		t.Errorf("expected und Signs/Songs track to inherit language=eng; edits: %v", res.Edits)
+	}
+	if !hasEdit(res.Edits, "flag-forced=1") {
+		t.Errorf("expected Signs/Songs track to get flag-forced=1 after lang inference; edits: %v", res.Edits)
+	}
+}
+
+func TestAnalyzeFile_UndForcedSubAmbiguous_NoInference(t *testing.T) {
+	// When subtitles exist in multiple languages, "und" Signs/Songs track
+	// should NOT have a language assigned (ambiguous).
+	info := MKVInfo{Tracks: []Track{
+		audioTrack(0, "jpn", "A_DTS", 6, true),
+		subTrack(1, "eng", "S_TEXT/ASS", "Full Subtitles", true, false),
+		subTrack(2, "jpn", "S_TEXT/ASS", "Full Subtitles [JPN]", false, false),
+		subTrack(3, "und", "S_TEXT/ASS", "Signs/Songs", false, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	for _, e := range res.Edits {
+		if strings.Contains(e, "track:4") && strings.Contains(e, "language=") {
+			t.Errorf("should not infer language for und Signs/Songs when subtitles are in multiple languages; edits: %v", res.Edits)
+		}
+	}
+}
+
+func TestAnalyzeFile_UndForcedSubInherited_IsStable(t *testing.T) {
+	// After inheritance (eng), a second pass should produce no further edits.
+	info := MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "audio", Properties: TrackProperties{
+			Language: "jpn", LanguageIETF: "ja-JP", CodecID: "A_DTS", AudioChannels: 6, DefaultTrack: true,
+		}},
+		{ID: 1, Type: "audio", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "A_TRUEHD", AudioChannels: 6, DefaultTrack: true,
+		}},
+		{ID: 2, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "S_TEXT/ASS",
+			TrackName: "Full Subtitles", DefaultTrack: true, ForcedTrack: false,
+		}},
+		{ID: 3, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "S_HDMV/PGS",
+			TrackName: "Full Subtitles [PGS]", DefaultTrack: false, ForcedTrack: false,
+		}},
+		{ID: 4, Type: "subtitles", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en-US", CodecID: "S_TEXT/ASS",
+			TrackName: "Signs/Songs [Q]", DefaultTrack: false, ForcedTrack: true,
+		}},
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if len(res.Edits) != 0 {
+		t.Errorf("expected no edits on already-correct file; edits: %v", res.Edits)
+	}
+}
+
 func TestAnalyzeFile_ForcedSubLanguageInferred_IsStable(t *testing.T) {
 	// After language correction (eng) and flag normalisation, a second pass
 	// should produce no further edits. All LanguageIETF fields are pre-set
@@ -421,11 +486,8 @@ func TestAnalyzeFile_EnSubRegionPriority(t *testing.T) {
 	found := false
 	for i, e := range res.Edits {
 		if e == "track:5" {
-			for _, f := range res.Edits[i:] {
-				if f == "flag-default=1" {
-					found = true
-					break
-				}
+			if slices.Contains(res.Edits[i:], "flag-default=1") {
+				found = true
 			}
 		}
 	}
