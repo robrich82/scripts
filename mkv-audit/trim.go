@@ -212,6 +212,9 @@ func subGroupWinnerFirst(lang string, group []Track) []Track {
 		if subPriority[cp.CodecID] != subPriority[wp.CodecID] {
 			return subPriority[cp.CodecID] > subPriority[wp.CodecID]
 		}
+		if cp.ForcedTrack != wp.ForcedTrack {
+			return cp.ForcedTrack
+		}
 		return cp.DefaultTrack && !wp.DefaultTrack
 	}
 
