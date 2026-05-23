@@ -27,7 +27,8 @@ func (f *fakePrompter) Ask(_ string) (string, error) {
 type fakeTagger struct {
 	calls     []taggerCall
 	err       error
-	tagsMatch bool // return value for TagsMatchMKV; default false → copy always runs
+	tagsMatch bool      // return value for TagsMatchMKV; default false → copy always runs
+	mkvDate   time.Time // when non-zero, MKVDate returns this date
 }
 
 type taggerCall struct {
@@ -46,8 +47,23 @@ func (f *fakeTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error
 }
 
 func (f *fakeTagger) MKVDate(mkvPath string) (time.Time, bool) {
+	if !f.mkvDate.IsZero() {
+		return f.mkvDate, true
+	}
 	return time.Time{}, false
 }
+
+// fakeTimer records SetTimes calls without touching the filesystem.
+type fakeTimer struct {
+	setTimesCalls []time.Time
+}
+
+func (f *fakeTimer) CreationTimeNeedsUpdate(_ string, _ int64) bool { return false }
+func (f *fakeTimer) SetTimes(_ string, t time.Time) error {
+	f.setTimesCalls = append(f.setTimesCalls, t)
+	return nil
+}
+func (f *fakeTimer) SetCreationTime(_ string, _ time.Time) error { return nil }
 
 // --- buildAudioData tests ---
 
@@ -514,6 +530,64 @@ func TestProcessVideo_Ignore_MatchesAfterPattern_CopiesTags(t *testing.T) {
 	}
 	if ft.calls[0].mkvPath != filepath.Join(dir, mkvFile) {
 		t.Errorf("mkvPath = %q, want %q", ft.calls[0].mkvPath, filepath.Join(dir, mkvFile))
+	}
+}
+
+func TestProcessVideo_AlreadyUpToDate_NoTimerCall(t *testing.T) {
+	dir := t.TempDir()
+	mkvFile := "Artist - Song - Song-video.mkv"
+	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+
+	ft := &fakeTagger{tagsMatch: true, mkvDate: time.Date(2020, 3, 15, 0, 0, 0, 0, time.UTC)}
+	timer := &fakeTimer{}
+	p := NewProcessor(dir, "", &fakePrompter{})
+	p.tagger = ft
+	p.timer = timer
+
+	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
+	audioPaths := map[string]string{"Artist - Song": "Artist - Song.flac"}
+
+	p.processVideo(dir, mkvFile, audioData, audioPaths)
+
+	if len(timer.setTimesCalls) != 0 {
+		t.Errorf("expected no SetTimes calls when tags already up to date, got %d", len(timer.setTimesCalls))
+	}
+}
+
+func TestProcessVideo_CopiesTags_MtimeRestoredToOriginal(t *testing.T) {
+	dir := t.TempDir()
+	mkvFile := "Artist - Song - Song-video.mkv"
+	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+
+	origMtime := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+	os.Chtimes(filepath.Join(dir, mkvFile), origMtime, origMtime)
+
+	// audioDate is different from origMtime to distinguish the restore call.
+	audioDate := time.Date(2020, 3, 15, 0, 0, 0, 0, time.UTC)
+	ft := &fakeTagger{mkvDate: audioDate}
+	timer := &fakeTimer{}
+	p := NewProcessor(dir, "", &fakePrompter{})
+	p.tagger = ft
+	p.timer = timer
+
+	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
+	audioPaths := map[string]string{"Artist - Song": "Artist - Song.flac"}
+
+	p.processVideo(dir, mkvFile, audioData, audioPaths)
+
+	if len(ft.calls) != 1 {
+		t.Fatalf("expected 1 CopyTagsToMKV call, got %d", len(ft.calls))
+	}
+	// syncTimestamps writes the audio date; the restore call then writes the
+	// original mtime.  Verify the final SetTimes is NOT the audio date.
+	if len(timer.setTimesCalls) < 2 {
+		t.Fatalf("expected at least 2 SetTimes calls (syncTimestamps + restore), got %d", len(timer.setTimesCalls))
+	}
+	last := timer.setTimesCalls[len(timer.setTimesCalls)-1]
+	if last.Equal(audioDate) {
+		t.Errorf("mtime left as audio date %v; expected original mtime to be restored", audioDate)
 	}
 }
 
