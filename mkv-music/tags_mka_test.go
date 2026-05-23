@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -127,6 +128,90 @@ func TestBuildHeaderTitle_MissingParts(t *testing.T) {
 	got = buildHeaderTitle(AudioTags{}, "")
 	if got != "" {
 		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestBuildTagsXML_ReplayGainPreserved(t *testing.T) {
+	tags := AudioTags{
+		Title:       "You Oughta Know",
+		Artist:      "Alanis Morissette",
+		AlbumArtist: "Alanis Morissette",
+		Album:       "Jagged Little Pill",
+		TrackNum:    2,
+		Date:        "1995",
+		Genre:       "Alternative Rock",
+	}
+	extra50 := map[string]string{
+		"REPLAYGAIN_ALBUM_GAIN": "-6.50 dB",
+		"REPLAYGAIN_ALBUM_PEAK": "0.987654",
+		"R128_ALBUM_GAIN":       "-650",
+	}
+	extra30 := map[string]string{
+		"REPLAYGAIN_TRACK_GAIN": "-7.20 dB",
+		"REPLAYGAIN_TRACK_PEAK": "0.999000",
+		"R128_TRACK_GAIN":       "-720",
+	}
+
+	xml := buildTagsXML(tags, extra50, extra30)
+
+	for _, want := range []string{
+		"REPLAYGAIN_ALBUM_GAIN", "-6.50 dB",
+		"REPLAYGAIN_ALBUM_PEAK", "0.987654",
+		"R128_ALBUM_GAIN", "-650",
+		"REPLAYGAIN_TRACK_GAIN", "-7.20 dB",
+		"REPLAYGAIN_TRACK_PEAK", "0.999000",
+		"R128_TRACK_GAIN", "-720",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("buildTagsXML output missing %q", want)
+		}
+	}
+}
+
+func TestBuildTagsXML_NilExtraMaps(t *testing.T) {
+	tags := AudioTags{Title: "Song", Album: "Album"}
+	// Should not panic with nil extra maps.
+	xml := buildTagsXML(tags, nil, nil)
+	if !strings.Contains(xml, "Song") {
+		t.Errorf("expected title in output, got %q", xml)
+	}
+}
+
+func TestParseMKVTagsXML_ReplayGainRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	xmlPath := filepath.Join(dir, "tags.xml")
+	content := `<Tags>
+  <Tag>
+    <Targets><TargetTypeValue>50</TargetTypeValue></Targets>
+    <Simple><Name>TITLE</Name><String>Some Album</String></Simple>
+    <Simple><Name>REPLAYGAIN_ALBUM_GAIN</Name><String>-6.50 dB</String></Simple>
+    <Simple><Name>R128_ALBUM_GAIN</Name><String>-650</String></Simple>
+  </Tag>
+  <Tag>
+    <Targets><TargetTypeValue>30</TargetTypeValue></Targets>
+    <Simple><Name>TITLE</Name><String>Some Track</String></Simple>
+    <Simple><Name>REPLAYGAIN_TRACK_GAIN</Name><String>-7.20 dB</String></Simple>
+    <Simple><Name>R128_TRACK_GAIN</Name><String>-720</String></Simple>
+  </Tag>
+</Tags>`
+	os.WriteFile(xmlPath, []byte(content), 0644)
+
+	lvl50, lvl30 := parseMKVTagsXML(xmlPath)
+
+	checks := []struct{ level, key, want string }{
+		{"50", "REPLAYGAIN_ALBUM_GAIN", "-6.50 dB"},
+		{"50", "R128_ALBUM_GAIN", "-650"},
+		{"30", "REPLAYGAIN_TRACK_GAIN", "-7.20 dB"},
+		{"30", "R128_TRACK_GAIN", "-720"},
+	}
+	for _, c := range checks {
+		m := lvl50
+		if c.level == "30" {
+			m = lvl30
+		}
+		if got := m[c.key]; got != c.want {
+			t.Errorf("lvl%s[%s] = %q, want %q", c.level, c.key, got, c.want)
+		}
 	}
 }
 

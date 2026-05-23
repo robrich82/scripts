@@ -234,3 +234,35 @@ func readAudioTagsFromMKA(path, mkvextractPath, mkvmergePath string) (AudioTags,
 		CoverMIME:   coverMIME,
 	}, nil
 }
+
+// extractReplayGainTags reads existing ReplayGain/R128 tags from mkvPath and
+// returns them keyed by level. Returns empty maps on any error.
+func extractReplayGainTags(mkvextractPath, mkvPath string) (extra50, extra30 map[string]string) {
+	extra50 = make(map[string]string)
+	extra30 = make(map[string]string)
+
+	tmp, err := os.CreateTemp("", "mkv-existing-tags-*.xml")
+	if err != nil {
+		return
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+
+	cmd := exec.Command(mkvextractPath, mkvPath, "tags", tmp.Name())
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.Run() //nolint:errcheck
+
+	lvl50, lvl30 := parseMKVTagsXML(tmp.Name())
+	for _, k := range replayGainKeys50 {
+		if v := lvl50[k]; v != "" {
+			extra50[k] = v
+		}
+	}
+	for _, k := range replayGainKeys30 {
+		if v := lvl30[k]; v != "" {
+			extra30[k] = v
+		}
+	}
+	return
+}

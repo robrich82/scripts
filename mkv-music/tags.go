@@ -139,14 +139,24 @@ func parseAudioDate(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// replayGainKeys50 and replayGainKeys30 are album- and track-level ReplayGain/R128
+// tag names preserved when rewriting MKV tags. These are not copied from the source
+// audio file because loudness normalisation is performed separately on the video.
+var (
+	replayGainKeys50 = []string{"REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_ALBUM_PEAK", "R128_ALBUM_GAIN"}
+	replayGainKeys30 = []string{"REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_TRACK_PEAK", "R128_TRACK_GAIN"}
+)
+
 // buildTagsXML returns a Matroska tags XML document for the given AudioTags.
+// extra50 and extra30 are additional tags (e.g. ReplayGain) to append at the
+// album and track levels respectively; pass nil maps to omit.
 //
 // Per the Matroska spec, TITLE at TargetTypeValue=50 means the album/collection
 // title, and TITLE at TargetTypeValue=30 means the track title.  ARTIST at
 // level 50 is the album artist; ARTIST at level 30 is the track artist.
 // Using a single level-50 block with track-level fields causes tag viewers
 // (e.g. Mp3tag) to misread them.
-func buildTagsXML(t AudioTags) string {
+func buildTagsXML(t AudioTags, extra50, extra30 map[string]string) string {
 	simple := func(name, value string) string {
 		return "<Simple><Name>" + name + "</Name><String>" + xmlEscape(value) + "</String></Simple>"
 	}
@@ -170,6 +180,17 @@ func buildTagsXML(t AudioTags) string {
 	addTo(&lvl30, "ARTIST", t.Artist)
 	if t.TrackNum > 0 {
 		addTo(&lvl30, "PART_NUMBER", strconv.Itoa(t.TrackNum))
+	}
+
+	for _, k := range replayGainKeys50 {
+		if v := extra50[k]; v != "" {
+			addTo(&lvl50, k, v)
+		}
+	}
+	for _, k := range replayGainKeys30 {
+		if v := extra30[k]; v != "" {
+			addTo(&lvl30, k, v)
+		}
 	}
 
 	var sb strings.Builder
@@ -320,13 +341,17 @@ func (t *realMusicVideoTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix str
 		tags.Title = tags.Title + " " + titleSuffix
 	}
 
+	// Preserve ReplayGain tags already on the MKV — they differ from the source
+	// audio file because loudness normalisation is run separately on the video.
+	extra50, extra30 := extractReplayGainTags(t.mkvextractPath, mkvPath)
+
 	// Write tags XML to a temp file.
 	xmlFile, err := os.CreateTemp("", "mkv-musicvideo-tags-*.xml")
 	if err != nil {
 		return fmt.Errorf("create temp tags file: %w", err)
 	}
 	defer os.Remove(xmlFile.Name())
-	if _, err := xmlFile.WriteString(buildTagsXML(tags)); err != nil {
+	if _, err := xmlFile.WriteString(buildTagsXML(tags, extra50, extra30)); err != nil {
 		xmlFile.Close()
 		return fmt.Errorf("write tags xml: %w", err)
 	}
