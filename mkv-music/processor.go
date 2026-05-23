@@ -291,25 +291,15 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 	}
 	if match, err := p.tagger.TagsMatchMKV(audioFullPath, mkvPath, titleSuffix); err == nil && match {
 		fmt.Printf("    [TAG] Already up to date: %s\n", filepath.Base(mkvPath))
+		p.syncTimestamps(mkvPath)
 		return
 	}
-	// Snapshot mtime before mkvpropedit writes to the file.  syncTimestamps sets
-	// the file's ctime to the audio release date (for library sorting) and also
-	// sets mtime.  We restore mtime to the pre-tag value afterwards so that the
-	// cutoff filter on subsequent runs uses the file's actual modification date
-	// rather than the audio release date (which may be newer than the cutoff).
-	origStat, origErr := os.Stat(mkvPath)
 	if err := p.tagger.CopyTagsToMKV(audioFullPath, mkvPath, titleSuffix); err != nil {
 		fmt.Printf("    [WARN] tag copy failed for %s: %v\n", filepath.Base(mkvPath), err)
 	} else {
 		fmt.Printf("    [TAG] Copied tags from %s\n", audioFilename)
 		p.markArtistTouched(videoDir)
 		p.syncTimestamps(mkvPath)
-		if p.timer != nil && origErr == nil {
-			if err := p.timer.SetTimes(mkvPath, origStat.ModTime()); err != nil {
-				fmt.Printf("    [WARN] restore mtime failed for %s: %v\n", filepath.Base(mkvPath), err)
-			}
-		}
 	}
 }
 
