@@ -54,6 +54,19 @@ func (r *RetryList) Len() int {
 	return len(r.data)
 }
 
+// CleanStalePaths removes entries for file paths that no longer exist on disk.
+// Returns the number of entries removed.
+func (r *RetryList) CleanStalePaths() int {
+	removed := 0
+	for path := range r.data {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			delete(r.data, path)
+			removed++
+		}
+	}
+	return removed
+}
+
 // Save persists the retry list to disk as a JSON array.
 func (r *RetryList) Save() error {
 	paths := make([]string, 0, len(r.data))

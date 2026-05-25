@@ -14,7 +14,13 @@ func main() {
 	verboseFlag := flag.Bool("verbose", false, "print planned mkvpropedit edits before applying")
 	cutoffDateStr := flag.String("cutoff-date", "", "only process files modified on or after this date (YYYY-MM-DD); defaults to today")
 	allFlag := flag.Bool("all", false, "process all files regardless of modification date")
+	cleanFlag := flag.Bool("clean", false, "remove stale directory-override entries from config for paths that no longer exist, then exit")
 	flag.Parse()
+
+	if *cleanFlag {
+		runClean()
+		return
+	}
 
 	var cutoffDate time.Time
 	if !*allFlag {

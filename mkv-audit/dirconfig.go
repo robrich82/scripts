@@ -76,6 +76,19 @@ func loadGlobalConfig() (*GlobalConfig, error) {
 	return &cfg, nil
 }
 
+// saveGlobalConfig writes cfg to config.json in the mkv-audit config directory.
+func saveGlobalConfig(cfg *GlobalConfig) error {
+	cfgDir, err := configDir()
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0644)
+}
+
 // detectLibrary finds the library whose Path is a prefix of cwd.
 // If multiple libraries match, the most specific (longest path) wins.
 // Returns nil if no library matches.

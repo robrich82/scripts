@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // ShowCache is a persistent map from show folder name to confirmed TMDB show ID.
@@ -63,6 +64,20 @@ func (c *ShowCache) AllEntries() map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// CleanStaleFolders removes entries whose folder name does not exist as a
+// directory under mediaDir. Returns the TMDB IDs that were removed so callers
+// can purge dependent caches.
+func (c *ShowCache) CleanStaleFolders(mediaDir string) []string {
+	var removedIDs []string
+	for folder, id := range c.data {
+		if _, err := os.Stat(filepath.Join(mediaDir, folder)); os.IsNotExist(err) {
+			removedIDs = append(removedIDs, id)
+			delete(c.data, folder)
+		}
+	}
+	return removedIDs
 }
 
 // Save writes the cache to disk as indented JSON.

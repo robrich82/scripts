@@ -20,6 +20,7 @@ func configDir() (string, error) {
 func main() {
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
+	cleanFlag := flag.Bool("clean", false, "Remove stale file-pattern entries for video files that no longer exist, then exit.")
 	flag.Parse()
 
 	var cutoff time.Time
@@ -41,6 +42,11 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
 		os.Exit(1)
+	}
+
+	if *cleanFlag {
+		runClean(root)
+		return
 	}
 
 	cfgDir, err := configDir()

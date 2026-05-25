@@ -20,6 +20,7 @@ Commands:
   disable <name>     Disable an app without removing it
   mark <name>        Mark current latest as seen/installed (skip next update prompt)
   import <file>      Bootstrap config from a Netscape bookmarks HTML file
+  clean              Remove state entries for apps no longer in the config
 
 Environment:
   GITHUB_TOKEN       GitHub personal access token
@@ -56,6 +57,8 @@ func main() {
 		err = cmdMark(args)
 	case "import":
 		err = cmdImport(args)
+	case "clean":
+		err = cmdClean(args)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n%s", cmd, usage)
 		os.Exit(1)

@@ -146,6 +146,7 @@ Scanned: 120  Fixed: 14  Failed: 0  LangFixes: 9  FlagFixes: 8
 | `--verbose` | Print planned mkvpropedit edits before applying |
 | `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
 | `--all` | Process all files regardless of modification date |
+| `--clean` | Remove stale `overrides` entries from `config.json` for directories that no longer exist on disk, then exit |
 
 ### Track trimming
 
@@ -274,6 +275,7 @@ Flags:
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values |
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--force` | Re-apply all metadata even if already cached |
+| `--clean` | Remove cache entries for movie files that no longer exist on disk, then exit |
 
 Output:
 
@@ -327,6 +329,7 @@ The tool prompts for manual confirmation when a match is ambiguous.
 |------|-------------|
 | `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
 | `--all` | Process all files regardless of modification date |
+| `--clean` | Remove file-specific pattern entries from `ignore_patterns.json` for video files that no longer exist under the current directory, then exit |
 
 ### Configuration
 
@@ -388,6 +391,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--language-only` | false | Apply Plex audio language preference for all cached shows without scanning files |
 | `--missing` | false | Check for missing episodes (see below) |
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
+| `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit |
 
 #### Output
 
@@ -606,6 +610,7 @@ sw-update enable <name>      # Enable an app for checking
 sw-update disable <name>     # Disable an app without removing it
 sw-update mark <name>        # Mark current latest as seen (skip next update prompt)
 sw-update import <file>      # Bootstrap config from a Netscape bookmarks HTML file
+sw-update clean              # Remove state entries for apps no longer in the config
 ```
 
 ### Environment

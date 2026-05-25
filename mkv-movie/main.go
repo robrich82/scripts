@@ -14,7 +14,13 @@ func main() {
 	force := flag.Bool("force", false, "Re-apply all metadata even if already cached.")
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
+	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, then exit.")
 	flag.Parse()
+
+	if *cleanFlag {
+		runClean()
+		return
+	}
 
 	var cutoff time.Time
 	if !*allFlag {

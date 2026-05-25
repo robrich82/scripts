@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // RatingCacheData is the JSON-serialisable body of rating_cache.json.
@@ -80,6 +81,52 @@ func (c *RatingCache) IsApplied(filePath string, r NZRating) bool {
 // MarkApplied records that filePath has had its rating tags successfully written.
 func (c *RatingCache) MarkApplied(filePath string, r NZRating) {
 	c.data.Applied[filePath] = string(r)
+}
+
+// CleanStalePaths removes Applied entries whose file paths no longer exist on disk.
+// Returns the number of entries removed.
+func (c *RatingCache) CleanStalePaths() int {
+	removed := 0
+	for path := range c.data.Applied {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			delete(c.data.Applied, path)
+			removed++
+		}
+	}
+	return removed
+}
+
+// CleanStaleShowIDs removes Shows, Episodes, LanguageApplied, and PlexKeys
+// entries whose TMDB show ID is not present in knownIDs.
+// Returns the number of entries removed.
+func (c *RatingCache) CleanStaleShowIDs(knownIDs map[string]bool) int {
+	removed := 0
+	for id := range c.data.Shows {
+		if !knownIDs[id] {
+			delete(c.data.Shows, id)
+			removed++
+		}
+	}
+	for key := range c.data.Episodes {
+		showID, _, _ := strings.Cut(key, "/")
+		if !knownIDs[showID] {
+			delete(c.data.Episodes, key)
+			removed++
+		}
+	}
+	for id := range c.data.LanguageApplied {
+		if !knownIDs[id] {
+			delete(c.data.LanguageApplied, id)
+			removed++
+		}
+	}
+	for id := range c.data.PlexKeys {
+		if !knownIDs[id] {
+			delete(c.data.PlexKeys, id)
+			removed++
+		}
+	}
+	return removed
 }
 
 // Save writes the cache to disk as JSON.

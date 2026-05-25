@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // MissingIgnoreList persists items that the user chose to ignore during
@@ -83,6 +84,33 @@ func (l *MissingIgnoreList) IsEpisodeIgnored(showID string, season, episode int)
 	return l.Shows[showID] ||
 		l.Seasons[fmt.Sprintf("%s/S%02d", showID, season)] ||
 		l.Episodes[fmt.Sprintf("%s/S%02dE%02d", showID, season, episode)]
+}
+
+// CleanStaleShowIDs removes Shows, Seasons, and Episodes entries whose TMDB
+// show ID is not present in knownIDs. Returns the number of entries removed.
+func (l *MissingIgnoreList) CleanStaleShowIDs(knownIDs map[string]bool) int {
+	removed := 0
+	for id := range l.Shows {
+		if !knownIDs[id] {
+			delete(l.Shows, id)
+			removed++
+		}
+	}
+	for key := range l.Seasons {
+		showID, _, _ := strings.Cut(key, "/")
+		if !knownIDs[showID] {
+			delete(l.Seasons, key)
+			removed++
+		}
+	}
+	for key := range l.Episodes {
+		showID, _, _ := strings.Cut(key, "/")
+		if !knownIDs[showID] {
+			delete(l.Episodes, key)
+			removed++
+		}
+	}
+	return removed
 }
 
 // Save writes the ignore list to disk as indented JSON.

@@ -50,6 +50,19 @@ func (tc *TitleCache) Set(filePath, title string) {
 	tc.Titles[filePath] = title
 }
 
+// CleanStalePaths removes entries whose file paths no longer exist on disk.
+// Returns the number of entries removed.
+func (tc *TitleCache) CleanStalePaths() int {
+	removed := 0
+	for path := range tc.Titles {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			delete(tc.Titles, path)
+			removed++
+		}
+	}
+	return removed
+}
+
 // Save writes the cache to disk.
 func (tc *TitleCache) Save() error {
 	if tc == nil {
