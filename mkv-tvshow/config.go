@@ -33,10 +33,34 @@ type ExtraEntry struct {
 
 // ManualEntry holds per-show TMDB ID overrides and episode-level remappings.
 type ManualEntry struct {
-	Overrides      map[string]SeasonOverride `json:"overrides"`       // keyed by season key e.g. "S02"
-	Mapping        map[string]EpisodePair    `json:"mapping"`         // keyed by "S01E03" -> [tmdbSeason, tmdbEpisode]
-	Extras         map[string]ExtraEntry     `json:"extras"`          // keyed by filename stem (no .mkv extension)
-	TitleOverrides map[string]string         `json:"title_overrides"` // keyed by "S01E03" -> correct FS-safe title
+	Overrides      map[string]SeasonOverride `json:"overrides"`                 // keyed by season key e.g. "S02"
+	Mapping        map[string]EpisodePair    `json:"mapping"`                   // keyed by "S01E03" -> [tmdbSeason, tmdbEpisode]
+	Extras         map[string]ExtraEntry     `json:"extras"`                    // keyed by filename stem (no .mkv extension)
+	TitleOverrides map[string]string         `json:"title_overrides"`           // keyed by "S01E03" -> correct FS-safe title
+	Deband         *bool                     `json:"deband,omitempty"`          // show-level deband flag
+	DebandSeasons  map[string]bool           `json:"deband_seasons,omitempty"`  // e.g. "S01": true
+	DebandEpisodes map[string]bool           `json:"deband_episodes,omitempty"` // e.g. "S01E05": true
+}
+
+// resolveDeband returns whether debanding should be applied for the given
+// season and episode keys. Episode-level takes precedence over season-level,
+// which takes precedence over the show-level flag. seasonKey format: "S01";
+// episodeKey format: "S01E05". Pass an empty episodeKey for extras lookups.
+func (e ManualEntry) resolveDeband(seasonKey, episodeKey string) bool {
+	if episodeKey != "" {
+		if v, ok := e.DebandEpisodes[episodeKey]; ok {
+			return v
+		}
+	}
+	if seasonKey != "" {
+		if v, ok := e.DebandSeasons[seasonKey]; ok {
+			return v
+		}
+	}
+	if e.Deband != nil {
+		return *e.Deband
+	}
+	return false
 }
 
 // LoadManualData reads per-show TMDB corrections from a JSON file.

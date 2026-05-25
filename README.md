@@ -490,6 +490,14 @@ your files:
   - `season` — selects the season poster to attach.
   - `episode` — optional. When set, fetches the air date, title, and summary
     from that TMDB episode (season × episode) instead of using a manual `date`.
+- `deband` — show-level boolean. When `true`, writes a `DEBAND=true` MKV tag
+  to every episode in the show so that mpv (or another player) can apply
+  debanding automatically. Omitting or setting to `false` removes the tag.
+- `deband_seasons` — season-level map (e.g. `"S01": true`). Overrides the
+  show-level `deband` flag for specific seasons.
+- `deband_episodes` — episode-level map (e.g. `"S01E26": true`). Overrides
+  both `deband` and `deband_seasons` for individual episodes. Priority order:
+  episode → season → show.
 
   If the filename ends with an OP/ED/NCOP/NCED suffix (with optional number,
   e.g. `NCOP1`, `ED2`), it is automatically detected and the MKV title becomes

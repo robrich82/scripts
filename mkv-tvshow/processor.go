@@ -251,7 +251,8 @@ func (p *Processor) Run() Stats {
 						}
 
 						rating := p.resolveEpisodeRating(showID, showName, filePath, extra.Season, 0)
-						if p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating) {
+						deband := entry.resolveDeband(fmt.Sprintf("S%02d", extra.Season), "")
+						if p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating, deband) {
 							if stampDate != "" {
 								p.retryList.Remove(filePath)
 							} else {
@@ -343,7 +344,14 @@ func (p *Processor) Run() Stats {
 			if cached, ok := p.titleCache.Get(filePath); ok {
 				title = cached
 			}
-			if p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating) {
+			var deband bool
+			if entry, ok := p.manualData[showFolder]; ok {
+				deband = entry.resolveDeband(
+					fmt.Sprintf("S%02d", sNum),
+					fmt.Sprintf("S%02dE%02d", sNum, eNum),
+				)
+			}
+			if p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating, deband) {
 				if stampDate != "" {
 					p.retryList.Remove(filePath)
 				} else {
@@ -512,7 +520,7 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 // the poster as a cover attachment, and sets filesystem timestamps to the
 // episode air date. dateStr is written to MKV metadata; stampDate (which may
 // differ or be empty) is used for filesystem timestamps.
-func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDate, posterURL string, rating NZRating) bool {
+func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDate, posterURL string, rating NZRating, deband bool) bool {
 	if !p.mkv.Available() {
 		fmt.Println("  [!] mkvpropedit not found in PATH")
 		return false
@@ -525,7 +533,7 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 
 	// Write tags XML to a temp file.
 	var tagsPath string
-	if xml := buildTagXML(summary, tmdbID, dateStr, rating); xml != "" {
+	if xml := buildTagXML(summary, tmdbID, dateStr, rating, deband); xml != "" {
 		var err error
 		tagsPath, err = p.mkv.WriteTempTags(xml)
 		if err == nil {

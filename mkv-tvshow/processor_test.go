@@ -282,7 +282,7 @@ func TestNormalizeFilename_ThreeEpisodes_Renamed(t *testing.T) {
 func TestApplyMKV_MkvpropeditNotFound(t *testing.T) {
 	runner := &fakeMKVRunner{avail: false}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyMKV("file.mkv", "Title", "", "id", "", "", "", RatingNone)
+	ok := p.applyMKV("file.mkv", "Title", "", "id", "", "", "", RatingNone, false)
 	if ok {
 		t.Error("expected false when mkvpropedit not available")
 	}
@@ -298,7 +298,7 @@ func TestApplyMKV_Success_ArgsIncludeEditAndTitle(t *testing.T) {
 		tagsPath:    "tags.xml",
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "My Title", "", "", "", "", "", RatingNone)
+	p.applyMKV("show.mkv", "My Title", "", "", "", "", "", RatingNone, false)
 
 	if len(runner.calls) == 0 {
 		t.Fatal("expected Apply to be called")
@@ -312,7 +312,7 @@ func TestApplyMKV_Success_ArgsIncludeEditAndTitle(t *testing.T) {
 func TestApplyMKV_WithDate_SetsDateArg(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "2021-05-10T00:00:00Z", "", "", RatingNone)
+	p.applyMKV("show.mkv", "T", "", "", "2021-05-10T00:00:00Z", "", "", RatingNone, false)
 
 	args := runner.calls[0].args
 	if !containsAll(args, "--set", "date=2021-05-10T00:00:00Z") {
@@ -329,7 +329,7 @@ func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 		posterOK:    true,
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone)
+	p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone, false)
 
 	args := runner.calls[0].args
 	if !containsAll(args, "--add-attachment", "poster.jpg") {
@@ -340,7 +340,7 @@ func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 func TestApplyMKV_NoPosterURL_NoAttachment(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone)
+	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone, false)
 
 	args := runner.calls[0].args
 	for _, a := range args {
@@ -358,7 +358,7 @@ func TestApplyMKV_ExistingJPEG_DeleteArgAdded(t *testing.T) {
 		tagsPath:    "t.xml",
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone)
+	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone, false)
 
 	args := runner.calls[0].args
 	if !containsAll(args, "--delete-attachment", "mime-type:image/jpeg") {
@@ -370,7 +370,7 @@ func TestApplyMKV_Success_SetsTimestamps(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyRC: 0, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
-	p.applyMKV("show.mkv", "T", "", "", "2020-06-15T00:00:00Z", "2020-06-15T00:00:00Z", "", RatingNone)
+	p.applyMKV("show.mkv", "T", "", "", "2020-06-15T00:00:00Z", "2020-06-15T00:00:00Z", "", RatingNone, false)
 
 	want := time.Date(2020, 6, 15, 0, 0, 0, 0, time.Local)
 	if len(timer.setTimesCalls) == 0 {
@@ -391,7 +391,7 @@ func TestApplyMKV_Failure_NoTimestamps(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyRC: 1, applyResult: "Error"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
-	p.applyMKV("show.mkv", "T", "", "", "2020-01-01T00:00:00Z", "2020-01-01T00:00:00Z", "", RatingNone)
+	p.applyMKV("show.mkv", "T", "", "", "2020-01-01T00:00:00Z", "2020-01-01T00:00:00Z", "", RatingNone, false)
 
 	if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
 		t.Error("timestamps should not be set on failure")

@@ -56,7 +56,7 @@ func (f *fakeMKVRunner) Cleanup(paths ...string) {
 // --- buildTagXML tests ---
 
 func TestBuildTagXML_WithDate(t *testing.T) {
-	xml := buildTagXML("", "", "2020-04-01T00:00:00Z", RatingNone)
+	xml := buildTagXML("", "", "2020-04-01T00:00:00Z", RatingNone, false)
 	if !strings.Contains(xml, "<Simple><Name>DATE</Name><String>2020-04-01</String></Simple>") {
 		t.Errorf("missing DATE node in: %s", xml)
 	}
@@ -66,42 +66,42 @@ func TestBuildTagXML_WithDate(t *testing.T) {
 }
 
 func TestBuildTagXML_WithSummary(t *testing.T) {
-	xml := buildTagXML("Episode summary", "", "", RatingNone)
+	xml := buildTagXML("Episode summary", "", "", RatingNone, false)
 	if !strings.Contains(xml, "<Simple><Name>SUMMARY</Name><String>Episode summary</String></Simple>") {
 		t.Errorf("missing SUMMARY node in: %s", xml)
 	}
 }
 
 func TestBuildTagXML_WithTMDBID(t *testing.T) {
-	xml := buildTagXML("", "12345", "", RatingNone)
+	xml := buildTagXML("", "12345", "", RatingNone, false)
 	if !strings.Contains(xml, "<Simple><Name>TMDB_ID</Name><String>12345</String></Simple>") {
 		t.Errorf("missing TMDB_ID node in: %s", xml)
 	}
 }
 
 func TestBuildTagXML_NoDate_ExcludesDateNodes(t *testing.T) {
-	xml := buildTagXML("summary", "id", "", RatingNone)
+	xml := buildTagXML("summary", "id", "", RatingNone, false)
 	if strings.Contains(xml, "DATE") || strings.Contains(xml, "YEAR") {
 		t.Errorf("unexpected DATE/YEAR in: %s", xml)
 	}
 }
 
 func TestBuildTagXML_AllEmpty_ReturnsEmpty(t *testing.T) {
-	xml := buildTagXML("", "", "", RatingNone)
+	xml := buildTagXML("", "", "", RatingNone, false)
 	if xml != "" {
 		t.Errorf("expected empty string, got: %s", xml)
 	}
 }
 
 func TestBuildTagXML_WrappedInTagsElement(t *testing.T) {
-	xml := buildTagXML("s", "", "", RatingNone)
+	xml := buildTagXML("s", "", "", RatingNone, false)
 	if !strings.HasPrefix(xml, "<Tags>") || !strings.HasSuffix(xml, "</Tags>") {
 		t.Errorf("expected <Tags>...</Tags> wrapper, got: %s", xml)
 	}
 }
 
 func TestBuildTagXML_WithRating_IncludesLAWRatingNestedInCountry(t *testing.T) {
-	xml := buildTagXML("s", "123", "", RatingR16)
+	xml := buildTagXML("s", "123", "", RatingR16, false)
 	// LAW_RATING must be nested *inside* COUNTRY (COUNTRY is a nesting tag per Matroska spec).
 	want := "<Simple><Name>COUNTRY</Name><String>NZ</String>" +
 		"<Simple><Name>LAW_RATING</Name><String>R16</String></Simple></Simple>"
@@ -111,8 +111,71 @@ func TestBuildTagXML_WithRating_IncludesLAWRatingNestedInCountry(t *testing.T) {
 }
 
 func TestBuildTagXML_NoRating_OmitsLAWRating(t *testing.T) {
-	xml := buildTagXML("s", "123", "", RatingNone)
+	xml := buildTagXML("s", "123", "", RatingNone, false)
 	if strings.Contains(xml, "LAW_RATING") || strings.Contains(xml, "COUNTRY") {
 		t.Errorf("unexpected LAW_RATING/COUNTRY in: %s", xml)
+	}
+}
+
+func TestBuildTagXML_WithDeband_IncludesDEBAND(t *testing.T) {
+	xml := buildTagXML("s", "123", "", RatingNone, true)
+	if !strings.Contains(xml, "<Simple><Name>DEBAND</Name><String>true</String></Simple>") {
+		t.Errorf("expected DEBAND node in: %s", xml)
+	}
+}
+
+func TestBuildTagXML_DebandFalse_OmitsDEBAND(t *testing.T) {
+	xml := buildTagXML("s", "123", "", RatingNone, false)
+	if strings.Contains(xml, "DEBAND") {
+		t.Errorf("unexpected DEBAND node in: %s", xml)
+	}
+}
+
+// --- ManualEntry.resolveDeband ---
+
+func TestResolveDeband_ShowLevel(t *testing.T) {
+	tr := true
+	e := ManualEntry{Deband: &tr}
+	if !e.resolveDeband("S01", "S01E05") {
+		t.Error("expected true from show-level deband")
+	}
+}
+
+func TestResolveDeband_SeasonOverridesShow(t *testing.T) {
+	tr := true
+	e := ManualEntry{
+		Deband:        &tr,
+		DebandSeasons: map[string]bool{"S01": false},
+	}
+	if e.resolveDeband("S01", "S01E05") {
+		t.Error("season-level false should override show-level true")
+	}
+}
+
+func TestResolveDeband_EpisodeOverridesSeason(t *testing.T) {
+	e := ManualEntry{
+		DebandSeasons:  map[string]bool{"S01": false},
+		DebandEpisodes: map[string]bool{"S01E05": true},
+	}
+	if !e.resolveDeband("S01", "S01E05") {
+		t.Error("episode-level true should override season-level false")
+	}
+}
+
+func TestResolveDeband_NotConfigured_ReturnsFalse(t *testing.T) {
+	e := ManualEntry{}
+	if e.resolveDeband("S01", "S01E01") {
+		t.Error("expected false when nothing configured")
+	}
+}
+
+func TestResolveDeband_EmptyEpisodeKey_SkipsEpisodeLookup(t *testing.T) {
+	e := ManualEntry{
+		DebandEpisodes: map[string]bool{"S01E05": true},
+		DebandSeasons:  map[string]bool{"S01": false},
+	}
+	// Empty episode key — should use season level, not episode level.
+	if e.resolveDeband("S01", "") {
+		t.Error("expected season-level false when episode key is empty")
 	}
 }
