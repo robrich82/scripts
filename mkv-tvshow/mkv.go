@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -32,18 +33,23 @@ type MKVRunner interface {
 	DownloadPoster(url string) (string, bool)
 	// Cleanup removes the given temp file paths, ignoring errors.
 	Cleanup(paths ...string)
+	// ExtractTags returns the global Matroska tags XML for filePath.
+	// Returns ("", nil) when the file has no tags.
+	ExtractTags(filePath string) (string, error)
 }
 
 // realMKVRunner is the production MKVRunner that calls mkvpropedit and mkvmerge.
 type realMKVRunner struct {
 	mkvpropedit string // path found via exec.LookPath
 	mkvmerge    string // path found via exec.LookPath (empty if not found)
+	mkvextract  string // path found via exec.LookPath (empty if not found)
 }
 
 func newRealMKVRunner() *realMKVRunner {
 	r := &realMKVRunner{}
 	r.mkvpropedit, _ = exec.LookPath("mkvpropedit")
 	r.mkvmerge, _ = exec.LookPath("mkvmerge")
+	r.mkvextract, _ = exec.LookPath("mkvextract")
 	return r
 }
 
@@ -129,6 +135,58 @@ func (r *realMKVRunner) Cleanup(paths ...string) {
 			os.Remove(p)
 		}
 	}
+}
+
+func (r *realMKVRunner) ExtractTags(filePath string) (string, error) {
+	if r.mkvextract == "" {
+		return "", fmt.Errorf("mkvextract not found in PATH")
+	}
+	f, err := os.CreateTemp("", "mkv-tags-*.xml")
+	if err != nil {
+		return "", err
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+
+	out, err := exec.Command(r.mkvextract, filePath, "tags", name).CombinedOutput()
+	if err != nil {
+		// Exit code 1 means warnings only — check output for actual errors.
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() > 1 {
+			return "", fmt.Errorf("mkvextract: %w: %s", err, out)
+		}
+	}
+	data, err := os.ReadFile(name)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// debandElementRe matches a DEBAND Simple element in Matroska tag XML.
+// The (?s) flag lets . match newlines so it handles both the compact format
+// written by buildTagXML and the indented format produced by mkvextract.
+var debandElementRe = regexp.MustCompile(`(?s)<Simple>\s*<Name>\s*DEBAND\s*</Name>\s*<String>[^<]*</String>\s*</Simple>`)
+
+// updateDebandInXML adds or removes the DEBAND tag element from a Matroska
+// tags XML string. If deband is false the element is removed; if true it is
+// inserted before the closing </Tag> tag. When the XML has no existing <Tag>
+// block and deband is true, a minimal tag block is returned.
+func updateDebandInXML(tagsXML string, deband bool) string {
+	updated := debandElementRe.ReplaceAllString(tagsXML, "")
+
+	if !deband {
+		return updated
+	}
+
+	const debandEl = "<Simple><Name>DEBAND</Name><String>true</String></Simple>"
+
+	if idx := strings.LastIndex(updated, "</Tag>"); idx >= 0 {
+		return updated[:idx] + debandEl + updated[idx:]
+	}
+
+	// No tag block present — build minimal XML from scratch.
+	return buildTagXML("", "", "", RatingNone, true)
 }
 
 // buildTagXML constructs the Matroska tags XML string for the given metadata.

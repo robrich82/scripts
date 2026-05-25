@@ -8,18 +8,20 @@ import (
 // fakeMKVRunner is a test double for MKVRunner that records calls and returns
 // pre-configured responses.
 type fakeMKVRunner struct {
-	avail       bool
-	attachments AttachmentInfo
-	probeErr    error
-	applyResult string
-	applyRC     int
-	applyErr    error
-	calls       []applyCall
-	tagsPath    string
-	tagsErr     error
-	posterPath  string
-	posterOK    bool
-	cleaned     []string
+	avail          bool
+	attachments    AttachmentInfo
+	probeErr       error
+	applyResult    string
+	applyRC        int
+	applyErr       error
+	calls          []applyCall
+	tagsPath       string
+	tagsErr        error
+	posterPath     string
+	posterOK       bool
+	cleaned        []string
+	extractTagsXML string
+	extractTagsErr error
 }
 
 type applyCall struct {
@@ -51,6 +53,10 @@ func (f *fakeMKVRunner) DownloadPoster(_ string) (string, bool) {
 
 func (f *fakeMKVRunner) Cleanup(paths ...string) {
 	f.cleaned = append(f.cleaned, paths...)
+}
+
+func (f *fakeMKVRunner) ExtractTags(_ string) (string, error) {
+	return f.extractTagsXML, f.extractTagsErr
 }
 
 // --- buildTagXML tests ---
@@ -177,5 +183,99 @@ func TestResolveDeband_EmptyEpisodeKey_SkipsEpisodeLookup(t *testing.T) {
 	// Empty episode key — should use season level, not episode level.
 	if e.resolveDeband("S01", "") {
 		t.Error("expected season-level false when episode key is empty")
+	}
+}
+
+// --- ManualEntry.hasDebandConfig ---
+
+func TestHasDebandConfig_ShowLevel(t *testing.T) {
+	tr := true
+	e := ManualEntry{Deband: &tr}
+	if !e.hasDebandConfig("S01", "S01E01") {
+		t.Error("expected true with show-level deband set")
+	}
+}
+
+func TestHasDebandConfig_SeasonLevel(t *testing.T) {
+	e := ManualEntry{DebandSeasons: map[string]bool{"S01": true}}
+	if !e.hasDebandConfig("S01", "S01E01") {
+		t.Error("expected true with season-level deband set")
+	}
+}
+
+func TestHasDebandConfig_EpisodeLevel(t *testing.T) {
+	e := ManualEntry{DebandEpisodes: map[string]bool{"S01E05": false}}
+	if !e.hasDebandConfig("S01", "S01E05") {
+		t.Error("expected true even when episode deband is false (explicitly configured)")
+	}
+}
+
+func TestHasDebandConfig_NotConfigured(t *testing.T) {
+	e := ManualEntry{}
+	if e.hasDebandConfig("S01", "S01E01") {
+		t.Error("expected false when no deband config exists")
+	}
+}
+
+func TestHasDebandConfig_OtherSeasonConfigured(t *testing.T) {
+	e := ManualEntry{DebandSeasons: map[string]bool{"S02": true}}
+	if e.hasDebandConfig("S01", "S01E01") {
+		t.Error("expected false when only a different season is configured")
+	}
+}
+
+// --- updateDebandInXML ---
+
+const existingTagsXML = `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>` +
+	`<Simple><Name>DATE</Name><String>2020-04-01</String></Simple>` +
+	`<Simple><Name>YEAR</Name><String>2020</String></Simple>` +
+	`</Tag></Tags>`
+
+func TestUpdateDebandInXML_AddToExistingTags(t *testing.T) {
+	result := updateDebandInXML(existingTagsXML, true)
+	if !strings.Contains(result, "<Simple><Name>DEBAND</Name><String>true</String></Simple>") {
+		t.Errorf("DEBAND element not added: %s", result)
+	}
+	if !strings.Contains(result, "DATE") {
+		t.Errorf("existing DATE tag was lost: %s", result)
+	}
+}
+
+func TestUpdateDebandInXML_RemoveDebandFromExistingTags(t *testing.T) {
+	xml := existingTagsXML[:len(existingTagsXML)-len("</Tag></Tags>")] +
+		`<Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`
+	result := updateDebandInXML(xml, false)
+	if strings.Contains(result, "DEBAND") {
+		t.Errorf("DEBAND element not removed: %s", result)
+	}
+	if !strings.Contains(result, "DATE") {
+		t.Errorf("existing DATE tag was lost: %s", result)
+	}
+}
+
+func TestUpdateDebandInXML_PrettyPrintedXML(t *testing.T) {
+	// mkvextract outputs indented XML; verify the regex handles whitespace.
+	pretty := "<Tags>\n  <Tag>\n    <Targets>\n      <TargetTypeValue>50</TargetTypeValue>\n    </Targets>\n" +
+		"    <Simple>\n      <Name>DEBAND</Name>\n      <String>true</String>\n    </Simple>\n  </Tag>\n</Tags>"
+	result := updateDebandInXML(pretty, false)
+	if strings.Contains(result, "DEBAND") {
+		t.Errorf("DEBAND not removed from pretty-printed XML: %s", result)
+	}
+}
+
+func TestUpdateDebandInXML_NoTagBlock_AddsDebandOnly(t *testing.T) {
+	result := updateDebandInXML("", true)
+	if !strings.Contains(result, "DEBAND") {
+		t.Errorf("expected DEBAND in minimal XML: %s", result)
+	}
+	if !strings.Contains(result, "<Tags>") {
+		t.Errorf("expected Tags wrapper: %s", result)
+	}
+}
+
+func TestUpdateDebandInXML_NoTagBlock_DebandFalse_ReturnsEmpty(t *testing.T) {
+	result := updateDebandInXML("", false)
+	if strings.Contains(result, "DEBAND") {
+		t.Errorf("unexpected DEBAND in result: %s", result)
 	}
 }

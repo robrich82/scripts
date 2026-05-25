@@ -803,6 +803,146 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	return true
 }
 
+// applyDebandOnlyMKV updates only the DEBAND tag in an MKV file, preserving
+// all other existing tags and restoring the original file timestamps afterward.
+// It extracts the current tag XML, splices in or out the DEBAND element, then
+// writes the result back with mkvpropedit.
+func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
+	if !p.mkv.Available() {
+		fmt.Println("  [!] mkvpropedit not found in PATH")
+		return false
+	}
+
+	origStat, statErr := os.Stat(filePath)
+
+	currentXML, err := p.mkv.ExtractTags(filePath)
+	if err != nil {
+		fmt.Printf("  [!] Failed to extract tags: %v\n", err)
+		return false
+	}
+
+	updatedXML := updateDebandInXML(currentXML, deband)
+
+	tagsPath, err := p.mkv.WriteTempTags(updatedXML)
+	if err != nil {
+		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
+		return false
+	}
+
+	combined, rc, err := p.mkv.Apply(filePath, []string{"--tags", "all:" + tagsPath})
+	p.mkv.Cleanup(tagsPath)
+
+	if err != nil {
+		fmt.Printf("  [!] subprocess error: %v\n", err)
+		return false
+	}
+	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
+	if !success {
+		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
+		return false
+	}
+
+	if statErr == nil {
+		if err := p.timer.SetTimes(filePath, origStat.ModTime()); err != nil {
+			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		}
+		if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
+			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		}
+	}
+
+	return true
+}
+
+// RunDebandOnly scans MediaDir and updates only the DEBAND MKV tag for files
+// that have an explicit deband configuration in manual_data.json. It makes no
+// TMDB API calls and preserves all other existing tags and file timestamps.
+// Files with no deband configuration are skipped entirely.
+func (p *Processor) RunDebandOnly() Stats {
+	var stats Stats
+
+	showFiles := map[string][]string{}
+	var showOrder []string
+
+	filepath.WalkDir(p.cfg.MediaDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
+			return nil
+		}
+		rel, err := filepath.Rel(p.cfg.MediaDir, path)
+		if err != nil {
+			return nil
+		}
+		parts := strings.SplitN(rel, string(filepath.Separator), 2)
+		if len(parts) < 2 {
+			return nil
+		}
+		showFolder := parts[0]
+		if _, seen := showFiles[showFolder]; !seen {
+			showOrder = append(showOrder, showFolder)
+		}
+		showFiles[showFolder] = append(showFiles[showFolder], path)
+		return nil
+	})
+
+	for _, showFolder := range showOrder {
+		entry, hasEntry := p.manualData[showFolder]
+		if !hasEntry {
+			continue
+		}
+
+		for _, path := range showFiles[showFolder] {
+			file := filepath.Base(path)
+			dir := filepath.Dir(path)
+			file, filePath := p.normalizeFilename(dir, file)
+			stem := strings.TrimSuffix(file, filepath.Ext(file))
+
+			// Check extras first.
+			if extra, hasExtra := entry.Extras[stem]; hasExtra {
+				seasonKey := fmt.Sprintf("S%02d", extra.Season)
+				if !entry.hasDebandConfig(seasonKey, "") {
+					continue
+				}
+				deband := entry.resolveDeband(seasonKey, "")
+				if p.applyDebandOnlyMKV(filePath, deband) {
+					fmt.Printf("[✓] Deband updated (extra): %s\n", file)
+					stats.Success++
+				} else {
+					fmt.Printf("  [X] Deband update failed: %s\n", file)
+					stats.Failed++
+				}
+				continue
+			}
+
+			epMatch := epRe.FindStringSubmatch(file)
+			if epMatch == nil {
+				continue
+			}
+			sNum, _ := strconv.Atoi(epMatch[1])
+			eNum, _ := strconv.Atoi(epMatch[2])
+			seasonKey := fmt.Sprintf("S%02d", sNum)
+			episodeKey := fmt.Sprintf("S%02dE%02d", sNum, eNum)
+
+			if !entry.hasDebandConfig(seasonKey, episodeKey) {
+				continue
+			}
+
+			deband := entry.resolveDeband(seasonKey, episodeKey)
+			if p.applyDebandOnlyMKV(filePath, deband) {
+				fmt.Printf("[✓] Deband updated: %s\n", file)
+				stats.Success++
+			} else {
+				fmt.Printf("  [X] Deband update failed: %s\n", file)
+				stats.Failed++
+			}
+		}
+	}
+
+	return stats
+}
+
 // applyPlexRatings pushes cached ratings to Plex at episode, season, and show
 // level. Season and show ratings are computed as the maximum (most restrictive)
 // rating across their child items. Does nothing when Plex is not configured.

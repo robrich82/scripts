@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -395,6 +396,78 @@ func TestApplyMKV_Failure_NoTimestamps(t *testing.T) {
 
 	if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
 		t.Error("timestamps should not be set on failure")
+	}
+}
+
+// --- applyDebandOnlyMKV ---
+
+func TestApplyDebandOnlyMKV_MkvpropeditNotFound(t *testing.T) {
+	runner := &fakeMKVRunner{avail: false}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+	ok := p.applyDebandOnlyMKV("file.mkv", true)
+	if ok {
+		t.Error("expected false when mkvpropedit unavailable")
+	}
+}
+
+func TestApplyDebandOnlyMKV_ExtractTagsFails(t *testing.T) {
+	runner := &fakeMKVRunner{avail: true, extractTagsErr: fmt.Errorf("mkvextract not found")}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+	ok := p.applyDebandOnlyMKV("file.mkv", true)
+	if ok {
+		t.Error("expected false when ExtractTags fails")
+	}
+	if len(runner.calls) != 0 {
+		t.Error("Apply should not be called after ExtractTags failure")
+	}
+}
+
+func TestApplyDebandOnlyMKV_Success_RestoresTimestamps(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "ep.mkv")
+	if err := os.WriteFile(filePath, []byte("fake"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2021, 6, 1, 0, 0, 0, 0, time.Local)
+	if err := os.Chtimes(filePath, want, want); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &fakeMKVRunner{
+		avail:          true,
+		applyResult:    mkvpropeditSuccessMsg,
+		tagsPath:       "tags.xml",
+		extractTagsXML: `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`,
+	}
+	timer := &captureFileTimer{}
+	p := &Processor{mkv: runner, timer: timer}
+	ok := p.applyDebandOnlyMKV(filePath, true)
+	if !ok {
+		t.Fatal("expected success")
+	}
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected SetTimes to be called to restore timestamps")
+	}
+	if !timer.setTimesCalls[0].t.Equal(want) {
+		t.Errorf("restored mtime = %v; want %v", timer.setTimesCalls[0].t, want)
+	}
+}
+
+func TestApplyDebandOnlyMKV_PassesUpdatedXMLToApply(t *testing.T) {
+	runner := &fakeMKVRunner{
+		avail:          true,
+		applyResult:    mkvpropeditSuccessMsg,
+		tagsPath:       "tags.xml",
+		extractTagsXML: `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`,
+	}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+	p.applyDebandOnlyMKV("file.mkv", true)
+
+	if len(runner.calls) == 0 {
+		t.Fatal("expected Apply to be called")
+	}
+	if !containsAll(runner.calls[0].args, "--tags", "all:tags.xml") {
+		t.Errorf("unexpected args: %v", runner.calls[0].args)
 	}
 }
 

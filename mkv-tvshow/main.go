@@ -18,6 +18,7 @@ func main() {
 	languageOnly := flag.Bool("language-only", false, "Apply Plex audio language preference for all cached shows without scanning files.")
 	missingMode := flag.Bool("missing", false, "Check for episodes that have aired on TMDB but are not present locally.")
 	titleCheckMode := flag.Bool("title-check", false, "Check episode titles in filenames against TMDB and offer to rename.")
+	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	flag.Parse()
 
 	apiKey := os.Getenv("TMDB_API_KEY")
@@ -115,6 +116,21 @@ func main() {
 		cfg := Config{OverwriteLanguage: *overwriteLanguage}
 		processor := NewProcessor(cfg, cache, nil, tmdb, nil, nil, nil, nil, ratingCache, nil, plexClient, nil)
 		processor.RunLanguageOnly()
+		return
+	}
+
+	// --deband-only mode: update the DEBAND tag for configured files only.
+	if *debandOnlyMode {
+		debandManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
+			os.Exit(1)
+		}
+		cfg := Config{MediaDir: mediaDir}
+		processor := NewProcessor(cfg, nil, debandManualData, nil, mkv, nil, timer, nil, nil, nil, nil, nil)
+		fmt.Printf("Updating DEBAND tags in %s...\n", mediaDir)
+		stats := processor.RunDebandOnly()
+		fmt.Printf("\nDone. Updated: %d  Failed: %d\n", stats.Success, stats.Failed)
 		return
 	}
 

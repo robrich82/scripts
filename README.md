@@ -506,6 +506,25 @@ your files:
 
 See [mkv-tvshow/manual_data.json.example](mkv-tvshow/manual_data.json.example) for a full example.
 
+### Deband tag update (`--deband-only`)
+
+Run from the media directory to update only the `DEBAND` MKV tag for files
+that have an explicit deband configuration in `manual_data.json`:
+
+```sh
+mkv-tvshow --deband-only
+```
+
+- Only files whose show/season/episode has a `deband`, `deband_seasons`, or
+  `deband_episodes` entry are touched — unconfigured files are skipped entirely.
+- All other existing tags (DATE, YEAR, SUMMARY, TMDB_ID, LAW_RATING, etc.) are
+  preserved by extracting the current tag XML with `mkvextract`, splicing in or
+  out the DEBAND element, and writing the result back.
+- File timestamps are restored after editing so the cutoff filter in normal mode
+  is unaffected.
+- Requires `mkvextract` to be in PATH (ships with MKVToolNix alongside
+  `mkvpropedit`).
+
 ### Episode title check (`--title-check`)
 
 Run from the media directory to compare the episode title(s) in your filenames

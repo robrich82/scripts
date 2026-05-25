@@ -42,6 +42,23 @@ type ManualEntry struct {
 	DebandEpisodes map[string]bool           `json:"deband_episodes,omitempty"` // e.g. "S01E05": true
 }
 
+// hasDebandConfig reports whether any deband configuration exists for the
+// given keys. It distinguishes "explicitly configured" (true or false) from
+// "not mentioned at all" so the caller can decide whether to skip the file.
+func (e ManualEntry) hasDebandConfig(seasonKey, episodeKey string) bool {
+	if episodeKey != "" {
+		if _, ok := e.DebandEpisodes[episodeKey]; ok {
+			return true
+		}
+	}
+	if seasonKey != "" {
+		if _, ok := e.DebandSeasons[seasonKey]; ok {
+			return true
+		}
+	}
+	return e.Deband != nil
+}
+
 // resolveDeband returns whether debanding should be applied for the given
 // season and episode keys. Episode-level takes precedence over season-level,
 // which takes precedence over the show-level flag. seasonKey format: "S01";
