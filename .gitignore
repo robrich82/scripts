@@ -1,4 +1,5 @@
+.claude/worktrees/
+.claude/settings.local.json
 configs/
 dist/
 *.exe
-.claude/settings.local.json
