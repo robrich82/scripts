@@ -120,12 +120,17 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading rating_cache.json: %v\n", err)
 			os.Exit(1)
 		}
+		langManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
+			os.Exit(1)
+		}
 		var plexClient PlexClient
 		if plexURL != "" && plexToken != "" {
 			plexClient = newHTTPPlexClient(plexURL, plexToken)
 		}
 		cfg := Config{OverwriteLanguage: *overwriteLanguage}
-		processor := NewProcessor(cfg, cache, nil, tmdb, nil, nil, nil, nil, ratingCache, nil, plexClient, nil)
+		processor := NewProcessor(cfg, cache, langManualData, tmdb, nil, nil, nil, nil, ratingCache, nil, plexClient, nil)
 		processor.RunLanguageOnly()
 		return
 	}
