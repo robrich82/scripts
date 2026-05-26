@@ -84,8 +84,11 @@ func (tc *TitleChecker) Run() error {
 			return nil
 		}
 		showFolder := parts[0]
-		if _, ok := tc.cache.Get(showFolder); !ok {
-			return nil
+		cacheKey := filepath.Join(tc.cfg.MediaDir, showFolder)
+		if _, ok := tc.cache.Get(cacheKey); !ok {
+			if _, ok := tc.cache.Get(showFolder); !ok {
+				return nil
+			}
 		}
 		if _, seen := showFiles[showFolder]; !seen {
 			showOrder = append(showOrder, showFolder)
@@ -98,7 +101,11 @@ func (tc *TitleChecker) Run() error {
 	}
 
 	for _, showFolder := range showOrder {
-		showID, _ := tc.cache.Get(showFolder)
+		cacheKey := filepath.Join(tc.cfg.MediaDir, showFolder)
+		showID, ok := tc.cache.Get(cacheKey)
+		if !ok {
+			showID, _ = tc.cache.Get(showFolder)
+		}
 		fmt.Printf("\nChecking: %s\n", showFolder)
 		seasonCache := map[string]SeasonResult{}
 
