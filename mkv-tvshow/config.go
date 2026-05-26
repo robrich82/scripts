@@ -38,6 +38,7 @@ type ManualEntry struct {
 	Mapping        map[string]EpisodePair    `json:"mapping"`                   // keyed by "S01E03" -> [tmdbSeason, tmdbEpisode]
 	Extras         map[string]ExtraEntry     `json:"extras"`                    // keyed by filename stem (no .mkv extension)
 	TitleOverrides map[string]string         `json:"title_overrides"`           // keyed by "S01E03" -> correct FS-safe title
+	Language       string                    `json:"language,omitempty"`        // ISO 639-1 code overriding TMDB original_language for Plex audio preference
 	Deband         *bool                     `json:"deband,omitempty"`          // show-level deband flag
 	DebandSeasons  map[string]bool           `json:"deband_seasons,omitempty"`  // e.g. "S01": true
 	DebandEpisodes map[string]bool           `json:"deband_episodes,omitempty"` // e.g. "S01E05": true

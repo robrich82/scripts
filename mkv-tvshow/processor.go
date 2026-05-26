@@ -391,7 +391,8 @@ func (p *Processor) Run() Stats {
 				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
 			}
 		}
-		p.applyPlexRatings(showID, showName, showTouched)
+		langOverride := p.manualData[showFolder].Language
+		p.applyPlexRatings(showID, showName, showTouched, langOverride)
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -980,7 +981,9 @@ func (p *Processor) RunDebandOnly() Stats {
 // level. Season and show ratings are computed as the maximum (most restrictive)
 // rating across their child items. Does nothing when Plex is not configured.
 // showName is used as a title-match fallback when TMDB GUID lookup fails.
-func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool) {
+// langOverride, if non-empty, is used instead of TMDB original_language when
+// setting the show's preferred audio language.
+func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool, langOverride string) {
 	if p.plex == nil || p.ratingCache == nil {
 		return
 	}
@@ -1053,7 +1056,7 @@ func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool) {
 		}
 	}
 
-	p.applyPlexAudioLanguage(showKey, tmdbID, showName)
+	p.applyPlexAudioLanguage(showKey, tmdbID, showName, langOverride)
 
 	if touched {
 		if err := p.plex.RefreshMetadata(showKey); err != nil {
@@ -1123,7 +1126,8 @@ func (p *Processor) RunLanguageOnly() {
 			continue
 		}
 
-		p.applyPlexAudioLanguage(showKey, tmdbID, showName)
+		langOverride := p.manualData[showName].Language
+		p.applyPlexAudioLanguage(showKey, tmdbID, showName, langOverride)
 	}
 
 	if err := p.ratingCache.Save(); err != nil {
@@ -1135,11 +1139,15 @@ func (p *Processor) RunLanguageOnly() {
 // the TMDB original language, but only once per show unless OverwriteLanguage
 // is set. This lets the user override the preference inside Plex on a
 // show-by-show basis without it being overwritten on subsequent runs.
-func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string) {
+// langOverride, if non-empty, takes precedence over the TMDB original_language.
+func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName, langOverride string) {
 	if p.ratingCache == nil {
 		return
 	}
-	lang := p.resolveOriginalLang(tmdbID)
+	lang := langOverride
+	if lang == "" {
+		lang = p.resolveOriginalLang(tmdbID)
+	}
 	if lang == "" {
 		return
 	}

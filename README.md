@@ -460,6 +460,7 @@ your files:
 ```json
 {
   "Show Name": {
+    "language": "ko",
     "overrides": {
       "S02": { "id": "246862", "map_season": 1 }
     },
@@ -494,6 +495,9 @@ your files:
   - `season` — selects the season poster to attach.
   - `episode` — optional. When set, fetches the air date, title, and summary
     from that TMDB episode (season × episode) instead of using a manual `date`.
+- `language` — ISO 639-1 code (e.g. `"ko"`, `"zh"`) that overrides the TMDB
+  `original_language` when setting the show's preferred audio language in Plex.
+  Use this when TMDB reports the wrong original language for a show.
 - `deband` — show-level boolean. When `true`, writes a `DEBAND=true` MKV tag
   to every episode in the show so that mpv (or another player) can apply
   debanding automatically. Omitting or setting to `false` removes the tag.

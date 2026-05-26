@@ -1382,6 +1382,29 @@ func TestRunLanguageOnly_TitleFallbackStripsYear(t *testing.T) {
 	}
 }
 
+func TestRunLanguageOnly_ManualDataLanguageOverride(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+
+	// TMDB says "ja" but manual_data.json overrides to "ko".
+	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
+	plexClient := &fakePlexClient{showRatingKey: "plex-99"}
+	cache := cacheWith(t, map[string]string{"Show A": "111"})
+	manualData := map[string]ManualEntry{
+		"Show A": {Language: "ko"},
+	}
+
+	p := NewProcessor(Config{}, cache, manualData, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	p.RunLanguageOnly()
+
+	if len(plexClient.setLangCalls) != 1 {
+		t.Fatalf("expected 1 SetAudioLanguage call, got %d", len(plexClient.setLangCalls))
+	}
+	if plexClient.setLangCalls[0].lang != "ko" {
+		t.Errorf("expected lang ko (manual override), got %q", plexClient.setLangCalls[0].lang)
+	}
+}
+
 // containsAll returns true if all of the given values appear in haystack
 // (as individual elements, in any order).
 func containsAll(haystack []string, needles ...string) bool {
