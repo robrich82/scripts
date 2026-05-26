@@ -168,7 +168,7 @@ func TestLoadManualData_ParsesExtrasWithEpisodeRef(t *testing.T) {
 	input := map[string]ManualEntry{
 		"My Show": {
 			Extras: map[string]ExtraEntry{
-				"My Show - S01 NCOP": {Season: 1, Episode: 1},
+				"My Show - S01 NCOP": {Episode: "S01E01"},
 			},
 		},
 	}
@@ -185,8 +185,33 @@ func TestLoadManualData_ParsesExtrasWithEpisodeRef(t *testing.T) {
 	if !ok {
 		t.Fatal("expected extras entry")
 	}
-	if extra.Season != 1 || extra.Episode != 1 || extra.Date != "" {
+	if extra.Season != 0 || extra.Episode != "S01E01" || extra.Date != "" {
 		t.Errorf("unexpected extra: %+v", extra)
+	}
+}
+
+func TestParseEpisodeRef(t *testing.T) {
+	cases := []struct {
+		input       string
+		wantSeason  int
+		wantEpisode int
+		wantOK      bool
+	}{
+		{"S01E01", 1, 1, true},
+		{"S02E05", 2, 5, true},
+		{"S10E12", 10, 12, true},
+		{"s01e03", 1, 3, true}, // case-insensitive
+		{"", 0, 0, false},
+		{"S01", 0, 0, false},
+		{"E01", 0, 0, false},
+		{"1x03", 0, 0, false},
+	}
+	for _, tc := range cases {
+		s, e, ok := parseEpisodeRef(tc.input)
+		if ok != tc.wantOK || s != tc.wantSeason || e != tc.wantEpisode {
+			t.Errorf("parseEpisodeRef(%q) = (%d, %d, %v), want (%d, %d, %v)",
+				tc.input, s, e, ok, tc.wantSeason, tc.wantEpisode, tc.wantOK)
+		}
 	}
 }
 

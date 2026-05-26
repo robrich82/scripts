@@ -1028,7 +1028,7 @@ func TestProcessorRun_ManualExtra_EpisodeRef_UsesEpisodeData(t *testing.T) {
 	manualData := map[string]ManualEntry{
 		"My Show": {
 			Extras: map[string]ExtraEntry{
-				"My Show - S01 NCOP": {Season: 1, Episode: 1},
+				"My Show - S01 NCOP": {Episode: "S01E01"},
 			},
 		},
 	}
@@ -1125,7 +1125,7 @@ func TestProcessorRun_ManualExtra_EpisodePatternInName_TreatedAsExtra(t *testing
 	manualData := map[string]ManualEntry{
 		"My Show": {
 			Extras: map[string]ExtraEntry{
-				"My Show - S01E03 - A Friend-NCOP": {Season: 1, Episode: 3},
+				"My Show - S01E03 - A Friend-NCOP": {Episode: "S01E03"},
 			},
 		},
 	}
@@ -1148,6 +1148,102 @@ func TestProcessorRun_ManualExtra_EpisodePatternInName_TreatedAsExtra(t *testing
 	wantTime := time.Date(2021, 1, 25, 0, 0, 0, 0, time.Local)
 	if len(timer.setTimesCalls) == 0 || !timer.setTimesCalls[0].t.Equal(wantTime) {
 		t.Errorf("SetTimes: got %v, want %v", timer.setTimesCalls, wantTime)
+	}
+}
+
+func TestProcessorRun_ManualExtra_EpisodeRef_NoSeason_DerivesSeasonFromEpisode(t *testing.T) {
+	// When no explicit season is set, the season from the episode ref is used so
+	// the episode data can be fetched and the timestamp is set correctly.
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S02 - Promo.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails: ShowDetails{PosterPath: "/show.jpg"},
+		seasonResult: SeasonResult{
+			PosterPath: "/season2.jpg",
+			Episodes: []Episode{
+				{EpisodeNumber: 5, AirDate: "2023-03-15", Overview: "Promo overview"},
+			},
+		},
+	}
+	runner := &fakeMKVRunner{
+		avail:       true,
+		applyResult: mkvpropeditSuccessMsg,
+		tagsPath:    "t.xml",
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {
+			Extras: map[string]ExtraEntry{
+				"My Show - S02 - Promo": {Episode: "S02E05"},
+			},
+		},
+	}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Fatalf("expected Success=1, got %+v", stats)
+	}
+	// Timestamp from episode air date (confirms episode was found via derived season).
+	wantTime := time.Date(2023, 3, 15, 0, 0, 0, 0, time.Local)
+	if len(timer.setTimesCalls) == 0 || !timer.setTimesCalls[0].t.Equal(wantTime) {
+		t.Errorf("SetTimes: got %v, want %v", timer.setTimesCalls, wantTime)
+	}
+}
+
+func TestProcessorRun_ManualExtra_EpisodeRef_DateOverridesEpisodeDate(t *testing.T) {
+	// When both date and episode are specified, date wins for the timestamp.
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S01 - Bonus.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails: ShowDetails{PosterPath: "/show.jpg"},
+		seasonResult: SeasonResult{
+			PosterPath: "/season1.jpg",
+			Episodes: []Episode{
+				{EpisodeNumber: 2, AirDate: "2021-11-20", Overview: "Episode two overview"},
+			},
+		},
+	}
+	runner := &fakeMKVRunner{
+		avail:       true,
+		applyResult: mkvpropeditSuccessMsg,
+		tagsPath:    "t.xml",
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {
+			Extras: map[string]ExtraEntry{
+				"My Show - S01 - Bonus": {Episode: "S01E02", Date: "2022-01-01"},
+			},
+		},
+	}
+	timer := &captureFileTimer{}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Fatalf("expected Success=1, got %+v", stats)
+	}
+	// Timestamp must use the manual date, not the episode air date.
+	wantTime := time.Date(2022, 1, 1, 0, 0, 0, 0, time.Local)
+	if len(timer.setTimesCalls) == 0 || !timer.setTimesCalls[0].t.Equal(wantTime) {
+		t.Errorf("SetTimes: got %v, want %v", timer.setTimesCalls, wantTime)
+	}
+	// The date written to MKV metadata must also be the manual date.
+	if len(runner.calls) == 0 {
+		t.Fatal("expected Apply to be called")
+	}
+	if !containsAll(runner.calls[0].args, "date=2022-01-01T00:00:00Z") {
+		t.Errorf("expected manual date in mkvpropedit args, got %v", runner.calls[0].args)
 	}
 }
 

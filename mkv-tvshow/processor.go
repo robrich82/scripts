@@ -206,11 +206,21 @@ func (p *Processor) Run() Stats {
 						// Detect OP/ED/NCOP/NCED suffix in the filename stem.
 						_, opEdSuffix := extractOpEdSuffix(stem)
 
-						// Fetch season data (needed for poster and optional episode lookup).
-						if extra.Season != 0 {
-							cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
+						// Resolve effective poster season and episode reference.
+						posterSeason := extra.Season
+						epSeason, epNum := 0, 0
+						if s, e, ok := parseEpisodeRef(extra.Episode); ok {
+							epSeason, epNum = s, e
+							if posterSeason == 0 {
+								posterSeason = epSeason
+							}
+						}
+
+						// Fetch season data for poster.
+						if posterSeason != 0 {
+							cKey := fmt.Sprintf("%s_S%d", showID, posterSeason)
 							if _, ok := seasonCache[cKey]; !ok {
-								if sr, err := p.tmdb.GetSeason(showID, extra.Season); err == nil {
+								if sr, err := p.tmdb.GetSeason(showID, posterSeason); err == nil {
 									seasonCache[cKey] = sr
 								}
 							}
@@ -219,13 +229,17 @@ func (p *Processor) Run() Stats {
 							}
 						}
 
-						if extra.Episode > 0 {
-							// Use a specific episode's metadata (date, summary) instead of a
-							// manual date. Title always comes from the filename (see below).
-							cKey := fmt.Sprintf("%s_S%d", showID, extra.Season)
+						// Fetch episode metadata when an episode reference is specified.
+						if epNum > 0 {
+							cKey := fmt.Sprintf("%s_S%d", showID, epSeason)
+							if _, ok := seasonCache[cKey]; !ok {
+								if sr, err := p.tmdb.GetSeason(showID, epSeason); err == nil {
+									seasonCache[cKey] = sr
+								}
+							}
 							if sr, ok := seasonCache[cKey]; ok {
 								for _, ep := range sr.Episodes {
-									if ep.EpisodeNumber == extra.Episode {
+									if ep.EpisodeNumber == epNum {
 										if ep.AirDate != "" {
 											relDate = ep.AirDate + "T00:00:00Z"
 											stampDate = relDate
@@ -235,7 +249,10 @@ func (p *Processor) Run() Stats {
 									}
 								}
 							}
-						} else if extra.Date != "" {
+						}
+
+						// Manual date takes priority over episode air date.
+						if extra.Date != "" {
 							relDate = extra.Date + "T00:00:00Z"
 							stampDate = relDate
 						}
@@ -250,8 +267,8 @@ func (p *Processor) Run() Stats {
 							title = cleanMetadataTitle(file)
 						}
 
-						rating := p.resolveEpisodeRating(showID, showName, filePath, extra.Season, 0)
-						deband := entry.resolveDeband(fmt.Sprintf("S%02d", extra.Season), "")
+						rating := p.resolveEpisodeRating(showID, showName, filePath, posterSeason, 0)
+						deband := entry.resolveDeband(fmt.Sprintf("S%02d", posterSeason), "")
 						if p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating, deband) {
 							if stampDate != "" {
 								p.retryList.Remove(filePath)

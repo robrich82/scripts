@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -26,9 +27,9 @@ type SeasonOverride struct {
 // ExtraEntry holds manual metadata for a non-episode file (extras, specials,
 // bonus content) that does not carry a standard S##E## episode number.
 type ExtraEntry struct {
-	Date    string `json:"date,omitempty"`    // YYYY-MM-DD; written as the MKV release date
-	Season  int    `json:"season"`            // season number; used to select the season poster
-	Episode int    `json:"episode,omitempty"` // if > 0, fetch metadata from this TMDB episode instead of using Date
+	Date    string `json:"date,omitempty"`    // YYYY-MM-DD; if set, overrides episode air date
+	Season  int    `json:"season,omitempty"`  // poster season; defaults to episode's season when episode is set
+	Episode string `json:"episode,omitempty"` // "S##E##" e.g. "S01E03"; fetch metadata from this episode
 }
 
 // ManualEntry holds per-show TMDB ID overrides and episode-level remappings.
@@ -127,6 +128,20 @@ func extractOpEdSuffix(stem string) (base, suffix string) {
 		return stem, ""
 	}
 	return stem[:m[0]], strings.ToUpper(stem[m[2]:m[3]])
+}
+
+var episodeRefRe = regexp.MustCompile(`(?i)^S(\d+)E(\d+)$`)
+
+// parseEpisodeRef parses a "S##E##" string into season and episode numbers.
+// Returns (0, 0, false) if the string does not match the expected format.
+func parseEpisodeRef(s string) (season, episode int, ok bool) {
+	m := episodeRefRe.FindStringSubmatch(s)
+	if m == nil {
+		return 0, 0, false
+	}
+	sn, _ := strconv.Atoi(m[1])
+	en, _ := strconv.Atoi(m[2])
+	return sn, en, true
 }
 
 // cleanMetadataTitle strips the file extension and restores ASCII characters
