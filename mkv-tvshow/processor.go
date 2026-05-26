@@ -404,7 +404,23 @@ func (p *Processor) resolveShowID(showFolder string) string {
 	if id, ok := p.sessionConfirmed[showFolder]; ok {
 		return id
 	}
+	// Use the absolute folder path as the cache key so --clean can verify
+	// existence via os.Stat without needing to know the media root.
+	cacheKey := filepath.Join(p.cfg.MediaDir, showFolder)
+	if id, ok := p.cache.Get(cacheKey); ok {
+		if !p.cfg.ProcessAll {
+			ans, _ := p.prompter.Ask(fmt.Sprintf("\nShow '%s' found in cache. Process? [y/n]: ", showFolder))
+			if strings.ToLower(strings.TrimSpace(ans)) != "y" {
+				p.sessionSkipped[showFolder] = true
+				return "SKIP"
+			}
+		}
+		p.sessionConfirmed[showFolder] = id
+		return id
+	}
+	// Legacy cache entries use the base folder name; migrate to absolute path on access.
 	if id, ok := p.cache.Get(showFolder); ok {
+		p.cache.Set(cacheKey, id)
 		if !p.cfg.ProcessAll {
 			ans, _ := p.prompter.Ask(fmt.Sprintf("\nShow '%s' found in cache. Process? [y/n]: ", showFolder))
 			if strings.ToLower(strings.TrimSpace(ans)) != "y" {
@@ -451,7 +467,7 @@ func (p *Processor) resolveShowID(showFolder string) string {
 	}
 
 	if resID != "" {
-		p.cache.Set(showFolder, resID)
+		p.cache.Set(cacheKey, resID)
 		p.sessionConfirmed[showFolder] = resID
 		if err := p.cache.Save(); err != nil {
 			fmt.Printf("  [!] Cache save error: %v\n", err)
@@ -1055,9 +1071,10 @@ func (p *Processor) RunLanguageOnly() {
 	}
 
 	// Build a reverse map: tmdbID → show folder name for title-fallback lookups.
+	// Cache keys are absolute paths; extract the base name for display/search.
 	tmdbToName := make(map[string]string)
 	for folder, id := range p.cache.AllEntries() {
-		tmdbToName[id] = folder
+		tmdbToName[id] = filepath.Base(folder)
 	}
 
 	for _, tmdbID := range p.ratingCache.AllShowIDs() {

@@ -141,9 +141,9 @@ func (p *Processor) LoadIgnorePatterns() error {
 
 // effectivePatterns returns the combined ignore patterns for videoFile:
 // global patterns plus any file-specific patterns for that filename.
-func (p *Processor) effectivePatterns(videoFile string) []string {
+func (p *Processor) effectivePatterns(videoPath string) []string {
 	patterns := append([]string{}, p.ignoreData.Global...)
-	patterns = append(patterns, p.ignoreData.FilePatterns[videoFile]...)
+	patterns = append(patterns, p.ignoreData.FilePatterns[videoPath]...)
 	return patterns
 }
 
@@ -256,9 +256,9 @@ func containsStr(slice []string, s string) bool {
 // that appear in cleanVideo. This is appended to the audio title when copying
 // tags so that e.g. " (Alternate Version)" survives in the MKV title tag.
 // videoFile is the video filename used to look up file-specific patterns.
-func (p *Processor) findIgnoredPatterns(cleanVideo, videoFile string) string {
+func (p *Processor) findIgnoredPatterns(cleanVideo, videoPath string) string {
 	var found []string
-	for _, pat := range p.effectivePatterns(videoFile) {
+	for _, pat := range p.effectivePatterns(videoPath) {
 		if strings.Contains(cleanVideo, pat) {
 			if t := strings.TrimSpace(pat); t != "" {
 				found = append(found, t)
@@ -272,7 +272,7 @@ func (p *Processor) findIgnoredPatterns(cleanVideo, videoFile string) string {
 // a tagger is configured. cleanVideo is the video base before ignore-pattern
 // stripping; postSuffix is any text after the recognized video suffix (e.g.
 // " (Second Version)"). Both are used to build the MKV title suffix.
-func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile string, audioPaths map[string]string) {
+func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath string, audioPaths map[string]string) {
 	if p.tagger == nil || audioPaths == nil {
 		return
 	}
@@ -281,7 +281,7 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 		return
 	}
 	audioFullPath := filepath.Join(videoDir, audioFilename)
-	titleSuffix := p.findIgnoredPatterns(cleanVideo, videoFile)
+	titleSuffix := p.findIgnoredPatterns(cleanVideo, videoPath)
 	if t := strings.TrimSpace(postSuffix); t != "" {
 		if titleSuffix == "" {
 			titleSuffix = t
@@ -329,11 +329,12 @@ func (p *Processor) syncTimestamps(mkvPath string) {
 // mismatch if needed, and interactively renames/ignores/skips.
 // Returns "renamed", "skipped", or "" (no action / no match).
 func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPaths map[string]string) string {
+	videoPath := filepath.Join(videoDir, videoFile)
 	ext := filepath.Ext(videoFile)
 	videoBase := strings.TrimSuffix(videoFile, ext)
 	cleanVideo, foundSuffix, postSuffix := cleanVideoBase(videoBase)
-	cleanVideoIgnored := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoFile))
-	postSuffixIgnored := removeIgnoredParts(postSuffix, p.effectivePatterns(videoFile))
+	cleanVideoIgnored := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoPath))
+	postSuffixIgnored := removeIgnoredParts(postSuffix, p.effectivePatterns(videoPath))
 
 	matchKey, ok := findMatch(cleanVideoIgnored, audioData)
 	if !ok {
@@ -348,10 +349,10 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 	}
 	targetName := matchedBase + effectiveSuffix
 	currentName := cleanVideoIgnored + effectiveSuffix + postSuffixIgnored
-	fullPath := filepath.Join(videoDir, videoFile)
+	fullPath := videoPath
 	if targetName == currentName {
 		// Filename is already correct — just copy tags.
-		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile, audioPaths)
+		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath, audioPaths)
 		return ""
 	}
 
@@ -393,17 +394,17 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			if p.ignoreData.FilePatterns == nil {
 				p.ignoreData.FilePatterns = make(map[string][]string)
 			}
-			p.ignoreData.FilePatterns[videoFile] = append(p.ignoreData.FilePatterns[videoFile], pattern)
-			if err := p.patternAppender(p.ignoreFile, videoFile, pattern); err != nil {
+			p.ignoreData.FilePatterns[videoPath] = append(p.ignoreData.FilePatterns[videoPath], pattern)
+			if err := p.patternAppender(p.ignoreFile, videoPath, pattern); err != nil {
 				fmt.Printf("    [ERROR] Could not save pattern: %v\n", err)
 			} else {
 				fmt.Printf("    [OK] Added '%s' to ignore list for %s\n", pattern, videoFile)
 			}
-			reCheckedClean := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoFile))
-			reCheckedPost := removeIgnoredParts(postSuffix, p.effectivePatterns(videoFile))
+			reCheckedClean := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoPath))
+			reCheckedPost := removeIgnoredParts(postSuffix, p.effectivePatterns(videoPath))
 			if reCheckedClean+effectiveSuffix+reCheckedPost == targetName {
 				fmt.Println("    [OK] File now matches after ignoring pattern!")
-				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile, audioPaths)
+				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath, audioPaths)
 			} else {
 				fmt.Println("    Still doesn't match after ignoring")
 			}

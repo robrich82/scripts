@@ -37,18 +37,35 @@ func runClean(root string) {
 		return
 	}
 
-	// Walk root to collect the base names of all .mkv files present.
+	// For legacy base-name keys, walk root to collect existing .mkv file names.
+	// Newer entries store absolute paths and are checked directly via os.Stat.
 	mkvFiles := make(map[string]bool)
-	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && filepath.Ext(d.Name()) == ".mkv" {
-			mkvFiles[d.Name()] = true
+	hasLegacyKeys := false
+	for name := range data.FilePatterns {
+		if !filepath.IsAbs(name) {
+			hasLegacyKeys = true
+			break
 		}
-		return nil
-	})
+	}
+	if hasLegacyKeys {
+		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && filepath.Ext(d.Name()) == ".mkv" {
+				mkvFiles[d.Name()] = true
+			}
+			return nil
+		})
+	}
 
 	removed := 0
 	for name := range data.FilePatterns {
-		if !mkvFiles[name] {
+		var stale bool
+		if filepath.IsAbs(name) {
+			_, err := os.Stat(name)
+			stale = os.IsNotExist(err)
+		} else {
+			stale = !mkvFiles[name]
+		}
+		if stale {
 			fmt.Printf("Removing stale file-pattern entry: %s\n", name)
 			delete(data.FilePatterns, name)
 			removed++

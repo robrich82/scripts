@@ -179,13 +179,14 @@ func TestProcessVideo_IgnoreChosen_SavesPattern(t *testing.T) {
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
 	p.processVideo(dir, "Artist - Song OFFICIAL-video.mkv", audioData, nil)
 
+	wantVideoPath := filepath.Join(dir, "Artist - Song OFFICIAL-video.mkv")
 	if savedPattern != " OFFICIAL" {
 		t.Errorf("saved pattern %q, want ' OFFICIAL'", savedPattern)
 	}
-	if savedVideo != "Artist - Song OFFICIAL-video.mkv" {
-		t.Errorf("saved videoFile %q, want 'Artist - Song OFFICIAL-video.mkv'", savedVideo)
+	if savedVideo != wantVideoPath {
+		t.Errorf("saved videoFile %q, want %q", savedVideo, wantVideoPath)
 	}
-	patterns := p.ignoreData.FilePatterns["Artist - Song OFFICIAL-video.mkv"]
+	patterns := p.ignoreData.FilePatterns[wantVideoPath]
 	if len(patterns) != 1 || patterns[0] != " OFFICIAL" {
 		t.Errorf("FilePatterns=%v", p.ignoreData.FilePatterns)
 	}
@@ -217,7 +218,7 @@ func TestProcessVideo_PostSuffix_AlreadyIgnored_NoPrompt(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
 
 	p := NewProcessor(dir, "", &fakePrompter{})
-	p.ignoreData.FilePatterns = map[string][]string{mkvFile: {" (Second Version)"}}
+	p.ignoreData.FilePatterns = map[string][]string{filepath.Join(dir, mkvFile): {" (Second Version)"}}
 
 	audioData := map[string]string{"08 - Rise & Shine": "08 - Rise & Shine - Rise & Shine"}
 	result := p.processVideo(dir, mkvFile, audioData, nil)
