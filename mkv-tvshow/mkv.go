@@ -189,6 +189,36 @@ func updateDebandInXML(tagsXML string, deband bool) string {
 	return buildTagXML("", "", "", RatingNone, true)
 }
 
+// countryRatingElementRe matches the nested COUNTRY/LAW_RATING Simple element in
+// Matroska tag XML, handling both the compact format written by buildTagXML and
+// the indented format produced by mkvextract.
+var countryRatingElementRe = regexp.MustCompile(`(?s)<Simple>\s*<Name>\s*COUNTRY\s*</Name>.*?<Simple>\s*<Name>\s*LAW_RATING\s*</Name>.*?</Simple>\s*</Simple>`)
+
+// updateRatingInXML adds or replaces the COUNTRY/LAW_RATING nested tag element
+// in a Matroska tags XML string. If rating is RatingNone the element is removed;
+// otherwise it is inserted before the closing </Tag>. All other tag elements
+// (DEBAND, SUMMARY, TMDB_ID, etc.) are preserved. When the XML has no existing
+// <Tag> block and rating is non-empty, a minimal tag block is returned.
+func updateRatingInXML(tagsXML string, rating NZRating) string {
+	updated := countryRatingElementRe.ReplaceAllString(tagsXML, "")
+
+	if rating == RatingNone {
+		return updated
+	}
+
+	ratingEl := fmt.Sprintf(
+		"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
+			"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>",
+		rating)
+
+	if idx := strings.LastIndex(updated, "</Tag>"); idx >= 0 {
+		return updated[:idx] + ratingEl + updated[idx:]
+	}
+
+	// No tag block present — build minimal XML from scratch.
+	return buildTagXML("", "", "", rating, false)
+}
+
 // buildTagXML constructs the Matroska tags XML string for the given metadata.
 // Returns an empty string if there is nothing to tag.
 func buildTagXML(summary, tmdbID, dateStr string, rating NZRating, deband bool) string {

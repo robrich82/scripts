@@ -137,6 +137,49 @@ func TestBuildTagXML_DebandFalse_OmitsDEBAND(t *testing.T) {
 	}
 }
 
+// --- updateRatingInXML ---
+
+func TestUpdateRatingInXML_AddsRatingToExistingTag(t *testing.T) {
+	input := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`
+	out := updateRatingInXML(input, RatingM)
+	if !strings.Contains(out, "LAW_RATING") {
+		t.Errorf("expected LAW_RATING in output: %s", out)
+	}
+	if !strings.Contains(out, "DEBAND") {
+		t.Errorf("DEBAND should be preserved: %s", out)
+	}
+}
+
+func TestUpdateRatingInXML_ReplacesExistingRating(t *testing.T) {
+	input := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>` +
+		`<Simple><Name>COUNTRY</Name><String>NZ</String><Simple><Name>LAW_RATING</Name><String>PG</String></Simple></Simple>` +
+		`</Tag></Tags>`
+	out := updateRatingInXML(input, RatingM)
+	if strings.Count(out, "LAW_RATING") != 1 {
+		t.Errorf("expected exactly one LAW_RATING: %s", out)
+	}
+	if !strings.Contains(out, "<String>M</String>") {
+		t.Errorf("expected new rating M in output: %s", out)
+	}
+}
+
+func TestUpdateRatingInXML_RatingNone_RemovesExistingRating(t *testing.T) {
+	input := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>` +
+		`<Simple><Name>COUNTRY</Name><String>NZ</String><Simple><Name>LAW_RATING</Name><String>M</String></Simple></Simple>` +
+		`</Tag></Tags>`
+	out := updateRatingInXML(input, RatingNone)
+	if strings.Contains(out, "LAW_RATING") || strings.Contains(out, "COUNTRY") {
+		t.Errorf("LAW_RATING/COUNTRY should be removed when RatingNone: %s", out)
+	}
+}
+
+func TestUpdateRatingInXML_EmptyXML_BuildsFromScratch(t *testing.T) {
+	out := updateRatingInXML("", RatingR16)
+	if !strings.Contains(out, "LAW_RATING") {
+		t.Errorf("expected LAW_RATING in scratch-built output: %s", out)
+	}
+}
+
 // --- ManualEntry.resolveDeband ---
 
 func TestResolveDeband_ShowLevel(t *testing.T) {

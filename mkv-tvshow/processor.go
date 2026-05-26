@@ -793,15 +793,14 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	// Snapshot the current mtime before mkvpropedit touches it.
 	origStat, statErr := os.Stat(filePath)
 
-	// COUNTRY is a nesting tag; LAW_RATING must be nested inside it.
-	xml := fmt.Sprintf(
-		"<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>"+
-			"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
-			"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>"+
-			"</Tag></Tags>",
-		rating,
-	)
-	tagsPath, err := p.mkv.WriteTempTags(xml)
+	// Extract existing tags so other tags (DEBAND, SUMMARY, TMDB_ID, etc.) are preserved.
+	currentXML, err := p.mkv.ExtractTags(filePath)
+	if err != nil {
+		fmt.Printf("  [!] Failed to extract tags: %v\n", err)
+		return false
+	}
+
+	tagsPath, err := p.mkv.WriteTempTags(updateRatingInXML(currentXML, rating))
 	if err != nil {
 		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
 		return false
@@ -1056,7 +1055,9 @@ func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool, lang
 		}
 	}
 
-	p.applyPlexAudioLanguage(showKey, tmdbID, showName, langOverride)
+	if !p.cfg.RatingsOnly {
+		p.applyPlexAudioLanguage(showKey, tmdbID, showName, langOverride)
+	}
 
 	if touched {
 		if err := p.plex.RefreshMetadata(showKey); err != nil {
