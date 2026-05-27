@@ -215,6 +215,31 @@ func TestParseMKVTagsXML_ReplayGainRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBuildTagsXML_PreservesUnqualifiedReplayGain(t *testing.T) {
+	tags := AudioTags{Title: "Song", Album: "Album"}
+	extra50 := map[string]string{"REPLAYGAIN_GAIN": "-5.00 dB", "REPLAYGAIN_PEAK": "0.987"}
+	extra30 := map[string]string{"REPLAYGAIN_GAIN": "-6.00 dB", "REPLAYGAIN_PEAK": "0.876"}
+	xml := buildTagsXML(tags, extra50, extra30)
+
+	dir := t.TempDir()
+	xmlPath := filepath.Join(dir, "tags.xml")
+	os.WriteFile(xmlPath, []byte(xml), 0644)
+	lvl50, lvl30 := parseMKVTagsXML(xmlPath)
+
+	if got := lvl50["REPLAYGAIN_GAIN"]; got != "-5.00 dB" {
+		t.Errorf("lvl50 REPLAYGAIN_GAIN = %q, want -5.00 dB", got)
+	}
+	if got := lvl50["REPLAYGAIN_PEAK"]; got != "0.987" {
+		t.Errorf("lvl50 REPLAYGAIN_PEAK = %q, want 0.987", got)
+	}
+	if got := lvl30["REPLAYGAIN_GAIN"]; got != "-6.00 dB" {
+		t.Errorf("lvl30 REPLAYGAIN_GAIN = %q, want -6.00 dB", got)
+	}
+	if got := lvl30["REPLAYGAIN_PEAK"]; got != "0.876" {
+		t.Errorf("lvl30 REPLAYGAIN_PEAK = %q, want 0.876", got)
+	}
+}
+
 func TestParseMKVTagsXML_FirstValueWins(t *testing.T) {
 	dir := t.TempDir()
 	xmlPath := filepath.Join(dir, "tags.xml")
