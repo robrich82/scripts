@@ -141,9 +141,14 @@ func (p *Processor) LoadIgnorePatterns() error {
 
 // effectivePatterns returns the combined ignore patterns for videoFile:
 // global patterns plus any file-specific patterns for that filename.
+// Legacy entries may be keyed by bare filename; fall back to that when the
+// absolute-path lookup finds nothing.
 func (p *Processor) effectivePatterns(videoPath string) []string {
 	patterns := append([]string{}, p.ignoreData.Global...)
 	patterns = append(patterns, p.ignoreData.FilePatterns[videoPath]...)
+	if base := filepath.Base(videoPath); base != videoPath {
+		patterns = append(patterns, p.ignoreData.FilePatterns[base]...)
+	}
 	return patterns
 }
 
