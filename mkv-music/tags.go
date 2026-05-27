@@ -143,8 +143,8 @@ func parseAudioDate(s string) (time.Time, bool) {
 // tag names preserved when rewriting MKV tags. These are not copied from the source
 // audio file because loudness normalisation is performed separately on the video.
 var (
-	replayGainKeys50 = []string{"REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_ALBUM_PEAK", "R128_ALBUM_GAIN", "REPLAYGAIN_GAIN", "REPLAYGAIN_PEAK"}
-	replayGainKeys30 = []string{"REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_TRACK_PEAK", "R128_TRACK_GAIN", "REPLAYGAIN_GAIN", "REPLAYGAIN_PEAK"}
+	replayGainKeys50 = []string{"REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_ALBUM_PEAK", "R128_ALBUM_GAIN", "R128_ALBUM_PEAK", "REPLAYGAIN_GAIN", "REPLAYGAIN_PEAK"}
+	replayGainKeys30 = []string{"REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_TRACK_PEAK", "R128_TRACK_GAIN", "R128_TRACK_PEAK", "REPLAYGAIN_GAIN", "REPLAYGAIN_PEAK"}
 )
 
 // buildTagsXML returns a Matroska tags XML document for the given AudioTags.
