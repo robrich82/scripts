@@ -115,17 +115,19 @@ func saveFailedCache(stateDir string, paths []string) {
 // (first path component relative to libraryRoot). TMDB calls are sequential to
 // respect rate limits. Entries that produce no match are absent from the map.
 //
-// Before doing a title-search, fetchOrigins checks the sibling tool caches
-// (mkv-tvshow's show_cache.json / mkv-movie's rating_cache.json) for a
-// previously resolved TMDB ID and uses the direct /tv/{id} or /movie/{id}
-// endpoint when one is found, avoiding a redundant search call.
-func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOriginClient) map[string]OriginInfo {
+// When no sibling-cache entry exists for a directory, fetchOrigins searches
+// TMDB interactively: the top result is shown and the user is prompted to
+// accept it, enter a manual TMDB ID, or skip. Confirmed IDs are saved back to
+// the sibling cache so future runs (and mkv-tvshow / mkv-movie) can skip the
+// search step.
+func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOriginClient, prompter Prompter) map[string]OriginInfo {
 	origins := make(map[string]OriginInfo)
 	if tmdb == nil || libraryRoot == "" || (libType != "tv" && libType != "movie") {
 		return origins
 	}
 
 	sibling := loadSiblingCaches()
+	var autoAll, skipAll bool
 
 	seen := map[string]bool{}
 	for _, path := range filesToScan {
@@ -146,16 +148,22 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 
 		switch libType {
 		case "tv":
-			if id := sibling.lookupTV(dir); id != "" {
+			if id := sibling.lookupTV(dir, libraryRoot); id != "" {
 				info, found, err = tmdb.GetTVOriginByID(id)
-			} else {
-				info, found, err = tmdb.GetTVOrigin(title, year)
+			} else if !skipAll {
+				id := resolveTMDBID(dir, title, year, libType, libraryRoot, tmdb, prompter, &autoAll, &skipAll)
+				if id != "" {
+					info, found, err = tmdb.GetTVOriginByID(id)
+				}
 			}
 		case "movie":
 			if id := sibling.lookupMovie(title, year); id != "" {
 				info, found, err = tmdb.GetMovieOriginByID(id)
-			} else {
-				info, found, err = tmdb.GetMovieOrigin(title, year)
+			} else if !skipAll {
+				id := resolveTMDBID(dir, title, year, libType, libraryRoot, tmdb, prompter, &autoAll, &skipAll)
+				if id != "" {
+					info, found, err = tmdb.GetMovieOriginByID(id)
+				}
 			}
 		}
 		if err != nil {
@@ -169,6 +177,91 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		}
 	}
 	return origins
+}
+
+// resolveTMDBID searches TMDB for dir and prompts the user to confirm the top
+// result or enter a manual ID. On confirmation the ID is saved to the sibling
+// cache and returned. Returns "" when the user skips or no prompter is available.
+func resolveTMDBID(dir, title, year, libType, libraryRoot string, tmdb TMDBOriginClient, prompter Prompter, autoAll, skipAll *bool) string {
+	if prompter == nil || *skipAll {
+		return ""
+	}
+
+	var topID, topName, topYear string
+
+	switch libType {
+	case "tv":
+		candidates, err := tmdb.SearchTV(title, year)
+		if err != nil {
+			fmt.Printf("[TMDB]   %s: search error: %v\n", dir, err)
+			return ""
+		}
+		if len(candidates) > 0 {
+			topID = candidates[0].ID
+			topName = candidates[0].Name
+			topYear = candidates[0].Year
+		}
+	case "movie":
+		candidates, err := tmdb.SearchMovie(title, year)
+		if err != nil {
+			fmt.Printf("[TMDB]   %s: search error: %v\n", dir, err)
+			return ""
+		}
+		if len(candidates) > 0 {
+			topID = candidates[0].ID
+			topName = candidates[0].Title
+			topYear = candidates[0].Year
+		}
+	}
+
+	var confirmedID string
+	if topID == "" {
+		// No search results — ask user to provide an ID manually.
+		ans, _ := prompter.Ask(fmt.Sprintf("[TMDB]   %s: no results found. Enter TMDB id or blank to skip: ", dir))
+		ans = strings.TrimSpace(ans)
+		if ans != "" {
+			confirmedID = ans
+		}
+	} else if *autoAll {
+		confirmedID = topID
+	} else {
+		prompt := fmt.Sprintf("[TMDB]   %s: found %q (%s) [id=%s]. Accept? (y/n/a=all/s=skip all/<id>): ", dir, topName, topYear, topID)
+		ans, _ := prompter.Ask(prompt)
+		ans = strings.TrimSpace(ans)
+		switch strings.ToLower(ans) {
+		case "y", "":
+			confirmedID = topID
+		case "a":
+			*autoAll = true
+			confirmedID = topID
+		case "n":
+			// skip this entry
+		case "s":
+			*skipAll = true
+		default:
+			// Treat any other input as a manual TMDB ID.
+			confirmedID = ans
+		}
+	}
+
+	if confirmedID == "" {
+		return ""
+	}
+
+	// Persist the confirmed ID to the sibling cache.
+	switch libType {
+	case "tv":
+		absPath := filepath.Join(libraryRoot, dir)
+		if err := saveTVShowCacheEntry(absPath, confirmedID); err != nil {
+			fmt.Printf("[TMDB]   %s: could not save to sibling cache: %v\n", dir, err)
+		}
+	case "movie":
+		if err := saveMovieTMDBIDEntry(title, year, confirmedID); err != nil {
+			fmt.Printf("[TMDB]   %s: could not save to sibling cache: %v\n", dir, err)
+		}
+	}
+
+	return confirmedID
 }
 
 // langFix describes a single track that needs its ISO language corrected.
@@ -252,7 +345,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 		libRoot = lib.Path
 		libType = lib.Type
 	}
-	origins := fetchOrigins(filesToScan, libRoot, libType, tmdb)
+	origins := fetchOrigins(filesToScan, libRoot, libType, tmdb, prompter)
 
 	// First pass: identify files whose first audio track has language 'und'.
 	// This runs before the main analysis so that language fixes are applied

@@ -33,6 +33,20 @@ func (o OriginInfo) IETFTag() string {
 	return o.OrigLang + "-" + o.OriginCountry
 }
 
+// TVSearchCandidate is a single result from a TMDB TV search.
+type TVSearchCandidate struct {
+	ID   string
+	Name string
+	Year string
+}
+
+// MovieSearchCandidate is a single result from a TMDB movie search.
+type MovieSearchCandidate struct {
+	ID    string
+	Title string
+	Year  string
+}
+
 // TMDBOriginClient fetches content-origin metadata from TMDB.
 type TMDBOriginClient interface {
 	// GetTVOrigin searches for a TV show by title and optional year and
@@ -46,6 +60,10 @@ type TMDBOriginClient interface {
 	GetTVOriginByID(id string) (OriginInfo, bool, error)
 	// GetMovieOriginByID fetches origin info directly via a known TMDB movie ID.
 	GetMovieOriginByID(id string) (OriginInfo, bool, error)
+	// SearchTV returns candidate TV shows matching title+year, ordered by relevance.
+	SearchTV(title, year string) ([]TVSearchCandidate, error)
+	// SearchMovie returns candidate movies matching title+year, ordered by relevance.
+	SearchMovie(title, year string) ([]MovieSearchCandidate, error)
 }
 
 // httpTMDBOriginClient is the production TMDBOriginClient.
@@ -172,6 +190,70 @@ func (c *httpTMDBOriginClient) GetMovieOriginByID(id string) (OriginInfo, bool, 
 		country = det.ProductionCountries[0].ISO31661
 	}
 	return OriginInfo{OrigLang: det.OriginalLanguage, OriginCountry: country}, true, nil
+}
+
+// SearchTV returns TMDB TV show candidates for the given title and optional year.
+func (c *httpTMDBOriginClient) SearchTV(title, year string) ([]TVSearchCandidate, error) {
+	params := url.Values{"api_key": {c.apiKey}, "query": {title}}
+	if year != "" {
+		params.Set("first_air_date_year", year)
+	}
+	resp, err := c.client.Get(tmdbOriginBase + "/search/tv?" + params.Encode())
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Results []struct {
+			ID           int    `json:"id"`
+			Name         string `json:"name"`
+			FirstAirDate string `json:"first_air_date"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode TV search: %w", err)
+	}
+	out := make([]TVSearchCandidate, 0, len(result.Results))
+	for _, r := range result.Results {
+		y := ""
+		if len(r.FirstAirDate) >= 4 {
+			y = r.FirstAirDate[:4]
+		}
+		out = append(out, TVSearchCandidate{ID: fmt.Sprintf("%d", r.ID), Name: r.Name, Year: y})
+	}
+	return out, nil
+}
+
+// SearchMovie returns TMDB movie candidates for the given title and optional year.
+func (c *httpTMDBOriginClient) SearchMovie(title, year string) ([]MovieSearchCandidate, error) {
+	params := url.Values{"api_key": {c.apiKey}, "query": {title}}
+	if year != "" {
+		params.Set("year", year)
+	}
+	resp, err := c.client.Get(tmdbOriginBase + "/search/movie?" + params.Encode())
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Results []struct {
+			ID          int    `json:"id"`
+			Title       string `json:"title"`
+			ReleaseDate string `json:"release_date"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode movie search: %w", err)
+	}
+	out := make([]MovieSearchCandidate, 0, len(result.Results))
+	for _, r := range result.Results {
+		y := ""
+		if len(r.ReleaseDate) >= 4 {
+			y = r.ReleaseDate[:4]
+		}
+		out = append(out, MovieSearchCandidate{ID: fmt.Sprintf("%d", r.ID), Title: r.Title, Year: y})
+	}
+	return out, nil
 }
 
 // dirYearRe matches a " (YYYY)" suffix at the end of a directory name.
