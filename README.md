@@ -80,6 +80,7 @@ cbz-fix --dry-run    # preview without making changes
 cbz-fix --verbose    # show per-file rename details
 cbz-fix --no-blank   # rename and renumber without inserting a blank page
 cbz-fix --backup     # create a .bak file before overwriting
+cbz-fix --update-cover  # replace in-archive cover with a higher-res cover.jpg sibling
 ```
 
 #### Flags
@@ -91,6 +92,7 @@ cbz-fix --backup     # create a .bak file before overwriting
 | `--backup` | Create a `.bak` file before overwriting the original |
 | `--no-blank` | Skip blank page insertion (rename and renumber only) |
 | `--verbose` | Print each filename mapping for every CBZ processed |
+| `--update-cover` | For each CBZ, look for a `cover.jpg` in the same directory. If it is larger in both dimensions, replace the `cover.*` entry inside the CBZ. If only one dimension is greater, prompt interactively. |
 
 ### Output
 

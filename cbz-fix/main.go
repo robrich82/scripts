@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ func main() {
 	verbose := flag.Bool("verbose", false, "print each file rename")
 	noBlank := flag.Bool("no-blank", false, "skip blank page insertion")
 	backup := flag.Bool("backup", false, "create a .bak file before overwriting")
+	updateCover := flag.Bool("update-cover", false, "replace cover.* in each CBZ with a larger cover.jpg from the same directory")
 	flag.Parse()
 
 	dir := "."
@@ -23,6 +25,18 @@ func main() {
 
 	// --check implies dry-run
 	impliedDryRun := *dryRun || *check
+
+	// Build a prompt function once; used only in --update-cover mode.
+	stdinReader := bufio.NewReader(os.Stdin)
+	prompt := func(q string) (bool, error) {
+		fmt.Print(q)
+		line, err := stdinReader.ReadString('\n')
+		if err != nil {
+			return false, err
+		}
+		s := strings.ToLower(strings.TrimSpace(line))
+		return s == "y" || s == "yes", nil
+	}
 
 	var needsFix, errCount int
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -43,7 +57,13 @@ func main() {
 			fmt.Printf("%s\n", path)
 		}
 
-		skipped, processErr := processCBZ(path, impliedDryRun, *verbose, *noBlank, !*backup)
+		var skipped bool
+		var processErr error
+		if *updateCover {
+			skipped, processErr = updateCoverCBZ(path, impliedDryRun, *verbose, !*backup, prompt)
+		} else {
+			skipped, processErr = processCBZ(path, impliedDryRun, *verbose, *noBlank, !*backup)
+		}
 		if processErr != nil {
 			if *check {
 				fmt.Printf("%s\n", path)

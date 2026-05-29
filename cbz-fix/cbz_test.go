@@ -354,6 +354,174 @@ func TestProcessCBZ_Idempotent(t *testing.T) {
 	}
 }
 
+// ── updateCoverCBZ tests ───────────────────────────────────────────────────
+
+// TestUpdateCoverCBZ_ReplacesWhenLarger verifies that when cover.jpg in the
+// directory is strictly larger in both dimensions the cover is auto-replaced.
+func TestUpdateCoverCBZ_ReplacesWhenLarger(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", makePNG(100, 150)},
+		{"p001.png", makePNG(100, 150)},
+	})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "cover.jpg"), makePNG(200, 300), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	skipped, err := updateCoverCBZ(path, false, false, true, nil)
+	if err != nil {
+		t.Fatalf("updateCoverCBZ: %v", err)
+	}
+	if skipped {
+		t.Error("expected skipped=false when cover.jpg is larger")
+	}
+
+	names := readCBZNames(t, path)
+	if !containsEntry(names, "cover.jpg") {
+		t.Errorf("expected cover.jpg in CBZ; got %v", names)
+	}
+	if containsEntry(names, "cover.png") {
+		t.Error("old cover.png should have been removed")
+	}
+
+	data := readCBZEntry(t, path, "cover.jpg")
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode new cover: %v", err)
+	}
+	if img.Bounds().Dx() != 200 || img.Bounds().Dy() != 300 {
+		t.Errorf("new cover dims = %dx%d, want 200x300", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}
+
+// TestUpdateCoverCBZ_SkipsWhenSmaller verifies that a cover.jpg smaller than
+// the one in the CBZ causes a skip.
+func TestUpdateCoverCBZ_SkipsWhenSmaller(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", makePNG(200, 300)},
+		{"p001.png", makePNG(200, 300)},
+	})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "cover.jpg"), makePNG(100, 150), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	skipped, err := updateCoverCBZ(path, false, false, true, nil)
+	if err != nil {
+		t.Fatalf("updateCoverCBZ: %v", err)
+	}
+	if !skipped {
+		t.Error("expected skipped=true when cover.jpg is smaller")
+	}
+
+	names := readCBZNames(t, path)
+	if containsEntry(names, "cover.jpg") {
+		t.Error("cover.jpg should not have been written to CBZ")
+	}
+}
+
+// TestUpdateCoverCBZ_SkipsWhenNoCoverJPG verifies that a missing cover.jpg
+// sibling is a no-op.
+func TestUpdateCoverCBZ_SkipsWhenNoCoverJPG(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", makePNG(100, 150)},
+		{"p001.png", makePNG(100, 150)},
+	})
+
+	skipped, err := updateCoverCBZ(path, false, false, true, nil)
+	if err != nil {
+		t.Fatalf("updateCoverCBZ: %v", err)
+	}
+	if !skipped {
+		t.Error("expected skipped=true when no cover.jpg exists")
+	}
+}
+
+// TestUpdateCoverCBZ_SkipsWhenNoCoverInCBZ verifies that a CBZ with no cover.*
+// entry is a no-op.
+func TestUpdateCoverCBZ_SkipsWhenNoCoverInCBZ(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"p001.png", makePNG(100, 150)},
+		{"p002.png", makePNG(100, 150)},
+	})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "cover.jpg"), makePNG(200, 300), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	skipped, err := updateCoverCBZ(path, false, false, true, nil)
+	if err != nil {
+		t.Fatalf("updateCoverCBZ: %v", err)
+	}
+	if !skipped {
+		t.Error("expected skipped=true when CBZ has no cover.* entry")
+	}
+}
+
+// TestUpdateCoverCBZ_MixedDimsCallsPrompt verifies that when one dimension is
+// greater and the other is less, the prompt function is called.
+func TestUpdateCoverCBZ_MixedDimsCallsPrompt(t *testing.T) {
+	// CBZ cover 100×200; external cover is wider but shorter: 150×100.
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", makePNG(100, 200)},
+		{"p001.png", makePNG(100, 200)},
+	})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "cover.jpg"), makePNG(150, 100), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// User says no → should skip without modifying.
+	prompted := false
+	skipped, err := updateCoverCBZ(path, false, false, true, func(q string) (bool, error) {
+		prompted = true
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("updateCoverCBZ: %v", err)
+	}
+	if !prompted {
+		t.Error("expected prompt to be called for mixed dimensions")
+	}
+	if !skipped {
+		t.Error("expected skipped=true when user declines replacement")
+	}
+
+	// User says yes → cover should be replaced.
+	skipped, err = updateCoverCBZ(path, false, false, true, func(q string) (bool, error) {
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("updateCoverCBZ (yes): %v", err)
+	}
+	if skipped {
+		t.Error("expected skipped=false when user accepts replacement")
+	}
+	if !containsEntry(readCBZNames(t, path), "cover.jpg") {
+		t.Error("cover.jpg should be in CBZ after user accepted")
+	}
+}
+
+// TestUpdateCoverCBZ_DryRun verifies that dry-run leaves the file unchanged.
+func TestUpdateCoverCBZ_DryRun(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", makePNG(100, 150)},
+		{"p001.png", makePNG(100, 150)},
+	})
+	before := readCBZNames(t, path)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "cover.jpg"), makePNG(200, 300), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	skipped, err := updateCoverCBZ(path, true, false, true, nil)
+	if err != nil {
+		t.Fatalf("updateCoverCBZ dry-run: %v", err)
+	}
+	if skipped {
+		t.Error("expected skipped=false (would update) in dry-run")
+	}
+	after := readCBZNames(t, path)
+	if len(before) != len(after) {
+		t.Errorf("dry-run changed file: before=%v after=%v", before, after)
+	}
+}
+
 // TestProcessCBZ_NeedsFixing verifies that a CBZ requiring processing returns
 // skipped=false.
 func TestProcessCBZ_NeedsFixing(t *testing.T) {
