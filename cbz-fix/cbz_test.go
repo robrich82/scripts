@@ -498,6 +498,96 @@ func TestUpdateCoverCBZ_MixedDimsCallsPrompt(t *testing.T) {
 	}
 }
 
+// TestUpdateCoverCBZ_UpdatesComicInfo verifies that when the cover is replaced
+// the Image=0 entry in ComicInfo.xml has its width, height and size updated.
+// Fields that were absent in the original must not be added.
+func TestUpdateCoverCBZ_UpdatesComicInfo(t *testing.T) {
+	ci := `<?xml version="1.0" encoding="utf-8"?>
+<ComicInfo>
+  <Title>Test</Title>
+  <Pages>
+    <Page Image="0" ImageHeight="150" ImageSize="999" ImageWidth="100" Type="FrontCover" />
+    <Page Image="1" ImageWidth="100" ImageHeight="150" />
+  </Pages>
+</ComicInfo>`
+
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", makePNG(100, 150)},
+		{"p001.png", makePNG(100, 150)},
+		{"ComicInfo.xml", []byte(ci)},
+	})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "cover.jpg"), makePNG(200, 300), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := updateCoverCBZ(path, false, false, true, nil); err != nil {
+		t.Fatalf("updateCoverCBZ: %v", err)
+	}
+
+	ciData := readCBZEntry(t, path, "ComicInfo.xml")
+	var out ComicInfo
+	if err := xml.Unmarshal(ciData, &out); err != nil {
+		t.Fatalf("unmarshal ComicInfo.xml: %v", err)
+	}
+	if out.Title != "Test" {
+		t.Errorf("Title = %q, want %q", out.Title, "Test")
+	}
+	if out.Pages == nil || len(out.Pages.Pages) == 0 {
+		t.Fatal("Pages missing")
+	}
+	p0 := out.Pages.Pages[0]
+	if p0.ImageWidth != 200 {
+		t.Errorf("page 0 ImageWidth = %d, want 200", p0.ImageWidth)
+	}
+	if p0.ImageHeight != 300 {
+		t.Errorf("page 0 ImageHeight = %d, want 300", p0.ImageHeight)
+	}
+	if p0.ImageSize == 0 || p0.ImageSize == 999 {
+		t.Errorf("page 0 ImageSize = %d, want updated non-zero value", p0.ImageSize)
+	}
+}
+
+// TestUpdateCoverCBZ_ComicInfoAbsentFieldsNotAdded verifies that fields absent
+// in the original ComicInfo page 0 are not added after a cover replace.
+func TestUpdateCoverCBZ_ComicInfoAbsentFieldsNotAdded(t *testing.T) {
+	// Page 0 has no ImageSize or ImageWidth — only ImageHeight.
+	ci := `<?xml version="1.0" encoding="utf-8"?>
+<ComicInfo>
+  <Pages>
+    <Page Image="0" ImageHeight="150" Type="FrontCover" />
+  </Pages>
+</ComicInfo>`
+
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", makePNG(100, 150)},
+		{"p001.png", makePNG(100, 150)},
+		{"ComicInfo.xml", []byte(ci)},
+	})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "cover.jpg"), makePNG(200, 300), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := updateCoverCBZ(path, false, false, true, nil); err != nil {
+		t.Fatalf("updateCoverCBZ: %v", err)
+	}
+
+	ciData := readCBZEntry(t, path, "ComicInfo.xml")
+	var out ComicInfo
+	if err := xml.Unmarshal(ciData, &out); err != nil {
+		t.Fatalf("unmarshal ComicInfo.xml: %v", err)
+	}
+	p0 := out.Pages.Pages[0]
+	if p0.ImageHeight != 300 {
+		t.Errorf("page 0 ImageHeight = %d, want 300", p0.ImageHeight)
+	}
+	if p0.ImageWidth != 0 {
+		t.Errorf("page 0 ImageWidth = %d, want 0 (was absent in original)", p0.ImageWidth)
+	}
+	if p0.ImageSize != 0 {
+		t.Errorf("page 0 ImageSize = %d, want 0 (was absent in original)", p0.ImageSize)
+	}
+}
+
 // TestUpdateCoverCBZ_DryRun verifies that dry-run leaves the file unchanged.
 func TestUpdateCoverCBZ_DryRun(t *testing.T) {
 	path := makeCBZ(t, []zipEntry{

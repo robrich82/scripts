@@ -40,11 +40,13 @@ func updateCoverCBZ(cbzPath string, dryRun, verbose, noBackup bool, prompt func(
 	}
 
 	var coverEntry *zip.File
+	var ciEntry *zip.File
 	for _, f := range zr.File {
 		base := strings.ToLower(filepath.Base(f.Name))
-		if strings.HasPrefix(base, "cover.") && isImageFile(f.Name) {
+		if coverEntry == nil && strings.HasPrefix(base, "cover.") && isImageFile(f.Name) {
 			coverEntry = f
-			break
+		} else if base == "comicinfo.xml" {
+			ciEntry = f
 		}
 	}
 	if coverEntry == nil {
@@ -113,7 +115,9 @@ func updateCoverCBZ(cbzPath string, dryRun, verbose, noBackup bool, prompt func(
 		return false, fmt.Errorf("read cover.jpg: %w", err)
 	}
 
-	tmpPath, err := writeCBZWithNewCover(zr, coverEntry.Name, newCoverData, dir)
+	ciData := updatedComicInfo(ciEntry, newW, newH, len(newCoverData))
+
+	tmpPath, err := writeCBZWithNewCover(zr, coverEntry.Name, newCoverData, ciData, dir)
 	zr.Close()
 	if err != nil {
 		return false, fmt.Errorf("write new CBZ: %w", err)
@@ -162,10 +166,51 @@ func imageDimsZip(f *zip.File) (w, h int, err error) {
 	return cfg.Width, cfg.Height, nil
 }
 
+// updatedComicInfo parses ciEntry, updates the Image=0 page dimensions, and
+// returns re-marshalled XML.  Fields that were zero (absent) in the original
+// are left at zero so omitempty keeps them out of the output.
+// Returns nil if ciEntry is nil or on any error (caller skips the update).
+func updatedComicInfo(ciEntry *zip.File, newW, newH, newSize int) []byte {
+	if ciEntry == nil {
+		return nil
+	}
+	raw, err := readZipEntry(ciEntry)
+	if err != nil {
+		return nil
+	}
+	ci, err := parseComicInfo(raw)
+	if err != nil {
+		return nil
+	}
+	if ci.Pages != nil {
+		for i := range ci.Pages.Pages {
+			if ci.Pages.Pages[i].Image == 0 {
+				p := &ci.Pages.Pages[i]
+				if p.ImageWidth != 0 {
+					p.ImageWidth = newW
+				}
+				if p.ImageHeight != 0 {
+					p.ImageHeight = newH
+				}
+				if p.ImageSize != 0 {
+					p.ImageSize = int64(newSize)
+				}
+				break
+			}
+		}
+	}
+	out, err := marshalComicInfo(ci)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
 // writeCBZWithNewCover writes a new CBZ to a temp file in dir, copying all
 // entries from zr except the old cover (oldCoverName), which is replaced by
-// "cover.jpg" containing newCoverData.  Returns the temp file path.
-func writeCBZWithNewCover(zr *zip.ReadCloser, oldCoverName string, newCoverData []byte, dir string) (string, error) {
+// "cover.jpg" containing newCoverData.  If ciData is non-nil the ComicInfo.xml
+// entry is replaced with it.  Returns the temp file path.
+func writeCBZWithNewCover(zr *zip.ReadCloser, oldCoverName string, newCoverData, ciData []byte, dir string) (string, error) {
 	tmp, err := os.CreateTemp(dir, "cbzfix-*.tmp")
 	if err != nil {
 		return "", err
@@ -191,6 +236,7 @@ func writeCBZWithNewCover(zr *zip.ReadCloser, oldCoverName string, newCoverData 
 	}
 
 	// Copy remaining entries, skipping the replaced cover.
+	// Replace ComicInfo.xml content if ciData is provided.
 	for _, f := range zr.File {
 		if f.Name == oldCoverName {
 			continue
@@ -199,6 +245,13 @@ func writeCBZWithNewCover(zr *zip.ReadCloser, oldCoverName string, newCoverData 
 		if err != nil {
 			cleanup()
 			return "", fmt.Errorf("create entry %s: %w", f.Name, err)
+		}
+		if ciData != nil && strings.EqualFold(filepath.Base(f.Name), "comicinfo.xml") {
+			if _, err := w.Write(ciData); err != nil {
+				cleanup()
+				return "", fmt.Errorf("write ComicInfo.xml: %w", err)
+			}
+			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
