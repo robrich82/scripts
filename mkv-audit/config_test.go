@@ -8,6 +8,7 @@ func TestNormalizeLanguage(t *testing.T) {
 		{"en", "eng"},
 		{"en-US", "eng"},
 		{"EN", "eng"},
+		{"enm", "eng"}, // Middle English — treat as English
 		{"ja", "jpn"},
 		{"ja_JP", "jpn"},
 		{"jpn", "jpn"},

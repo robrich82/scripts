@@ -36,7 +36,7 @@ func normalizeLanguage(code string) string {
 	}
 	c := strings.ToLower(strings.ReplaceAll(code, "_", "-"))
 	switch {
-	case strings.HasPrefix(c, "en") || c == "eng":
+	case strings.HasPrefix(c, "en") || c == "eng": // includes enm (Middle English)
 		return "eng"
 	case strings.HasPrefix(c, "ja") || strings.HasPrefix(c, "jp") || c == "jap" || c == "japn":
 		return "jpn"
