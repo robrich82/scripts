@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const tmdbOriginBase = "https://api.themoviedb.org/3"
@@ -73,7 +74,7 @@ type httpTMDBOriginClient struct {
 }
 
 func newHTTPTMDBOriginClient(apiKey string) *httpTMDBOriginClient {
-	return &httpTMDBOriginClient{apiKey: apiKey, client: &http.Client{}}
+	return &httpTMDBOriginClient{apiKey: apiKey, client: &http.Client{Timeout: 30 * time.Second}}
 }
 
 // GetTVOrigin searches /search/tv which returns both original_language and
