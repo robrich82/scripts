@@ -226,7 +226,7 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 
 // processFile looks up the movie on TMDB by filename, fetches full metadata,
 // and applies it to the MKV file (title, date header, tags, poster, timestamps).
-func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, force bool) FileResult {
+func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, force bool) FileResult {
 	basename := filepath.Base(filePath)
 
 	// 1. Derive title and year from filename.
@@ -319,9 +319,14 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 
 	// 6. Build tags XML and download poster (only when applying metadata).
+	stem := strings.TrimSuffix(basename, filepath.Ext(basename))
+	var deband bool
+	if entry, ok := manualData[stem]; ok && entry.Deband != nil {
+		deband = *entry.Deband
+	}
 	var tagsPath, posterPath string
 	if needsApply && applier != nil {
-		xml := buildMovieTagXML(details.Overview, tmdbID, details.ReleaseDate, rating)
+		xml := buildMovieTagXML(details.Overview, tmdbID, details.ReleaseDate, rating, deband)
 		if xml != "" {
 			tagsPath, err = writeTempTagFile(xml)
 			if err != nil {
@@ -406,7 +411,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 
 // buildMovieTagXML constructs the Matroska tags XML for the given movie metadata.
 // Returns an empty string when there is nothing to tag.
-func buildMovieTagXML(overview, tmdbID, dateStr string, rating NZRating) string {
+func buildMovieTagXML(overview, tmdbID, dateStr string, rating NZRating, deband bool) string {
 	var elements []string
 
 	if dateStr != "" {
@@ -435,6 +440,11 @@ func buildMovieTagXML(overview, tmdbID, dateStr string, rating NZRating) string 
 			"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
 				"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>",
 			rating))
+	}
+	if deband {
+		elements = append(elements,
+			"<Simple><Name>DEBAND</Name><String>true</String></Simple>",
+		)
 	}
 
 	if len(elements) == 0 {
@@ -521,7 +531,7 @@ func extractYear(filename string) string {
 }
 
 // walkAndProcess walks root for .mkv files and processes each one.
-func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, force bool, cutoff time.Time) Stats {
+func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, force bool, cutoff time.Time) Stats {
 	var stats Stats
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -537,7 +547,7 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 				return nil
 			}
 		}
-		switch processFile(path, tmdb, applier, timer, rr, cache, force) {
+		switch processFile(path, tmdb, applier, timer, rr, cache, manualData, force) {
 		case ResultUpdated:
 			stats.Updated++
 		case ResultOK:
@@ -555,6 +565,77 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 			fmt.Printf("[!] Failed to save rating cache: %v\n", err)
 		}
 	}
+	return stats
+}
+
+// applyDebandOnlyFile updates only the DEBAND MKV tag for filePath, preserving
+// all other existing tags and restoring the original file timestamps afterward.
+func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer FileTimer) bool {
+	if !tagger.Available() {
+		fmt.Println("  [!] mkvpropedit or mkvextract not found in PATH")
+		return false
+	}
+
+	origStat, statErr := os.Stat(filePath)
+
+	currentXML, err := tagger.ExtractTags(filePath)
+	if err != nil {
+		fmt.Printf("  [!] Failed to extract tags: %v\n", err)
+		return false
+	}
+
+	updatedXML := updateDebandInXML(currentXML, deband)
+
+	tagsPath, err := tagger.WriteTempTags(updatedXML)
+	if err != nil {
+		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
+		return false
+	}
+	defer tagger.Cleanup(tagsPath)
+
+	if err := tagger.ApplyTags(filePath, tagsPath); err != nil {
+		fmt.Printf("  [!] mkvpropedit failed: %v\n", err)
+		return false
+	}
+
+	if statErr == nil {
+		if err := timer.SetTimes(filePath, origStat.ModTime()); err != nil {
+			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		}
+		if err := timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
+			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		}
+	}
+	return true
+}
+
+// runDebandOnly scans dir and updates only the DEBAND MKV tag for files that
+// have an explicit deband entry in manualData. All other tags and timestamps
+// are preserved. Files not in manualData are skipped entirely.
+func runDebandOnly(dir string, manualData map[string]MovieManualEntry, tagger MKVTagger, timer FileTimer) Stats {
+	var stats Stats
+	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
+			return nil
+		}
+		stem := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+		entry, ok := manualData[stem]
+		if !ok || entry.Deband == nil {
+			return nil
+		}
+		deband := *entry.Deband
+		if applyDebandOnlyFile(path, deband, tagger, timer) {
+			fmt.Printf("[✓] Deband updated: %s\n", d.Name())
+			stats.Updated++
+		} else {
+			fmt.Printf("  [X] Deband update failed: %s\n", d.Name())
+			stats.Errors++
+		}
+		return nil
+	})
 	return stats
 }
 

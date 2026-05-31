@@ -135,7 +135,7 @@ func TestParseDate_InvalidYear(t *testing.T) {
 func TestProcessFile_TMDBSearchError_Error(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	tmdb := &fakeTMDBMovieClient{err: fmt.Errorf("network error")}
-	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), false)
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
 	if result != ResultError {
 		t.Errorf("got %v, want ResultError", result)
 	}
@@ -144,7 +144,7 @@ func TestProcessFile_TMDBSearchError_Error(t *testing.T) {
 func TestProcessFile_TMDBNotFound_Skipped(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	tmdb := &fakeTMDBMovieClient{tmdbID: "", details: MovieDetails{}}
-	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), false)
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped", result)
 	}
@@ -153,7 +153,7 @@ func TestProcessFile_TMDBNotFound_Skipped(t *testing.T) {
 func TestProcessFile_NoReleaseDate_Skipped(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: MovieDetails{TMDBID: "12345", Title: "Avengers Endgame"}}
-	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), false)
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped", result)
 	}
@@ -172,7 +172,7 @@ func TestProcessFile_AlreadyApplied_MtimeCurrent_OK(t *testing.T) {
 	cache.SetTMDBID("Avengers Endgame:2019", "12345")
 	cache.MarkMetaApplied(path, "12345")
 
-	result := processFile(path, tmdb, applier, timer, nil, cache, false)
+	result := processFile(path, tmdb, applier, timer, nil, cache, nil, false)
 	if result != ResultOK {
 		t.Errorf("got %v, want ResultOK", result)
 	}
@@ -194,7 +194,7 @@ func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)
 
-	result := processFile(path, tmdb, applier, timer, nil, cache, false)
+	result := processFile(path, tmdb, applier, timer, nil, cache, nil, false)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated", result)
 	}
@@ -232,7 +232,7 @@ func TestProcessFile_AppliedButMtimeWrong_FixesTimestamps(t *testing.T) {
 	cache.SetTMDBID("Avengers Endgame:2019", "12345")
 	cache.MarkMetaApplied(path, "12345")
 
-	result := processFile(path, tmdb, applier, timer, nil, cache, false)
+	result := processFile(path, tmdb, applier, timer, nil, cache, nil, false)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated (mtime wrong)", result)
 	}
@@ -260,7 +260,7 @@ func TestProcessFile_Overwrite_ReappliesEvenIfApplied(t *testing.T) {
 	prompter := func(string) (string, error) { return "", nil }
 	rr := newMovieRatingResolver(nil, cache, true /* overwrite */, false, nil, prompter)
 
-	result := processFile(path, tmdb, applier, timer, rr, cache, false)
+	result := processFile(path, tmdb, applier, timer, rr, cache, nil, false)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated (overwrite forces re-apply)", result)
 	}
@@ -280,7 +280,7 @@ func TestProcessFile_MkvpropeditRuns_AlwaysRestoresMtime(t *testing.T) {
 	cache := makeCache(t)
 	// Not yet applied — mkvpropedit will run.
 
-	processFile(path, tmdb, applier, timer, nil, cache, false)
+	processFile(path, tmdb, applier, timer, nil, cache, nil, false)
 
 	if len(timer.setTimesCalls) == 0 {
 		t.Error("SetTimes must be called after mkvpropedit even when mtime was already correct")
@@ -301,7 +301,7 @@ func TestProcessFile_WithRating_TagsPathSet(t *testing.T) {
 	prompter := func(string) (string, error) { return "", nil }
 	rr := newMovieRatingResolver(nil, cache, false, false, nil, prompter)
 
-	result := processFile(path, tmdb, applier, timer, rr, cache, false)
+	result := processFile(path, tmdb, applier, timer, rr, cache, nil, false)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated", result)
 	}
@@ -397,7 +397,7 @@ func TestWalkAndProcess_SkipsNonMKV(t *testing.T) {
 
 	tmdb := &fakeTMDBMovieClient{}
 	cache := makeCache(t)
-	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false, time.Time{})
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
 	if stats.Skipped != 0 || stats.Updated != 0 || stats.Errors != 0 {
 		t.Errorf("unexpected stats for non-mkv file: %+v", stats)
 	}
@@ -410,7 +410,7 @@ func TestWalkAndProcess_CountsSkipped(t *testing.T) {
 	// TMDB finds nothing → skipped.
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
 	cache := makeCache(t)
-	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false, time.Time{})
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
 	if stats.Skipped != 1 {
 		t.Errorf("got Skipped=%d, want 1", stats.Skipped)
 	}

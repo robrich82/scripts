@@ -278,6 +278,7 @@ Flags:
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--force` | Re-apply all metadata even if already cached |
 | `--clean` | Remove cache entries for movie files that no longer exist on disk, then exit |
+| `--deband-only` | Update only the `DEBAND` MKV tag for movies configured in `manual_data.json`; preserves all other tags and timestamps |
 
 Output:
 
@@ -289,6 +290,7 @@ Updated: 8  OK: 42  Skipped: 3  Errors: 0
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
 - `mkvpropedit` — writes metadata to MKV files (optional; a warning is shown if missing)
+- `mkvextract` — required for `--deband-only` mode (part of MKVToolNix)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
 
 When Plex is configured, after processing each movie the tool pushes the resolved NZ content rating and selects the appropriate audio and subtitle streams: the audio track matching the TMDB original language (e.g. Japanese for anime) and the first non-forced English subtitle. Stream selection is cached in `movie_rating_cache.json` and only applied once per movie; use `--overwrite-streams` to force a re-apply.
@@ -302,6 +304,22 @@ The cache is stored in `%APPDATA%\mkv-movie\movie_rating_cache.json`
 (Windows) or `$XDG_CONFIG_HOME/mkv-movie/movie_rating_cache.json` (Linux/macOS).
 It persists TMDB IDs (keyed by `title:YEAR`), NZ ratings, and which files have
 already had their full metadata written.
+
+#### manual_data.json
+
+An optional `manual_data.json` in the config directory allows per-movie overrides.
+Keys are filename stems (filename without `.mkv`):
+
+```json
+{
+  "Coco (2017)": { "deband": true },
+  "Spirited Away (2001)": { "deband": true }
+}
+```
+
+**`deband`** — when `true`, embeds a `DEBAND=true` tag in the MKV alongside the
+other metadata. Use `--deband-only` to update only this tag without touching any
+other metadata or timestamps.
 
 ---
 

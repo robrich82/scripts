@@ -15,6 +15,7 @@ func main() {
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
 	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, then exit.")
+	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	flag.Parse()
 
 	if *cleanFlag {
@@ -37,20 +38,6 @@ func main() {
 		}
 	}
 
-	tmdbKey := os.Getenv("TMDB_API_KEY")
-	if tmdbKey == "" {
-		fmt.Fprintln(os.Stderr, "Error: TMDB_API_KEY environment variable is not set.")
-		os.Exit(1)
-	}
-	tmdb := newTMDBMovieSource(tmdbKey)
-
-	applier, err := newRealMKVApplier()
-	if err != nil {
-		// mkvpropedit is optional — metadata will not be written.
-		fmt.Fprintln(os.Stderr, "Warning: 'mkvpropedit' not found. MKV metadata will not be updated.")
-		applier = nil
-	}
-
 	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
@@ -67,7 +54,36 @@ func main() {
 		os.Exit(1)
 	}
 
+	manualData, err := LoadMovieManualData(filepath.Join(cfgDir, "manual_data.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
+		os.Exit(1)
+	}
+
 	timer := &win32FileTimer{}
+
+	// --deband-only mode: update the DEBAND tag for configured files only.
+	if *debandOnlyMode {
+		tagger := newRealMKVTagger()
+		fmt.Printf("Updating DEBAND tags in %s...\n", dir)
+		stats := runDebandOnly(dir, manualData, tagger, timer)
+		fmt.Printf("\nDone. Updated: %d  Failed: %d\n", stats.Updated, stats.Errors)
+		return
+	}
+
+	tmdbKey := os.Getenv("TMDB_API_KEY")
+	if tmdbKey == "" {
+		fmt.Fprintln(os.Stderr, "Error: TMDB_API_KEY environment variable is not set.")
+		os.Exit(1)
+	}
+	tmdb := newTMDBMovieSource(tmdbKey)
+
+	applier, err := newRealMKVApplier()
+	if err != nil {
+		// mkvpropedit is optional — metadata will not be written.
+		fmt.Fprintln(os.Stderr, "Warning: 'mkvpropedit' not found. MKV metadata will not be updated.")
+		applier = nil
+	}
 
 	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
@@ -103,7 +119,7 @@ func main() {
 		fmt.Printf("--- Cutoff date: %s ---\n", cutoff.Format("2006-01-02"))
 	}
 	fmt.Printf("Scanning %s...\n", dir)
-	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, *force, cutoff)
+	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, manualData, *force, cutoff)
 
 	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Skipped (old): %d  Errors: %d\n",
 		stats.Updated, stats.OK, stats.Skipped, stats.SkippedOld, stats.Errors)

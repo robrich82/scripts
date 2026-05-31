@@ -11,14 +11,14 @@ import (
 // --- buildMovieTagXML tests ---
 
 func TestBuildMovieTagXML_Empty_ReturnsEmpty(t *testing.T) {
-	xml := buildMovieTagXML("", "", "", RatingNone)
+	xml := buildMovieTagXML("", "", "", RatingNone, false)
 	if xml != "" {
 		t.Errorf("got %q, want empty string when all inputs are empty", xml)
 	}
 }
 
 func TestBuildMovieTagXML_DateOnly_ContainsTags(t *testing.T) {
-	xml := buildMovieTagXML("", "", "2021-06-15", RatingNone)
+	xml := buildMovieTagXML("", "", "2021-06-15", RatingNone, false)
 	if !strings.Contains(xml, "<String>2021-06-15</String>") {
 		t.Errorf("xml missing DATE tag: %s", xml)
 	}
@@ -28,14 +28,14 @@ func TestBuildMovieTagXML_DateOnly_ContainsTags(t *testing.T) {
 }
 
 func TestBuildMovieTagXML_YearOnly_ExpandsToFullDate(t *testing.T) {
-	xml := buildMovieTagXML("", "", "2019", RatingNone)
+	xml := buildMovieTagXML("", "", "2019", RatingNone, false)
 	if !strings.Contains(xml, "<String>2019</String>") {
 		t.Errorf("xml missing year string: %s", xml)
 	}
 }
 
 func TestBuildMovieTagXML_Overview_EscapesXML(t *testing.T) {
-	xml := buildMovieTagXML("A & <B> \"C\"", "", "2020-01-01", RatingNone)
+	xml := buildMovieTagXML("A & <B> \"C\"", "", "2020-01-01", RatingNone, false)
 	if strings.Contains(xml, "<B>") {
 		t.Errorf("xml should escape < and >: %s", xml)
 	}
@@ -51,7 +51,7 @@ func TestBuildMovieTagXML_Overview_EscapesXML(t *testing.T) {
 }
 
 func TestBuildMovieTagXML_RatingIncluded(t *testing.T) {
-	xml := buildMovieTagXML("", "99", "2021-01-01", RatingR16)
+	xml := buildMovieTagXML("", "99", "2021-01-01", RatingR16, false)
 	if !strings.Contains(xml, "R16") {
 		t.Errorf("xml should contain rating R16: %s", xml)
 	}
@@ -61,7 +61,7 @@ func TestBuildMovieTagXML_RatingIncluded(t *testing.T) {
 }
 
 func TestBuildMovieTagXML_TMDBID_Included(t *testing.T) {
-	xml := buildMovieTagXML("", "42", "", RatingNone)
+	xml := buildMovieTagXML("", "42", "", RatingNone, false)
 	if !strings.Contains(xml, "<String>42</String>") {
 		t.Errorf("xml should contain TMDB ID: %s", xml)
 	}
@@ -71,7 +71,7 @@ func TestBuildMovieTagXML_TMDBID_Included(t *testing.T) {
 }
 
 func TestBuildMovieTagXML_LongDateString_TruncatesToTen(t *testing.T) {
-	xml := buildMovieTagXML("", "", "2022-08-20T00:00:00Z", RatingNone)
+	xml := buildMovieTagXML("", "", "2022-08-20T00:00:00Z", RatingNone, false)
 	if !strings.Contains(xml, "<String>2022-08-20</String>") {
 		t.Errorf("xml should truncate date to 10 chars: %s", xml)
 	}
@@ -149,7 +149,7 @@ func TestProcessFile_BadFilename_Skipped(t *testing.T) {
 	// "(2019).mkv" → year="2019", title="" after truncation.
 	path := makeTempMKVNamed(t, "(2019).mkv")
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
-	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), false)
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped for empty-title filename", result)
 	}
@@ -171,7 +171,7 @@ func TestProcessFile_ApplierError_ReturnsUpdated_WithoutMarkingApplied(t *testin
 	cache := makeCache(t)
 
 	// When apply fails, meta should NOT be marked applied.
-	processFile(path, tmdb, applier, timer, nil, cache, false)
+	processFile(path, tmdb, applier, timer, nil, cache, nil, false)
 	if cache.IsMetaApplied(path, "27205") {
 		t.Error("meta should not be marked applied when Apply() returns an error")
 	}
@@ -201,7 +201,7 @@ func TestProcessFile_CachedTMDBID_SkipsSearch(t *testing.T) {
 	// Pre-seed the TMDB ID so search should be skipped.
 	cache.SetTMDBID("Interstellar:2014", "157336")
 
-	result := processFile(path, tmdb, applier, timer, nil, cache, false)
+	result := processFile(path, tmdb, applier, timer, nil, cache, nil, false)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated", result)
 	}
@@ -227,7 +227,7 @@ func TestProcessFile_ForceFlag_ReappliesEvenWhenApplied(t *testing.T) {
 	cache.SetTMDBID("Parasite:2019", "496243")
 	cache.MarkMetaApplied(path, "496243")
 
-	result := processFile(path, tmdb, applier, timer, nil, cache, true /* force */)
+	result := processFile(path, tmdb, applier, timer, nil, cache, nil, true /* force */)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated when force=true", result)
 	}
@@ -254,7 +254,7 @@ func TestProcessFile_CtimeNeedsUpdate_SetsCreationTime(t *testing.T) {
 	cache.SetTMDBID("Avengers:2012", "24428")
 	cache.MarkMetaApplied(path, "24428")
 
-	result := processFile(path, tmdb, applier, timer, nil, cache, false)
+	result := processFile(path, tmdb, applier, timer, nil, cache, nil, false)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated (ctime needs fixing)", result)
 	}
@@ -281,7 +281,7 @@ func TestWalkAndProcess_MultipleFiles_CountsAll(t *testing.T) {
 	// Client always returns not-found.
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
 	cache := makeCache(t)
-	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false, time.Time{})
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
 
 	// All three have derivable titles and go to TMDB, which returns not-found for each.
 	if stats.Skipped != 3 {
@@ -300,7 +300,7 @@ func TestWalkAndProcess_SavesCache(t *testing.T) {
 	cache.Set("test", RatingG)
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
-	walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, false, time.Time{})
+	walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
 
 	if _, statErr := os.Stat(cacheFile); os.IsNotExist(statErr) {
 		t.Error("cache file should be written by walkAndProcess")
