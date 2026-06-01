@@ -283,14 +283,32 @@ func normalizeTitleChars(s string) string {
 	return s
 }
 
+// isFileExtension returns true when s looks like a bare file extension:
+// 2–5 ASCII letters, no spaces or digits.
+func isFileExtension(s string) bool {
+	if len(s) < 2 || len(s) > 5 {
+		return false
+	}
+	for _, c := range s {
+		if c < 'a' || c > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
 // dirTitleYear parses a content-root directory name (e.g. "Show Name (2023)")
 // into a search title and year. Strips any file extension first so flat movie
 // filenames work too. Filesystem-safe substitute characters (e.g. ꞉ for :)
 // are converted back to their real equivalents before returning.
 func dirTitleYear(dirName string) (title, year string) {
 	// Strip file extension if present (flat movie libraries use filenames as roots).
+	// Only strip if the suffix looks like a real extension: no spaces, 2-5 alpha chars.
 	if idx := strings.LastIndex(dirName, "."); idx > 0 {
-		dirName = dirName[:idx]
+		ext := dirName[idx+1:]
+		if isFileExtension(ext) {
+			dirName = dirName[:idx]
+		}
 	}
 	dirName = normalizeTitleChars(dirName)
 	m := dirYearRe.FindStringSubmatchIndex(dirName)

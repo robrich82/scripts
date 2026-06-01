@@ -207,6 +207,16 @@ func TestDirTitleYear_FullwidthQuestionMark(t *testing.T) {
 	}
 }
 
+func TestDirTitleYear_PeriodInTitleSubdir(t *testing.T) {
+	// Subdirectory name: no extension, but title contains a period.
+	// Must not truncate at the period mid-title.
+	title, year := dirTitleYear("Fate╱stay night꞉ Heaven's Feel I. Presage Flower (2017)")
+	wantTitle := "Fate/stay night: Heaven's Feel I. Presage Flower"
+	if title != wantTitle || year != "2017" {
+		t.Errorf("got title=%q year=%q, want %q %q", title, year, wantTitle, "2017")
+	}
+}
+
 func TestResolveIETFMap_CaseInsensitive(t *testing.T) {
 	root := t.TempDir()
 	lib := &Library{
