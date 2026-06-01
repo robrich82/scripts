@@ -1,0 +1,128 @@
+package main
+
+import (
+	"archive/zip"
+	"path"
+	"regexp"
+	"strings"
+)
+
+var (
+	reCalibreNext = regexp.MustCompile(`(?i)<a\s[^>]*class=["']calibreANext["'][^>]*>`)
+	reHref        = regexp.MustCompile(`(?i)\bhref=["']([^"']*)["']`)
+	reImgSrc      = regexp.MustCompile(`(?i)<img\s[^>]*\bsrc=["']([^"']*)["']`)
+)
+
+// kfxPageOrder detects a calibre-exported KFX CBZ (root HTML + matching
+// *_files/ directory containing XHTML pages) and returns all comic images in
+// reading order by following the calibreANext navigation chain.
+// Returns nil if the structure is not present or cannot be parsed.
+func kfxPageOrder(zr *zip.Reader) []*zip.File {
+	byName := make(map[string]*zip.File, len(zr.File))
+	for _, f := range zr.File {
+		byName[f.Name] = f
+	}
+
+	// Find a root-level .html whose stem+"_files/" prefix exists in the zip.
+	var htmlPath string
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		name := f.Name
+		if strings.ContainsRune(name, '/') {
+			continue // not at root
+		}
+		if !strings.EqualFold(path.Ext(name), ".html") {
+			continue
+		}
+		stem := strings.TrimSuffix(name, path.Ext(name))
+		prefix := stem + "_files/"
+		for zipName := range byName {
+			if strings.HasPrefix(zipName, prefix) {
+				htmlPath = name
+				break
+			}
+		}
+		if htmlPath != "" {
+			break
+		}
+	}
+	if htmlPath == "" {
+		return nil
+	}
+
+	htmlData, err := readZipEntry(byName[htmlPath])
+	if err != nil {
+		return nil
+	}
+
+	// First page is the calibreANext link from the main HTML.
+	current := calibreNextLink(string(htmlData))
+	if current == "" {
+		return nil
+	}
+
+	var ordered []*zip.File
+	seen := make(map[string]bool)
+
+	for current != "" && !seen[current] {
+		seen[current] = true
+		f := byName[current]
+		if f == nil || f.FileInfo().IsDir() {
+			break
+		}
+		data, err := readZipEntry(f)
+		if err != nil {
+			break
+		}
+		body := string(data)
+		dir := current[:strings.LastIndex(current, "/")+1]
+
+		// Collect the image referenced by this XHTML page.
+		if src := calibreImgSrc(body); src != "" && !strings.HasPrefix(src, "http") {
+			imgPath := path.Clean(dir + src)
+			if img := byName[imgPath]; img != nil && isImageFile(imgPath) {
+				ordered = append(ordered, img)
+			}
+		}
+
+		// Advance to next XHTML; stop when we leave the _files tree.
+		nextRel := calibreNextLink(body)
+		if nextRel == "" {
+			break
+		}
+		nextAbs := path.Clean(dir + nextRel)
+		if !strings.EqualFold(path.Ext(nextAbs), ".xhtml") {
+			break
+		}
+		current = nextAbs
+	}
+
+	if len(ordered) == 0 {
+		return nil
+	}
+	return ordered
+}
+
+// calibreNextLink returns the href of the first <a class="calibreANext"> in s.
+func calibreNextLink(s string) string {
+	m := reCalibreNext.FindStringIndex(s)
+	if m == nil {
+		return ""
+	}
+	hm := reHref.FindStringSubmatch(s[m[0]:m[1]])
+	if hm == nil {
+		return ""
+	}
+	return hm[1]
+}
+
+// calibreImgSrc returns the src of the first <img> in s.
+func calibreImgSrc(s string) string {
+	m := reImgSrc.FindStringSubmatch(s)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}

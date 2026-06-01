@@ -588,6 +588,134 @@ func TestUpdateCoverCBZ_ComicInfoAbsentFieldsNotAdded(t *testing.T) {
 	}
 }
 
+// ── KFX / calibre-HTML ordering tests ─────────────────────────────────────
+
+// makeKFXCBZ creates a CBZ with the calibre KFX export structure:
+// a root HTML file with calibreANext navigation pointing to XHTML pages
+// inside a matching *_files/OEBPS/ directory.
+// pages is a slice of image names (without directory prefix) that define
+// reading order via the XHTML navigation chain; images are portrait PNGs.
+func makeKFXCBZ(t *testing.T, pages []string) string {
+	t.Helper()
+
+	const filesDir = "kfxtest_files/OEBPS/"
+
+	// Build XHTML content for each page with next-page links.
+	xhtmlFor := func(imgName, nextPage string) string {
+		next := ""
+		if nextPage != "" {
+			next = `<a href="` + nextPage + `" class="calibreANext">next page</a>`
+		}
+		return `<html><body>` +
+			`<img src="` + imgName + `" alt="page"/>` +
+			next +
+			`</body></html>`
+	}
+
+	var entries []zipEntry
+
+	// Root HTML whose calibreANext points to the first XHTML page.
+	firstXHTML := ""
+	if len(pages) > 0 {
+		firstXHTML = filesDir + "page_" + pages[0] + ".xhtml"
+	}
+	rootHTML := `<html><body><a href="` + firstXHTML + `" class="calibreANext">start</a></body></html>`
+	entries = append(entries, zipEntry{"kfxtest.html", []byte(rootHTML)})
+
+	for i, img := range pages {
+		xhtmlName := "page_" + img + ".xhtml"
+		nextXHTML := ""
+		if i+1 < len(pages) {
+			nextXHTML = "page_" + pages[i+1] + ".xhtml"
+		}
+		entries = append(entries, zipEntry{filesDir + xhtmlName, []byte(xhtmlFor(img+".png", nextXHTML))})
+		entries = append(entries, zipEntry{filesDir + img + ".png", portrait})
+	}
+
+	return makeCBZ(t, entries)
+}
+
+// TestKFXPageOrder verifies that kfxPageOrder returns images in the order
+// defined by the XHTML navigation chain, not alphabetical filename order.
+func TestKFXPageOrder(t *testing.T) {
+	// Natural sort: img_a, img_b, img_c. HTML chain: img_c → img_a → img_b.
+	pages := []string{"img_c", "img_a", "img_b"}
+	path := makeKFXCBZ(t, pages)
+
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	ordered := kfxPageOrder(&zr.Reader)
+	if ordered == nil {
+		t.Fatal("kfxPageOrder returned nil for KFX CBZ")
+	}
+	if len(ordered) != 3 {
+		t.Fatalf("got %d images, want 3", len(ordered))
+	}
+
+	want := []string{
+		"kfxtest_files/OEBPS/img_c.png",
+		"kfxtest_files/OEBPS/img_a.png",
+		"kfxtest_files/OEBPS/img_b.png",
+	}
+	for i, f := range ordered {
+		if f.Name != want[i] {
+			t.Errorf("ordered[%d] = %q, want %q", i, f.Name, want[i])
+		}
+	}
+}
+
+// TestKFXPageOrder_NonKFX verifies that kfxPageOrder returns nil for a
+// regular CBZ (no HTML file).
+func TestKFXPageOrder_NonKFX(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"001.png", portrait},
+		{"002.png", portrait},
+	})
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	if got := kfxPageOrder(&zr.Reader); got != nil {
+		t.Errorf("kfxPageOrder returned non-nil for non-KFX CBZ: %v", got)
+	}
+}
+
+// TestProcessCBZ_KFXOrdering verifies that processCBZ renames pages using the
+// HTML navigation order rather than the natural sort of image filenames.
+func TestProcessCBZ_KFXOrdering(t *testing.T) {
+	// HTML chain: img_c → img_a → img_b (all portrait → blank inserted after cover).
+	path := makeKFXCBZ(t, []string{"img_c", "img_a", "img_b"})
+
+	if _, err := processCBZ(path, false, false, false, true); err != nil {
+		t.Fatalf("processCBZ: %v", err)
+	}
+
+	names := readCBZNames(t, path)
+
+	// cover should be img_c (first in chain), not img_a (first alphabetically).
+	if !containsEntry(names, "cover.png") {
+		t.Error("expected cover.png in output")
+	}
+	// p001 is blank, p002 = img_a, p003 = img_b.
+	for _, want := range []string{"p001.png", "p002.png", "p003.png", "ComicInfo.xml"} {
+		if !containsEntry(names, want) {
+			t.Errorf("missing %q in output; got %v", want, names)
+		}
+	}
+	// Original KFX XHTML and HTML entries are not images and are dropped.
+	for _, old := range []string{"kfxtest_files/OEBPS/img_a.png", "kfxtest_files/OEBPS/img_b.png", "kfxtest_files/OEBPS/img_c.png"} {
+		if containsEntry(names, old) {
+			t.Errorf("original KFX entry %q should have been removed", old)
+		}
+	}
+}
+
 // TestUpdateCoverCBZ_DryRun verifies that dry-run leaves the file unchanged.
 func TestUpdateCoverCBZ_DryRun(t *testing.T) {
 	path := makeCBZ(t, []zipEntry{

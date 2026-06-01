@@ -52,13 +52,18 @@ Normalises CBZ comic archives for consistent two-page-spread viewing:
 
 1. **Backs up** each CBZ to `<file>.cbz.bak` alongside the original.
 2. **Reads `ComicInfo.xml`** (if present) to gather page metadata.
-3. **Renames the cover** (first image by natural sort order) to `cover.<ext>`.
-4. **Inserts a blank page** — white, same dimensions as the first non-double-page
+3. **Determines page order**: for calibre KFX exports (a root `.html` file next
+   to a matching `*_files/` directory), the XHTML navigation chain is followed
+   to get the correct reading order — image filenames in these archives are
+   opaque hashes that sort incorrectly by name. For all other CBZs, images are
+   sorted by natural (numeric) order.
+4. **Renames the cover** (first image in reading order) to `cover.<ext>`.
+5. **Inserts a blank page** — white, same dimensions as the first non-double-page
    after the cover — so that interior pages land on the correct side in a
    two-page-spread viewer.
-5. **Renames all remaining pages** to `p001.<ext>`, `p002.<ext>`, … in sort order,
+6. **Renames all remaining pages** to `p001.<ext>`, `p002.<ext>`, … in reading order,
    moving every image to the root of the zip.
-6. **Updates `ComicInfo.xml`** `PageCount` and `Pages` to reflect the new layout.
+7. **Updates `ComicInfo.xml`** `PageCount` and `Pages` to reflect the new layout.
    Creates a minimal `ComicInfo.xml` if one did not exist.
 
 A double-page spread is detected by checking `DoublePage="true"` or

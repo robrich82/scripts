@@ -72,10 +72,17 @@ func processCBZ(path string, dryRun, verbose, noBlank, noBackup bool) (skipped b
 		return false, fmt.Errorf("no image files found")
 	}
 
-	// ── Sort images (natural, case-insensitive — same as CBZ viewers) ──────
-	sort.Slice(imgs, func(i, j int) bool {
-		return naturalLess(imgs[i].Name, imgs[j].Name)
-	})
+	// ── Sort images ───────────────────────────────────────────────────────
+	// For calibre KFX exports (root HTML + *_files/ tree) the XHTML
+	// navigation chain defines reading order; image filenames are opaque
+	// hashes that sort incorrectly by name.
+	if kfxOrder := kfxPageOrder(&zr.Reader); kfxOrder != nil {
+		imgs = kfxOrder
+	} else {
+		sort.Slice(imgs, func(i, j int) bool {
+			return naturalLess(imgs[i].Name, imgs[j].Name)
+		})
+	}
 
 	// ── Idempotency guard ──────────────────────────────────────────────────
 	// If the first image is already "cover.*" and the second is "p001.*" the
