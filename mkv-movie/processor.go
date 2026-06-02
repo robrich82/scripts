@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -296,7 +297,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			return false
 		}
 		last, ok := cache.GetPlexRating(tmdbID)
-		return !ok || last != rating
+		return force || !ok || last != rating
 	}
 
 	plexStreamsNeedSet := func(originalLang string) bool {
@@ -304,7 +305,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			return false
 		}
 		applied, ok := cache.GetStreamsApplied(tmdbID)
-		return !ok || applied != originalLang || rr.overwriteStreams
+		return force || !ok || applied != originalLang || rr.overwriteStreams
 	}
 
 	// 5. Resolve NZ rating early so we can include it in the needs-update check.
@@ -357,7 +358,17 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		if plexErr != nil {
 			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
 		}
-		if plexErr == nil {
+		if errors.Is(plexErr, ErrPlexMovieNotFound) {
+			fmt.Printf("  [!] Not in Plex library – rating and streams not pushed\n")
+			// Cache what we would have set so subsequent runs skip retrying.
+			// Re-run with --force to retry after adding the movie to Plex.
+			if rating != RatingNone {
+				cache.SetPlexRating(tmdbID, rating)
+			}
+			if details.OriginalLanguage != "" {
+				cache.SetStreamsApplied(tmdbID, details.OriginalLanguage)
+			}
+		} else if plexErr == nil {
 			if plexRatingNeedsUpdate(rating) {
 				if err := rr.plex.SetContentRating(rk, rating); err != nil {
 					fmt.Printf("  [!] Plex rating update failed: %v\n", err)

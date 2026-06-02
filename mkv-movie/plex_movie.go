@@ -135,7 +135,7 @@ func (c *httpPlexMovieClient) FindMovieByTMDBID(tmdbID string) (string, error) {
 }
 
 func (c *httpPlexMovieClient) findMovieInSection(sectionKey, wantGUID, tmdbID string) (string, error) {
-	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=1")
+	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=1&includeGuids=1")
 	if err != nil {
 		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
 	}
@@ -255,12 +255,19 @@ func (c *httpPlexMovieClient) findMovieInSectionByTitle(sectionKey, normTitle st
 		if normalizePlexTitle(item.Title) != normTitle {
 			continue
 		}
-		if wantYear != 0 && item.Year != wantYear {
+		if wantYear != 0 && abs(item.Year-wantYear) > 1 {
 			continue
 		}
 		return item.RatingKey, nil
 	}
 	return "", nil
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // normalizePlexTitle returns a lowercase alphanumeric-only string for fuzzy title matching.
