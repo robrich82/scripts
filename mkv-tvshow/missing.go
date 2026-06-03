@@ -78,7 +78,12 @@ func (mc *MissingChecker) Run() error {
 			continue
 		}
 		folder := entry.Name()
-		showID, ok := mc.cache.Get(folder)
+		// Cache entries use the absolute folder path (legacy entries use the base
+		// name); try both so --missing works regardless of which format was stored.
+		showID, ok := mc.cache.Get(filepath.Join(mc.cfg.MediaDir, folder))
+		if !ok {
+			showID, ok = mc.cache.Get(folder)
+		}
 		if !ok {
 			continue // not a tracked show
 		}
