@@ -102,6 +102,32 @@ func kfxPageOrder(zr *zip.Reader) []*zip.File {
 	if len(ordered) == 0 {
 		return nil
 	}
+
+	// Calibre stores the book cover at *_files/cover.* — it either appears at
+	// the very end of the XHTML chain or is omitted from it entirely. In both
+	// cases, promote it to position 0.
+	filesRoot := strings.TrimSuffix(htmlPath, path.Ext(htmlPath)) + "_files/"
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		if path.Dir(f.Name)+"/" != filesRoot {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(path.Base(f.Name)), "cover.") || !isImageFile(f.Name) {
+			continue
+		}
+		// Remove from ordered if already present (e.g. linked at end of chain).
+		for i, o := range ordered {
+			if o.Name == f.Name {
+				ordered = append(ordered[:i], ordered[i+1:]...)
+				break
+			}
+		}
+		ordered = append([]*zip.File{f}, ordered...)
+		break
+	}
+
 	return ordered
 }
 

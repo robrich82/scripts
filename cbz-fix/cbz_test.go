@@ -635,6 +635,49 @@ func makeKFXCBZ(t *testing.T, pages []string) string {
 	return makeCBZ(t, entries)
 }
 
+// makeKFXCBZWithCover is like makeKFXCBZ but also writes a cover.jpeg at the
+// *_files/ root. If linkedAtEnd is true, the last XHTML page links to the
+// cover via "../cover.jpeg" (vol-11 pattern); otherwise the cover is unlinked
+// (ONIMAI pattern).
+func makeKFXCBZWithCover(t *testing.T, pages []string, linkedAtEnd bool) string {
+	t.Helper()
+
+	const filesDir = "kfxtest_files/OEBPS/"
+
+	xhtmlFor := func(imgName, nextPage string) string {
+		next := ""
+		if nextPage != "" {
+			next = `<a href="` + nextPage + `" class="calibreANext">next page</a>`
+		}
+		return `<html><body>` +
+			`<img src="` + imgName + `" alt="page"/>` +
+			next +
+			`</body></html>`
+	}
+
+	var entries []zipEntry
+	entries = append(entries, zipEntry{"kfxtest.html", []byte(
+		`<html><body><a href="` + filesDir + `page_` + pages[0] + `.xhtml" class="calibreANext">start</a></body></html>`,
+	)})
+
+	for i, img := range pages {
+		xhtmlName := "page_" + img + ".xhtml"
+		nextXHTML := ""
+		if i+1 < len(pages) {
+			nextXHTML = "page_" + pages[i+1] + ".xhtml"
+		} else if linkedAtEnd {
+			nextXHTML = "../cover.jpeg" // last page links back to cover
+		}
+		entries = append(entries, zipEntry{filesDir + xhtmlName, []byte(xhtmlFor(img+".png", nextXHTML))})
+		entries = append(entries, zipEntry{filesDir + img + ".png", portrait})
+	}
+
+	// cover.jpeg lives at *_files/ root, not inside OEBPS/.
+	entries = append(entries, zipEntry{"kfxtest_files/cover.jpeg", portrait})
+
+	return makeCBZ(t, entries)
+}
+
 // TestKFXPageOrder verifies that kfxPageOrder returns images in the order
 // defined by the XHTML navigation chain, not alphabetical filename order.
 func TestKFXPageOrder(t *testing.T) {
@@ -683,6 +726,64 @@ func TestKFXPageOrder_NonKFX(t *testing.T) {
 
 	if got := kfxPageOrder(&zr.Reader); got != nil {
 		t.Errorf("kfxPageOrder returned non-nil for non-KFX CBZ: %v", got)
+	}
+}
+
+// TestKFXPageOrder_CoverUnlinked verifies that a cover.jpeg at *_files/ root
+// that is NOT referenced by any XHTML page (ONIMAI pattern) is promoted to
+// position 0 of the ordered list.
+func TestKFXPageOrder_CoverUnlinked(t *testing.T) {
+	cbzPath := makeKFXCBZWithCover(t, []string{"p1", "p2", "p3"}, false)
+
+	zr, err := zip.OpenReader(cbzPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	ordered := kfxPageOrder(&zr.Reader)
+	if ordered == nil {
+		t.Fatal("kfxPageOrder returned nil")
+	}
+	if len(ordered) != 4 {
+		t.Fatalf("got %d images, want 4", len(ordered))
+	}
+	if filepath.Base(ordered[0].Name) != "cover.jpeg" {
+		t.Errorf("ordered[0] = %q, want cover.jpeg", ordered[0].Name)
+	}
+}
+
+// TestKFXPageOrder_CoverLinkedAtEnd verifies that a cover.jpeg linked from the
+// last XHTML page (vol-11 pattern) is moved from the end to position 0.
+func TestKFXPageOrder_CoverLinkedAtEnd(t *testing.T) {
+	cbzPath := makeKFXCBZWithCover(t, []string{"p1", "p2", "p3"}, true)
+
+	zr, err := zip.OpenReader(cbzPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	ordered := kfxPageOrder(&zr.Reader)
+	if ordered == nil {
+		t.Fatal("kfxPageOrder returned nil")
+	}
+	if len(ordered) != 4 {
+		t.Fatalf("got %d images, want 4 (3 pages + cover); got %v",
+			len(ordered), func() []string {
+				var ns []string
+				for _, f := range ordered {
+					ns = append(ns, f.Name)
+				}
+				return ns
+			}())
+	}
+	if filepath.Base(ordered[0].Name) != "cover.jpeg" {
+		t.Errorf("ordered[0] = %q, want cover.jpeg", ordered[0].Name)
+	}
+	// cover must not also appear at the end
+	if filepath.Base(ordered[len(ordered)-1].Name) == "cover.jpeg" {
+		t.Error("cover.jpeg appears at both first and last positions")
 	}
 }
 
