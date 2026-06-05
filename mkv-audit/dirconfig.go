@@ -113,6 +113,17 @@ func detectLibrary(cwd string, cfg *GlobalConfig) *Library {
 	return best
 }
 
+// overrideMatches reports whether an override path applies to a relative file
+// path. Both arguments must already be lowercased NFC strings.
+// "." is a library-root wildcard that matches every file in the library.
+// Otherwise the match is a case-insensitive prefix at a directory boundary.
+func overrideMatches(relLower, ovLower string) bool {
+	if ovLower == "." {
+		return true
+	}
+	return relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/")
+}
+
 // resolveIETFMap returns a copy of the global ietfMap with TMDB-derived origin
 // info and any applicable Library overrides merged in, in that priority order:
 //
@@ -155,7 +166,7 @@ func resolveIETFMap(filePath, root string, lib *Library, origin OriginInfo) map[
 		// compare equal.
 		relLower := strings.ToLower(norm.NFC.String(rel))
 		ovLower := strings.ToLower(norm.NFC.String(overridePath))
-		if relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/") {
+		if overrideMatches(relLower, ovLower) {
 			for k, v := range override.IETF {
 				result[k] = v
 			}
@@ -183,7 +194,7 @@ func matchedOverrideIETF(filePath, root string, lib *Library) map[string]string 
 		overridePath := filepath.ToSlash(override.Path)
 		relLower := strings.ToLower(norm.NFC.String(rel))
 		ovLower := strings.ToLower(norm.NFC.String(overridePath))
-		if relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/") {
+		if overrideMatches(relLower, ovLower) {
 			if merged == nil {
 				merged = make(map[string]string)
 			}
@@ -212,7 +223,7 @@ func resolveOriginLang(filePath, root string, lib *Library, origin OriginInfo) s
 				overridePath := filepath.ToSlash(override.Path)
 				relLower := strings.ToLower(norm.NFC.String(rel))
 				ovLower := strings.ToLower(norm.NFC.String(overridePath))
-				if relLower == ovLower || strings.HasPrefix(relLower, ovLower+"/") {
+				if overrideMatches(relLower, ovLower) {
 					overrideLang = override.OriginLang
 				}
 			}
