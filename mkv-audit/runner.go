@@ -466,42 +466,53 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 
 				// Detect video/audio tracks whose language does not match the active
 				// dir override. Collect fixable cases for the sequential prompt phase.
-				if overrideIETF := matchedOverrideIETF(p, libRoot, lib); len(overrideIETF) > 0 {
-					overrideKeys := make([]string, 0, len(overrideIETF))
-					for k := range overrideIETF {
-						overrideKeys = append(overrideKeys, k)
-					}
-					sort.Strings(overrideKeys)
-					keysStr := "[" + strings.Join(overrideKeys, ", ") + "]"
-					// Unambiguous fix target: only when merged override has exactly one key.
-					var fixLang, fixIETF string
-					if len(overrideIETF) == 1 {
-						fixLang, fixIETF = overrideKeys[0], overrideIETF[overrideKeys[0]]
-					}
-					var candidate langMismatchCandidate
-					candidate.path = p
-					for _, t := range info.Tracks {
-						if t.Type != "video" && t.Type != "audio" {
-							continue
-						}
-						lang := normalizeLanguage(t.Properties.Language)
-						if _, ok := overrideIETF[lang]; ok {
-							continue
-						}
-						fmt.Fprintf(&buf, "[WARN]   %s: %s track language %q not in override %s\n",
-							basename, t.Type, lang, keysStr)
-						if fixLang != "" {
-							candidate.fixes = append(candidate.fixes, langFix{
-								trackID:     t.ID,
-								trackType:   t.Type,
-								currentLang: lang,
-								targetLang:  fixLang,
-								targetIETF:  fixIETF,
-							})
+				if rawOverride := matchedOverrideIETF(p, libRoot, lib); len(rawOverride) > 0 {
+					// Exclude "und" from the mismatch check. "und" is a fallback
+					// for untagged tracks, not an expected content language — a jpn
+					// track is not "wrong" just because the override contains "und".
+					overrideIETF := make(map[string]string, len(rawOverride))
+					for k, v := range rawOverride {
+						if k != "und" {
+							overrideIETF[k] = v
 						}
 					}
-					if len(candidate.fixes) > 0 {
-						localMismatches = append(localMismatches, candidate)
+					if len(overrideIETF) > 0 {
+						overrideKeys := make([]string, 0, len(overrideIETF))
+						for k := range overrideIETF {
+							overrideKeys = append(overrideKeys, k)
+						}
+						sort.Strings(overrideKeys)
+						keysStr := "[" + strings.Join(overrideKeys, ", ") + "]"
+						// Unambiguous fix target: only when merged override has exactly one key.
+						var fixLang, fixIETF string
+						if len(overrideIETF) == 1 {
+							fixLang, fixIETF = overrideKeys[0], overrideIETF[overrideKeys[0]]
+						}
+						var candidate langMismatchCandidate
+						candidate.path = p
+						for _, t := range info.Tracks {
+							if t.Type != "video" && t.Type != "audio" {
+								continue
+							}
+							lang := normalizeLanguage(t.Properties.Language)
+							if _, ok := overrideIETF[lang]; ok {
+								continue
+							}
+							fmt.Fprintf(&buf, "[WARN]   %s: %s track language %q not in override %s\n",
+								basename, t.Type, lang, keysStr)
+							if fixLang != "" {
+								candidate.fixes = append(candidate.fixes, langFix{
+									trackID:     t.ID,
+									trackType:   t.Type,
+									currentLang: lang,
+									targetLang:  fixLang,
+									targetIETF:  fixIETF,
+								})
+							}
+						}
+						if len(candidate.fixes) > 0 {
+							localMismatches = append(localMismatches, candidate)
+						}
 					}
 				}
 
