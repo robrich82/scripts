@@ -486,6 +486,44 @@ func TestAnalyzeFile_EnGB_BeatsEnUS_Subtitle(t *testing.T) {
 	}
 }
 
+// --- Track-name language inference for non-forced subtitles ---
+
+func TestAnalyzeFile_SubNamedEnglish_MislabelledJpn_Corrected(t *testing.T) {
+	// A subtitle tagged jpn but named "English Subtitles" should be corrected
+	// to eng so the trim phase keeps it rather than removing it as Japanese.
+	info := MKVInfo{Tracks: []Track{
+		videoTrack(0, "jpn"),
+		audioTrack(1, "jpn", "A_FLAC", 5, true),
+		subTrack(2, "jpn", "S_TEXT/ASS", "English Subtitles", true, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	if !hasEdit(res.Edits, "language=eng") {
+		t.Errorf("expected language=eng correction for English-named jpn subtitle; edits: %v", res.Edits)
+	}
+	if res.LocalFixes.Lang != 1 {
+		t.Errorf("expected 1 lang fix, got %d", res.LocalFixes.Lang)
+	}
+}
+
+func TestAnalyzeFile_SubNamedEnglish_UpdatedTracksReflectsCorrection(t *testing.T) {
+	// UpdatedTracks must carry the corrected language so trim uses eng, not jpn.
+	info := MKVInfo{Tracks: []Track{
+		videoTrack(0, "jpn"),
+		audioTrack(1, "jpn", "A_FLAC", 5, true),
+		subTrack(2, "jpn", "S_TEXT/ASS", "English Subtitles", true, false),
+	}}
+	res := AnalyzeFile(info, AnalyzeOptions{})
+	var subLang string
+	for _, t := range res.UpdatedTracks {
+		if t.Type == "subtitles" {
+			subLang = t.Properties.Language
+		}
+	}
+	if subLang != "eng" {
+		t.Errorf("UpdatedTracks subtitle language: got %q, want eng", subLang)
+	}
+}
+
 func TestAnalyzeFile_EnSubRegionPriority(t *testing.T) {
 	// Preference order: NZ (score 4) > GB (score 3) > AU (score 2) > generic (score 1).
 	// Track 4 is en-NZ and should win. All tracks have identical codecs.

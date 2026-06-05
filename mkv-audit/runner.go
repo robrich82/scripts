@@ -573,9 +573,14 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			}
 			langMismatches = append(langMismatches, localMismatches...)
 			if remuxer != nil && info != nil && !res.Failed {
+				// Use the post-normalisation track state so that language
+				// corrections (e.g. jpn → eng from track-name inference) are
+				// reflected in the trim decision rather than the pre-edit snapshot.
+				trimInfo := *info
+				trimInfo.Tracks = res.UpdatedTracks
 				trimCandidates = append(trimCandidates, trimCandidate{
 					path:       p,
-					info:       *info,
+					info:       trimInfo,
 					originLang: originLang,
 				})
 			}

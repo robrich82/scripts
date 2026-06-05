@@ -17,6 +17,10 @@ type AnalysisResult struct {
 	LocalFixes LocalFixes
 	// UnknownCodecs collects codec IDs not in our priority maps.
 	UnknownCodecs []string
+	// UpdatedTracks is the in-memory track state after all normalisations. Use
+	// this instead of the original MKVInfo.Tracks when making decisions that
+	// depend on corrected language tags (e.g. trim planning).
+	UpdatedTracks []Track
 }
 
 // LocalFixes counts individual fix types within one file analysis.
@@ -176,10 +180,11 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		props := &tracks[i].Properties
 		norm := normalizeLanguage(props.Language)
 
-		// For Signs/Songs/Forced subtitle tracks, try to infer the language
-		// from the track name when it starts with a known language word
-		// (e.g. "English [Signs/Songs]" mislabelled as jpn → correct to eng).
-		if tracks[i].Type == "subtitles" && containsAny(props.TrackName, forcedKeywords) {
+		// For subtitle tracks, infer the language from the track name when it
+		// starts with a known language word (e.g. "English Subtitles" mislabelled
+		// as jpn → correct to eng). Applies to all subtitle tracks, not just
+		// forced/Signs/Songs, so releases that tag English subs as jpn are caught.
+		if tracks[i].Type == "subtitles" {
 			if inferred := inferForcedSubLanguage(props.TrackName); inferred != "" && inferred != norm {
 				norm = inferred
 			}
@@ -628,5 +633,6 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
+	res.UpdatedTracks = tracks
 	return res
 }
