@@ -69,6 +69,11 @@ type AnalyzeOptions struct {
 	// normalised on all tracks: 1 for tracks in that language, 0 for others.
 	// "" disables flag-original processing.
 	OriginLang string
+	// UndLang is the ISO 639-2/B code to use as a last-resort fallback for
+	// tracks whose language is "und" and cannot be inferred from context.
+	// Derived from Library.UndLang / DirOverride.UndLang in config.json.
+	// "" disables the fallback.
+	UndLang string
 }
 
 // effectiveIETFTag resolves the IETF tag for an ISO 639-2 code using either
@@ -257,34 +262,33 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
-	// --- 1c. Promote remaining "und" tracks via IETF override (last resort) ---
+	// --- 1c. Promote remaining "und" tracks via und_lang config (last resort) ---
 	// Runs after 1b so that per-file inference (other subtitle tracks) always
-	// takes priority over the blanket directory override.
-	if overrideIETF := effectiveIETFTag("und", opts); overrideIETF != "und" {
-		if promoted := normalizeLanguage(overrideIETF); promoted != "und" {
-			effMap := ietfMap
-			if opts.IETFMap != nil {
-				effMap = opts.IETFMap
+	// takes priority over the library/directory fallback.
+	if opts.UndLang != "" {
+		promoted := opts.UndLang
+		effMap := ietfMap
+		if opts.IETFMap != nil {
+			effMap = opts.IETFMap
+		}
+		for i := range tracks {
+			props := &tracks[i].Properties
+			if props.Language != "und" {
+				continue
 			}
-			for i := range tracks {
-				props := &tracks[i].Properties
-				if props.Language != "und" {
-					continue
-				}
-				normIETF := effectiveIETFTag(promoted, opts)
-				normIETF = applyRegionKeyword(normIETF, props.TrackName)
-				_, hasIETFMapping := effMap[promoted]
-				pairs := []string{"language", promoted}
-				if hasIETFMapping {
-					pairs = append(pairs, "language-ietf", normIETF)
-				}
-				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, pairs...)...)
-				props.Language = promoted
-				if hasIETFMapping {
-					props.LanguageIETF = normIETF
-				}
-				res.LocalFixes.Lang++
+			normIETF := effectiveIETFTag(promoted, opts)
+			normIETF = applyRegionKeyword(normIETF, props.TrackName)
+			_, hasIETFMapping := effMap[promoted]
+			pairs := []string{"language", promoted}
+			if hasIETFMapping {
+				pairs = append(pairs, "language-ietf", normIETF)
 			}
+			res.Edits = append(res.Edits, trackEdit(tracks[i].ID, pairs...)...)
+			props.Language = promoted
+			if hasIETFMapping {
+				props.LanguageIETF = normIETF
+			}
+			res.LocalFixes.Lang++
 		}
 	}
 

@@ -461,7 +461,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				local.Failed++
 				local.FailedPaths = append(local.FailedPaths, p)
 			} else {
-				res = AnalyzeFile(*info, AnalyzeOptions{IETFMap: ietfMap, OriginLang: originLang})
+				res = AnalyzeFile(*info, AnalyzeOptions{IETFMap: ietfMap, OriginLang: originLang, UndLang: resolveUndLang(p, libRoot, lib)})
 				localCodecs = append(localCodecs, res.UnknownCodecs...)
 
 				// Detect video/audio tracks whose language does not match the active

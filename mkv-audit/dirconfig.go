@@ -44,15 +44,17 @@ type Library struct {
 	Name      string        `json:"name"`
 	Type      string        `json:"type,omitempty"` // "tv" or "movie"; controls TMDB lookup strategy
 	Path      string        `json:"path"`
+	UndLang   string        `json:"und_lang,omitempty"` // ISO 639-2/B or IETF tag; last-resort language for "und" tracks
 	Overrides []DirOverride `json:"overrides,omitempty"`
 }
 
 // DirOverride specifies per-directory overrides for files under a given subdirectory.
 // Path is relative to the library root and matched case-insensitively.
 type DirOverride struct {
-	Path       string            `json:"path"`                  // relative directory path (case-insensitive prefix match)
+	Path       string            `json:"path"`                  // relative directory path (case-insensitive prefix match); "." matches all
 	IETF       map[string]string `json:"ietf,omitempty"`        // ISO 639-2/B code → IETF override, e.g. "eng": "en-GB"
 	OriginLang string            `json:"origin_lang,omitempty"` // ISO 639-2/B code overriding TMDB original language, e.g. "jpn"
+	UndLang    string            `json:"und_lang,omitempty"`    // ISO 639-2/B or IETF tag; last-resort language for "und" tracks
 }
 
 // loadGlobalConfig reads config.json from the mkv-audit config directory.
@@ -233,6 +235,37 @@ func resolveOriginLang(filePath, root string, lib *Library, origin OriginInfo) s
 		}
 	}
 	return origin.OrigLangISO()
+}
+
+// resolveUndLang returns the ISO 639-2/B code to use as a last-resort fallback
+// for "und" tracks. Per-directory overrides (most specific wins) take priority
+// over the library-level default. Returns "" when no fallback is configured.
+func resolveUndLang(filePath, root string, lib *Library) string {
+	if lib == nil {
+		return ""
+	}
+	rel, err := filepath.Rel(root, filePath)
+	if err == nil {
+		rel = filepath.ToSlash(rel)
+		var found string
+		for _, override := range lib.Overrides {
+			if override.UndLang == "" {
+				continue
+			}
+			ovLower := strings.ToLower(norm.NFC.String(filepath.ToSlash(override.Path)))
+			relLower := strings.ToLower(norm.NFC.String(rel))
+			if overrideMatches(relLower, ovLower) {
+				found = override.UndLang
+			}
+		}
+		if found != "" {
+			return normalizeLanguage(found)
+		}
+	}
+	if lib.UndLang != "" {
+		return normalizeLanguage(lib.UndLang)
+	}
+	return ""
 }
 
 // contentRootDir returns the first path component of filePath relative to

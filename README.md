@@ -214,7 +214,8 @@ The tool auto-detects which library to use based on the current working director
     {
       "name": "Movies",
       "type": "movie",
-      "path": "G:\\Movies"
+      "path": "G:\\Movies",
+      "und_lang": "en-US"
     },
     {
       "name": "Anime",
@@ -233,25 +234,27 @@ environment, mkv-audit looks up each show/movie on TMDB to determine its
    gets `eng → en-CA`).
 2. `flag-original=1` is set on all tracks whose language matches the original language.
 
+**`und_lang`** (optional, on library or override) — last-resort fallback language for
+tracks tagged `und` (undefined). Accepts an ISO 639-2/B code (`"eng"`) or IETF tag
+(`"en-US"`). Both `language` and `language-ietf` are updated. This is strictly a
+fallback: per-file inference (all other subtitle tracks share one language) always wins.
+Useful when a subtitle is the only track in the file — e.g. an anime movie with a
+single English subtitle mislabelled as `und`.
+
+Set it on the library for a library-wide default, or on an override entry for a
+specific subdirectory:
+
+```json
+{ "path": "Some Show", "und_lang": "eng" }
+```
+
 **`overrides[].path`** — relative path to match (case-insensitive prefix at a directory
-boundary). Use `"."` to match every file in the library, making it a library-wide default.
+boundary). Use `"."` to match every file in the library.
 
 **`overrides[].ietf`** (optional) — overrides the IETF/BCP-47 tag written for one or
 more ISO 639-2 language codes within the matched path. Useful for regional English
 variants (e.g. `"eng": "en-GB"` for a British show). Manual `ietf` overrides always take
 precedence over TMDB-derived values.
-
-Use `"und": "en-US"` (or any real IETF tag) to promote tracks whose language is
-`und` (undefined) to a concrete language. The ISO 639-2 code is derived from the
-tag and both `language` and `language-ietf` are updated. This is a last resort:
-per-file inference (all other subtitle tracks share one language) always wins over
-this override. Useful when a subtitle is the only track in the file — e.g. an
-anime movie with a single English subtitle mislabelled as `und`. Apply library-wide
-with `"path": "."`:
-
-```json
-{ "path": ".", "ietf": { "und": "en-US" } }
-```
 
 **`overrides[].origin_lang`** (optional) — overrides the TMDB-reported original language
 for a specific subdirectory. Use this when TMDB has the wrong original language for a
