@@ -180,6 +180,17 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 			}
 		}
 
+		// If norm is still "und" and the effective IETF map remaps "und" to a
+		// real language tag (e.g. user override "und": "en-US"), derive the ISO
+		// 639-2 code from that tag and promote the track out of "und".
+		if norm == "und" {
+			if overrideIETF := effectiveIETFTag("und", opts); overrideIETF != "und" {
+				if derived := normalizeLanguage(overrideIETF); derived != "und" {
+					norm = derived
+				}
+			}
+		}
+
 		normIETF := effectiveIETFTag(norm, opts)
 		// Apply per-track region detection from the track name (e.g. "British" → en-GB).
 		normIETF = applyRegionKeyword(normIETF, props.TrackName)
@@ -216,10 +227,9 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		}
 	}
 
-	// --- 1b. Infer language for "und" Signs/Songs subtitle tracks ---
+	// --- 1b. Infer language for "und" subtitle tracks ---
 	// When all other subtitle tracks in the file share a single language, assign
-	// that language to any "und" Signs/Songs/Forced subtitle whose name doesn't
-	// contain a language keyword prefix (handled above by inferForcedSubLanguage).
+	// that language to any "und" subtitle whose language wasn't resolved above.
 	{
 		subLangs := map[string]bool{}
 		for _, t := range tracks {
@@ -238,7 +248,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 			}
 			for i := range tracks {
 				props := &tracks[i].Properties
-				if tracks[i].Type != "subtitles" || props.Language != "und" || !containsAny(props.TrackName, forcedKeywords) {
+				if tracks[i].Type != "subtitles" || props.Language != "und" {
 					continue
 				}
 				normIETF := effectiveIETFTag(inferredLang, opts)

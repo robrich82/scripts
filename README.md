@@ -238,6 +238,12 @@ more ISO 639-2 language codes within a specific subdirectory. Useful for regiona
 variants (e.g. `"eng": "en-GB"` for a British show). Manual `ietf` overrides always take
 precedence over TMDB-derived values.
 
+Use `"und": "en-US"` (or any real IETF tag) to promote tracks whose language is
+`und` (undefined) to a concrete language. The ISO 639-2 code is derived from the
+tag and both `language` and `language-ietf` are updated. Useful when a subtitle
+track is the only one in the file and cannot be inferred from other tracks — e.g.
+an anime movie with a single English subtitle mislabelled as `und`.
+
 **`overrides[].origin_lang`** (optional) — overrides the TMDB-reported original language
 for a specific subdirectory. Use this when TMDB has the wrong original language for a
 show (e.g. a Japanese anime incorrectly listed as English). Accepts any ISO 639-2/B code
