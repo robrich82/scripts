@@ -180,17 +180,6 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 			}
 		}
 
-		// If norm is still "und" and the effective IETF map remaps "und" to a
-		// real language tag (e.g. user override "und": "en-US"), derive the ISO
-		// 639-2 code from that tag and promote the track out of "und".
-		if norm == "und" {
-			if overrideIETF := effectiveIETFTag("und", opts); overrideIETF != "und" {
-				if derived := normalizeLanguage(overrideIETF); derived != "und" {
-					norm = derived
-				}
-			}
-		}
-
 		normIETF := effectiveIETFTag(norm, opts)
 		// Apply per-track region detection from the track name (e.g. "British" → en-GB).
 		normIETF = applyRegionKeyword(normIETF, props.TrackName)
@@ -260,6 +249,37 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 				}
 				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, pairs...)...)
 				props.Language = inferredLang
+				if hasIETFMapping {
+					props.LanguageIETF = normIETF
+				}
+				res.LocalFixes.Lang++
+			}
+		}
+	}
+
+	// --- 1c. Promote remaining "und" tracks via IETF override (last resort) ---
+	// Runs after 1b so that per-file inference (other subtitle tracks) always
+	// takes priority over the blanket directory override.
+	if overrideIETF := effectiveIETFTag("und", opts); overrideIETF != "und" {
+		if promoted := normalizeLanguage(overrideIETF); promoted != "und" {
+			effMap := ietfMap
+			if opts.IETFMap != nil {
+				effMap = opts.IETFMap
+			}
+			for i := range tracks {
+				props := &tracks[i].Properties
+				if props.Language != "und" {
+					continue
+				}
+				normIETF := effectiveIETFTag(promoted, opts)
+				normIETF = applyRegionKeyword(normIETF, props.TrackName)
+				_, hasIETFMapping := effMap[promoted]
+				pairs := []string{"language", promoted}
+				if hasIETFMapping {
+					pairs = append(pairs, "language-ietf", normIETF)
+				}
+				res.Edits = append(res.Edits, trackEdit(tracks[i].ID, pairs...)...)
+				props.Language = promoted
 				if hasIETFMapping {
 					props.LanguageIETF = normIETF
 				}
