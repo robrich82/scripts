@@ -1654,7 +1654,7 @@ func TestApplyPlexRatings_SetsDateFromDatesOverride(t *testing.T) {
 	}
 }
 
-func TestApplyPlexRatings_SetsTitleFromTitleOverrides(t *testing.T) {
+func TestApplyPlexRatings_SetsTitleFromTitleOverrides_WhenDateAlsoSet(t *testing.T) {
 	rc := emptyRatingCache(t)
 	rc.SetShowRating("111", RatingM)
 
@@ -1667,7 +1667,10 @@ func TestApplyPlexRatings_SetsTitleFromTitleOverrides(t *testing.T) {
 	}
 	// title_overrides uses FS-safe lookalikes; cleanMetadataTitle restores them.
 	manualData := map[string]ManualEntry{
-		"My Show": {TitleOverrides: map[string]string{"S01E01": "Pilot꞉ The Beginning"}},
+		"My Show": {
+			Dates:          map[string]string{"S01E01": "2024-03-15"},
+			TitleOverrides: map[string]string{"S01E01": "Pilot꞉ The Beginning"},
+		},
 	}
 
 	p := &Processor{
@@ -1685,6 +1688,38 @@ func TestApplyPlexRatings_SetsTitleFromTitleOverrides(t *testing.T) {
 	call := plexClient.setEpMetaCalls[0]
 	if call.title != "Pilot: The Beginning" {
 		t.Errorf("title = %q; want \"Pilot: The Beginning\" (lookalikes decoded)", call.title)
+	}
+	if call.originallyAvailableAt != "2024-03-15" {
+		t.Errorf("originallyAvailableAt = %q; want 2024-03-15", call.originallyAvailableAt)
+	}
+}
+
+func TestApplyPlexRatings_TitleOverrideSkipped_WhenNoDate(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+
+	plexClient := &fakePlexClient{
+		showRatingKey: "show-1",
+		seasons:       []PlexSeason{{RatingKey: "s1", SeasonNumber: 1}},
+		episodesByKey: map[string][]PlexEpisodeItem{
+			"s1": {{RatingKey: "ep101", SeasonNumber: 1, EpisodeNumber: 1}},
+		},
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {TitleOverrides: map[string]string{"S01E01": "Pilot꞉ The Beginning"}},
+	}
+
+	p := &Processor{
+		ratingCache:    rc,
+		plex:           plexClient,
+		manualData:     manualData,
+		sessionPlexKey: map[string]string{"111": "show-1"},
+		cfg:            Config{},
+	}
+	p.applyPlexRatings("111", "My Show", "My Show", false, "")
+
+	if len(plexClient.setEpMetaCalls) != 0 {
+		t.Errorf("expected no SetEpisodeMetadata calls when dates is absent, got %d", len(plexClient.setEpMetaCalls))
 	}
 }
 

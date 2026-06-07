@@ -542,9 +542,9 @@ your files:
   when it cannot be derived from TMDB (e.g. DVD releases that combine two OVA
   episodes). `--title-check` compares against this value instead of fetching
   TMDB. Use the same lookalike characters as your filenames (`╱` for `/`, etc.).
-  When Plex is configured, the `Title` and `Sort Title` for any episode with a
-  `title_overrides` entry are also set and locked in Plex (using the decoded
-  ASCII title).
+  When Plex is configured, the `Title` and `Sort Title` are also set and locked
+  in Plex (using the decoded ASCII title) for any episode that also has a
+  `dates` entry.
 - `extras` — metadata for non-episode files (bonus content, OPs/EDs, etc.)
   that have no `S##E##` in their name. The key is the filename **without the
   `.mkv` extension**.

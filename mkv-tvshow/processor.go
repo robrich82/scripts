@@ -1079,17 +1079,18 @@ func (p *Processor) applyPlexRatings(tmdbID, showName, showFolder string, touche
 			seasonMax = MaxRating(seasonMax, r)
 		}
 
-		// Set title and/or originally available date for episodes with manual overrides.
+		// Set originally available date (and title when also overridden) in Plex
+		// for episodes that have a dates entry in manual_data.
 		for _, ep := range episodes {
 			localKey, hasMapped := inverseMapping[epKey{ep.SeasonNumber, ep.EpisodeNumber}]
 			if !hasMapped {
 				localKey = fmt.Sprintf("S%02dE%02d", ep.SeasonNumber, ep.EpisodeNumber)
 			}
 			epDate := manualEntry.Dates[localKey]
-			epTitle := cleanMetadataTitle(manualEntry.TitleOverrides[localKey])
-			if epDate == "" && epTitle == "" {
+			if epDate == "" {
 				continue
 			}
+			epTitle := cleanMetadataTitle(manualEntry.TitleOverrides[localKey])
 			if err := p.plex.SetEpisodeMetadata(ep.RatingKey, epTitle, epDate); err != nil {
 				fmt.Printf("  [!] Plex: set episode %s metadata: %v\n", ep.RatingKey, err)
 			}
