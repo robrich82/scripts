@@ -1583,7 +1583,7 @@ func TestRatingsOnly_DoesNotSetPlexAudioLanguage(t *testing.T) {
 
 	p := NewProcessor(Config{RatingsOnly: true}, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
 	// applyPlexRatings is called internally; simulate by calling it directly.
-	p.applyPlexRatings("111", "Show A", false, "")
+	p.applyPlexRatings("111", "Show A", "", false, "")
 
 	if len(plexClient.setLangCalls) != 0 {
 		t.Errorf("--ratings-only must not set Plex audio language, got %d calls", len(plexClient.setLangCalls))
@@ -1610,6 +1610,144 @@ func TestRunLanguageOnly_ManualDataLanguageOverride(t *testing.T) {
 	}
 	if plexClient.setLangCalls[0].lang != "ko" {
 		t.Errorf("expected lang ko (manual override), got %q", plexClient.setLangCalls[0].lang)
+	}
+}
+
+// --- applyPlexRatings episode metadata ---
+
+func TestApplyPlexRatings_SetsDateFromDatesOverride(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+
+	plexClient := &fakePlexClient{
+		showRatingKey: "show-1",
+		seasons:       []PlexSeason{{RatingKey: "s1", SeasonNumber: 1}},
+		episodesByKey: map[string][]PlexEpisodeItem{
+			"s1": {{RatingKey: "ep101", SeasonNumber: 1, EpisodeNumber: 1}},
+		},
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {Dates: map[string]string{"S01E01": "2024-03-15"}},
+	}
+
+	p := &Processor{
+		ratingCache:    rc,
+		plex:           plexClient,
+		manualData:     manualData,
+		sessionPlexKey: map[string]string{"111": "show-1"},
+		cfg:            Config{},
+	}
+	p.applyPlexRatings("111", "My Show", "My Show", false, "")
+
+	if len(plexClient.setEpMetaCalls) != 1 {
+		t.Fatalf("expected 1 SetEpisodeMetadata call, got %d", len(plexClient.setEpMetaCalls))
+	}
+	call := plexClient.setEpMetaCalls[0]
+	if call.ratingKey != "ep101" {
+		t.Errorf("ratingKey = %q; want ep101", call.ratingKey)
+	}
+	if call.originallyAvailableAt != "2024-03-15" {
+		t.Errorf("originallyAvailableAt = %q; want 2024-03-15", call.originallyAvailableAt)
+	}
+	if call.title != "" {
+		t.Errorf("title = %q; want empty (no title override)", call.title)
+	}
+}
+
+func TestApplyPlexRatings_SetsTitleFromTitleOverrides(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+
+	plexClient := &fakePlexClient{
+		showRatingKey: "show-1",
+		seasons:       []PlexSeason{{RatingKey: "s1", SeasonNumber: 1}},
+		episodesByKey: map[string][]PlexEpisodeItem{
+			"s1": {{RatingKey: "ep101", SeasonNumber: 1, EpisodeNumber: 1}},
+		},
+	}
+	// title_overrides uses FS-safe lookalikes; cleanMetadataTitle restores them.
+	manualData := map[string]ManualEntry{
+		"My Show": {TitleOverrides: map[string]string{"S01E01": "Pilot꞉ The Beginning"}},
+	}
+
+	p := &Processor{
+		ratingCache:    rc,
+		plex:           plexClient,
+		manualData:     manualData,
+		sessionPlexKey: map[string]string{"111": "show-1"},
+		cfg:            Config{},
+	}
+	p.applyPlexRatings("111", "My Show", "My Show", false, "")
+
+	if len(plexClient.setEpMetaCalls) != 1 {
+		t.Fatalf("expected 1 SetEpisodeMetadata call, got %d", len(plexClient.setEpMetaCalls))
+	}
+	call := plexClient.setEpMetaCalls[0]
+	if call.title != "Pilot: The Beginning" {
+		t.Errorf("title = %q; want \"Pilot: The Beginning\" (lookalikes decoded)", call.title)
+	}
+}
+
+func TestApplyPlexRatings_InverseMappingApplied(t *testing.T) {
+	// Local S01E05 maps to TMDB S02E03. Plex has it as S02E03.
+	// The Dates entry keyed by local "S01E05" should still be found.
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+
+	plexClient := &fakePlexClient{
+		showRatingKey: "show-1",
+		seasons:       []PlexSeason{{RatingKey: "s2", SeasonNumber: 2}},
+		episodesByKey: map[string][]PlexEpisodeItem{
+			"s2": {{RatingKey: "ep203", SeasonNumber: 2, EpisodeNumber: 3}},
+		},
+	}
+	manualData := map[string]ManualEntry{
+		"My Show": {
+			Mapping: map[string]EpisodePair{"S01E05": {2, 3}},
+			Dates:   map[string]string{"S01E05": "2023-11-01"},
+		},
+	}
+
+	p := &Processor{
+		ratingCache:    rc,
+		plex:           plexClient,
+		manualData:     manualData,
+		sessionPlexKey: map[string]string{"111": "show-1"},
+		cfg:            Config{},
+	}
+	p.applyPlexRatings("111", "My Show", "My Show", false, "")
+
+	if len(plexClient.setEpMetaCalls) != 1 {
+		t.Fatalf("expected 1 SetEpisodeMetadata call, got %d: %+v", len(plexClient.setEpMetaCalls), plexClient.setEpMetaCalls)
+	}
+	if plexClient.setEpMetaCalls[0].originallyAvailableAt != "2023-11-01" {
+		t.Errorf("originallyAvailableAt = %q; want 2023-11-01", plexClient.setEpMetaCalls[0].originallyAvailableAt)
+	}
+}
+
+func TestApplyPlexRatings_NoManualData_NoMetadataCalls(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+
+	plexClient := &fakePlexClient{
+		showRatingKey: "show-1",
+		seasons:       []PlexSeason{{RatingKey: "s1", SeasonNumber: 1}},
+		episodesByKey: map[string][]PlexEpisodeItem{
+			"s1": {{RatingKey: "ep101", SeasonNumber: 1, EpisodeNumber: 1}},
+		},
+	}
+
+	p := &Processor{
+		ratingCache:    rc,
+		plex:           plexClient,
+		manualData:     map[string]ManualEntry{},
+		sessionPlexKey: map[string]string{"111": "show-1"},
+		cfg:            Config{},
+	}
+	p.applyPlexRatings("111", "My Show", "My Show", false, "")
+
+	if len(plexClient.setEpMetaCalls) != 0 {
+		t.Errorf("expected no SetEpisodeMetadata calls with no manual data, got %d", len(plexClient.setEpMetaCalls))
 	}
 }
 

@@ -536,10 +536,15 @@ your files:
   by episode code (e.g. `"S03E01": "2024-01-07"`). Overrides the TMDB air date
   — use this for episodes that are missing from TMDB or have an incorrect date.
   Both the MKV `DATE` tag and filesystem timestamps are set from this value.
+  When Plex is configured, the `Originally Available` date for the matching
+  episode is also set and locked in Plex.
 - `title_overrides` — declare the correct filesystem-safe title for an episode
   when it cannot be derived from TMDB (e.g. DVD releases that combine two OVA
   episodes). `--title-check` compares against this value instead of fetching
   TMDB. Use the same lookalike characters as your filenames (`╱` for `/`, etc.).
+  When Plex is configured, the `Title` and `Sort Title` for any episode with a
+  `title_overrides` entry are also set and locked in Plex (using the decoded
+  ASCII title).
 - `extras` — metadata for non-episode files (bonus content, OPs/EDs, etc.)
   that have no `S##E##` in their name. The key is the filename **without the
   `.mkv` extension**.

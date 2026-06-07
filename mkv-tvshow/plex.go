@@ -78,6 +78,10 @@ type PlexClient interface {
 	// RefreshMetadata triggers a metadata refresh for the item identified by
 	// ratingKey, causing Plex to re-read embedded metadata from the files.
 	RefreshMetadata(ratingKey string) error
+	// SetEpisodeMetadata updates the title, sort title, and/or originally
+	// available date on a Plex episode item. Non-empty fields are written and
+	// locked; empty fields are left unchanged.
+	SetEpisodeMetadata(ratingKey, title, originallyAvailableAt string) error
 }
 
 // httpPlexClient is the production PlexClient that communicates with a real
@@ -520,6 +524,40 @@ func (c *httpPlexClient) RefreshMetadata(ratingKey string) error {
 		return fmt.Errorf("plex: refresh metadata %s: %w", ratingKey, err)
 	}
 	resp.Body.Close()
+	return nil
+}
+
+// SetEpisodeMetadata implements PlexClient.
+func (c *httpPlexClient) SetEpisodeMetadata(ratingKey, title, originallyAvailableAt string) error {
+	if title == "" && originallyAvailableAt == "" {
+		return nil
+	}
+	path := fmt.Sprintf("/library/metadata/%s?type=%d&id=%s",
+		ratingKey, PlexTypeEpisode, ratingKey)
+	if title != "" {
+		path += "&title.value=" + url.QueryEscape(title) + "&title.locked=1"
+		path += "&titleSort.value=" + url.QueryEscape(title) + "&titleSort.locked=1"
+	}
+	if originallyAvailableAt != "" {
+		path += "&originallyAvailableAt.value=" + url.QueryEscape(originallyAvailableAt) + "&originallyAvailableAt.locked=1"
+	}
+	path += "&X-Plex-Token=" + url.QueryEscape(c.token)
+
+	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("plex: build put request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("plex: set episode metadata: %w", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("plex: set episode metadata got status %d", resp.StatusCode)
+	}
 	return nil
 }
 

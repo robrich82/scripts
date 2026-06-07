@@ -403,7 +403,7 @@ func (p *Processor) Run() Stats {
 			}
 		}
 		langOverride := p.manualData[showFolder].Language
-		p.applyPlexRatings(showID, showName, showTouched, langOverride)
+		p.applyPlexRatings(showID, showName, showFolder, showTouched, langOverride)
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -1004,9 +1004,10 @@ func (p *Processor) RunDebandOnly() Stats {
 // level. Season and show ratings are computed as the maximum (most restrictive)
 // rating across their child items. Does nothing when Plex is not configured.
 // showName is used as a title-match fallback when TMDB GUID lookup fails.
+// showFolder is the show's directory name, used to look up manual_data overrides.
 // langOverride, if non-empty, is used instead of TMDB original_language when
 // setting the show's preferred audio language.
-func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool, langOverride string) {
+func (p *Processor) applyPlexRatings(tmdbID, showName, showFolder string, touched bool, langOverride string) {
 	if p.plex == nil || p.ratingCache == nil {
 		return
 	}
@@ -1042,6 +1043,19 @@ func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool, lang
 		return
 	}
 
+	// Build an inverse mapping from (Plex season, Plex episode) → local epKey
+	// so that manual_data Dates and TitleOverrides (keyed by local epKey) can be
+	// looked up per Plex episode. Episodes without a Mapping entry use their Plex
+	// season/episode numbers as the local key directly.
+	type epKey struct{ s, e int }
+	inverseMapping := make(map[epKey]string)
+	manualEntry := p.manualData[showFolder]
+	for localKey, pair := range manualEntry.Mapping {
+		if len(pair) >= 2 {
+			inverseMapping[epKey{pair[0], pair[1]}] = localKey
+		}
+	}
+
 	showMax := RatingNone
 	for _, season := range seasons {
 		episodes, err := p.plex.GetEpisodes(season.RatingKey)
@@ -1063,6 +1077,22 @@ func (p *Processor) applyPlexRatings(tmdbID, showName string, touched bool, lang
 				fmt.Printf("  [!] Plex: set episode %s rating: %v\n", ep.RatingKey, err)
 			}
 			seasonMax = MaxRating(seasonMax, r)
+		}
+
+		// Set title and/or originally available date for episodes with manual overrides.
+		for _, ep := range episodes {
+			localKey, hasMapped := inverseMapping[epKey{ep.SeasonNumber, ep.EpisodeNumber}]
+			if !hasMapped {
+				localKey = fmt.Sprintf("S%02dE%02d", ep.SeasonNumber, ep.EpisodeNumber)
+			}
+			epDate := manualEntry.Dates[localKey]
+			epTitle := cleanMetadataTitle(manualEntry.TitleOverrides[localKey])
+			if epDate == "" && epTitle == "" {
+				continue
+			}
+			if err := p.plex.SetEpisodeMetadata(ep.RatingKey, epTitle, epDate); err != nil {
+				fmt.Printf("  [!] Plex: set episode %s metadata: %v\n", ep.RatingKey, err)
+			}
 		}
 
 		if seasonMax != RatingNone {

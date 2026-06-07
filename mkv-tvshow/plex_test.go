@@ -20,6 +20,12 @@ type setLangCall struct {
 	lang      string
 }
 
+type setEpMetaCall struct {
+	ratingKey             string
+	title                 string
+	originallyAvailableAt string
+}
+
 type fakePlexClient struct {
 	showRatingKey     string
 	findErr           error
@@ -37,6 +43,8 @@ type fakePlexClient struct {
 	contentRatingErr  error
 	setLangCalls      []setLangCall
 	setLangErr        error
+	setEpMetaCalls    []setEpMetaCall
+	setEpMetaErr      error
 }
 
 func (f *fakePlexClient) FindShowByTMDBID(_ string) (string, error) {
@@ -77,6 +85,11 @@ func (f *fakePlexClient) SetContentRating(ratingKey string, t PlexItemType, rati
 func (f *fakePlexClient) SetAudioLanguage(ratingKey, lang string) error {
 	f.setLangCalls = append(f.setLangCalls, setLangCall{ratingKey, lang})
 	return f.setLangErr
+}
+
+func (f *fakePlexClient) SetEpisodeMetadata(ratingKey, title, originallyAvailableAt string) error {
+	f.setEpMetaCalls = append(f.setEpMetaCalls, setEpMetaCall{ratingKey, title, originallyAvailableAt})
+	return f.setEpMetaErr
 }
 
 func (f *fakePlexClient) RefreshLibraries() error        { return nil }
