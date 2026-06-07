@@ -20,6 +20,7 @@ func main() {
 	titleCheckMode := flag.Bool("title-check", false, "Check episode titles in filenames against TMDB and offer to rename.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	cleanFlag := flag.Bool("clean", false, "Remove stale cache entries for shows and files that no longer exist on disk, then exit.")
+	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a show and reset its applied state (folder substring or TMDB ID), then exit.")
 	flag.Parse()
 
 	if *cleanFlag {
@@ -29,6 +30,16 @@ func main() {
 			os.Exit(1)
 		}
 		runClean(mediaDir)
+		return
+	}
+
+	if *resetRatingQuery != "" {
+		mediaDir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+			os.Exit(1)
+		}
+		runResetRating(*resetRatingQuery, mediaDir)
 		return
 	}
 

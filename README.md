@@ -301,6 +301,7 @@ Flags:
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--force` | Re-apply all metadata even if already cached |
 | `--clean` | Remove cache entries for movie files that no longer exist on disk, then exit |
+| `--reset-rating <query>` | Clear the cached NZ rating for a movie and reset its applied state so the next run re-fetches and re-applies it. `query` is a title substring or TMDB ID |
 | `--deband-only` | Update only the `DEBAND` MKV tag for movies configured in `manual_data.json`; preserves all other tags and timestamps |
 
 Output:
@@ -435,6 +436,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--missing` | false | Check for missing episodes (see below) |
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
 | `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit |
+| `--reset-rating <query>` | — | Clear the cached NZ rating for a show and reset the applied state on all its files so the next run re-fetches and re-applies it. `query` is a folder name substring or TMDB ID |
 
 #### Output
 

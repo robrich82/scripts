@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // MovieRatingCache persists NZ content ratings for movies across runs so that
@@ -160,6 +161,56 @@ func (c *MovieRatingCache) CleanStalePaths() (applied, metaApplied int) {
 		}
 	}
 	return
+}
+
+// FindTMDBIDByQuery returns all (tmdbID, displayKey) pairs matching query.
+// Query may be a direct TMDB ID present in Movies, or a case-insensitive substring
+// of a "title (YEAR)" key in TMDBIDs. Falls back to substring matching Movies keys.
+func (c *MovieRatingCache) FindTMDBIDByQuery(query string) [][2]string {
+	var matches [][2]string
+	seen := make(map[string]bool)
+	lq := strings.ToLower(query)
+
+	// Direct key hit in Movies (e.g. bare TMDB ID or legacy "title:YEAR").
+	if _, ok := c.data.Movies[query]; ok && !seen[query] {
+		matches = append(matches, [2]string{query, query})
+		seen[query] = true
+	}
+
+	// Substring match in TMDBIDs ("title (YEAR)" → tmdbID).
+	for titleKey, id := range c.data.TMDBIDs {
+		if strings.Contains(strings.ToLower(titleKey), lq) && !seen[id] {
+			matches = append(matches, [2]string{id, titleKey})
+			seen[id] = true
+		}
+	}
+
+	// Fall back to substring match on Movies keys (legacy "title:YEAR" or bare IDs).
+	if len(matches) == 0 {
+		for key := range c.data.Movies {
+			if strings.Contains(strings.ToLower(key), lq) && !seen[key] {
+				matches = append(matches, [2]string{key, key})
+				seen[key] = true
+			}
+		}
+	}
+	return matches
+}
+
+// ResetForTMDBID clears the cached rating, Plex rating, and all applied-state
+// entries for files identified by the given TMDB ID. Returns the reset file paths.
+func (c *MovieRatingCache) ResetForTMDBID(tmdbID string) []string {
+	delete(c.data.Movies, tmdbID)
+	delete(c.data.PlexRatings, tmdbID)
+	var paths []string
+	for path, id := range c.data.MetaApplied {
+		if id == tmdbID {
+			delete(c.data.Applied, path)
+			delete(c.data.MetaApplied, path)
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 // Save writes the cache to disk.

@@ -16,10 +16,16 @@ func main() {
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
 	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, then exit.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
+	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a movie and reset its applied state (title substring or TMDB ID), then exit.")
 	flag.Parse()
 
 	if *cleanFlag {
 		runClean()
+		return
+	}
+
+	if *resetRatingQuery != "" {
+		runResetRating(*resetRatingQuery)
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -127,6 +128,35 @@ func (c *RatingCache) CleanStaleShowIDs(knownIDs map[string]bool) int {
 		}
 	}
 	return removed
+}
+
+// ResetForShowID clears the show-level rating and all episode ratings for the
+// given TMDB show ID. Returns the number of episode entries removed.
+func (c *RatingCache) ResetForShowID(tmdbID string) int {
+	delete(c.data.Shows, tmdbID)
+	prefix := tmdbID + "/"
+	removed := 0
+	for key := range c.data.Episodes {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.data.Episodes, key)
+			removed++
+		}
+	}
+	return removed
+}
+
+// ResetAppliedForFolder clears Applied entries for files that fall under
+// folderPath (based on filepath.Rel). Returns the file paths that were reset.
+func (c *RatingCache) ResetAppliedForFolder(folderPath string) []string {
+	var paths []string
+	for path := range c.data.Applied {
+		rel, err := filepath.Rel(folderPath, path)
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			delete(c.data.Applied, path)
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 // Save writes the cache to disk as JSON.

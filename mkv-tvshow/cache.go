@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ShowCache is a persistent map from show folder name to confirmed TMDB show ID.
@@ -85,6 +86,24 @@ func (c *ShowCache) CleanStaleFolders(mediaDir string) []string {
 		}
 	}
 	return removedIDs
+}
+
+// FindByQuery returns all (tmdbID, folderKey) pairs matching query.
+// Query may be a direct TMDB ID or a case-insensitive substring of a folder name.
+func (c *ShowCache) FindByQuery(query string) [][2]string {
+	var matches [][2]string
+	seen := make(map[string]bool)
+	lq := strings.ToLower(query)
+	for folder, id := range c.data {
+		name := strings.ToLower(filepath.Base(folder))
+		if id == query || strings.Contains(name, lq) {
+			if !seen[id] {
+				matches = append(matches, [2]string{id, folder})
+				seen[id] = true
+			}
+		}
+	}
+	return matches
 }
 
 // Save writes the cache to disk as indented JSON.
