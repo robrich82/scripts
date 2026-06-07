@@ -324,11 +324,11 @@ func (p *Processor) Run() Stats {
 					seasonCache[cKey] = sr
 				}
 			}
+			var prevDate, srAirDate string
 			if sr, ok := seasonCache[cKey]; ok {
 				if sr.PosterPath != "" {
 					posterURL = tmdbImageBase + sr.PosterPath
 				}
-				var prevDate string
 				for _, ep := range sr.Episodes {
 					if ep.EpisodeNumber == tmdbEpisode {
 						summary = ep.Overview
@@ -342,27 +342,29 @@ func (p *Processor) Run() Stats {
 						prevDate = ep.AirDate
 					}
 				}
-				if relDate == "" {
-					if prevDate != "" {
-						relDate = prevDate + "T00:00:00Z"
-						fmt.Printf("  [i] No air date for episode; using previous episode date as placeholder: %s\n", prevDate)
-					} else if sr.AirDate != "" {
-						relDate = sr.AirDate + "T00:00:00Z"
-						fmt.Printf("  [i] No air date for episode; using season air date as placeholder: %s\n", sr.AirDate)
-					}
-				}
-			}
-			if relDate == "" && showFirstAirDate != "" {
-				relDate = showFirstAirDate + "T00:00:00Z"
-				fmt.Printf("  [i] No air date for episode; using show first air date as placeholder: %s\n", showFirstAirDate)
+				srAirDate = sr.AirDate
 			}
 
-			// Manual date overrides all TMDB-derived dates (including placeholders).
+			// Manual date overrides all TMDB-derived dates.
 			epKey := fmt.Sprintf("S%02dE%02d", sNum, eNum)
 			if entry, ok := p.manualData[showFolder]; ok {
 				if dateStr, ok := entry.Dates[epKey]; ok && dateStr != "" {
 					relDate = dateStr + "T00:00:00Z"
 					stampDate = relDate
+				}
+			}
+
+			// Fall back to placeholder dates only when no TMDB or manual date is available.
+			if relDate == "" {
+				if prevDate != "" {
+					relDate = prevDate + "T00:00:00Z"
+					fmt.Printf("  [i] No air date for episode; using previous episode date as placeholder: %s\n", prevDate)
+				} else if srAirDate != "" {
+					relDate = srAirDate + "T00:00:00Z"
+					fmt.Printf("  [i] No air date for episode; using season air date as placeholder: %s\n", srAirDate)
+				} else if showFirstAirDate != "" {
+					relDate = showFirstAirDate + "T00:00:00Z"
+					fmt.Printf("  [i] No air date for episode; using show first air date as placeholder: %s\n", showFirstAirDate)
 				}
 			}
 
