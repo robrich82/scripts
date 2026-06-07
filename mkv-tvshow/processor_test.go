@@ -66,6 +66,20 @@ func (f *fakeTMDB) FetchEpisodeRating(_, _ string, _, _ int) (NZRating, error) {
 	return RatingNone, nil
 }
 
+// fakeRatingSource is a minimal RatingSource that returns fixed ratings.
+type fakeRatingSource struct {
+	showRating    NZRating
+	episodeRating NZRating
+}
+
+func (f *fakeRatingSource) Name() string { return "fakeSource" }
+func (f *fakeRatingSource) FetchShowRating(_, _ string) (NZRating, error) {
+	return f.showRating, nil
+}
+func (f *fakeRatingSource) FetchEpisodeRating(_, _ string, _, _ int) (NZRating, error) {
+	return f.episodeRating, nil
+}
+
 // helpers
 
 func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tmdb TMDBClient, mkv MKVRunner, prompter Prompter) (*Processor, *captureFileTimer) {
@@ -683,10 +697,10 @@ func TestResolveEpisodeRating_BlankUsesPlexFilePathFallback(t *testing.T) {
 	}
 }
 
-func TestResolveEpisodeRating_CachedRating_PromptShownAndConfirmedOnEnter(t *testing.T) {
+func TestResolveEpisodeRating_CachedRating_ReturnsSilently(t *testing.T) {
 	rc := emptyRatingCache(t)
 	rc.SetShowRating("12345", RatingR16)
-	prompter := &scriptedPrompter{answers: []string{""}} // user presses Enter to confirm
+	prompter := &scriptedPrompter{answers: []string{}}
 	p := &Processor{
 		ratingCache:           rc,
 		ratingSources:         []RatingSource{},
@@ -696,33 +710,53 @@ func TestResolveEpisodeRating_CachedRating_PromptShownAndConfirmedOnEnter(t *tes
 
 	got := p.resolveEpisodeRating("12345", "Test Show", "", 1, 1)
 	if got != RatingR16 {
-		t.Errorf("got %q, want R16 (confirmed from cache)", got)
+		t.Errorf("got %q, want R16 (silent cache hit)", got)
+	}
+	if prompter.idx != 0 {
+		t.Errorf("prompter called %d times, want 0 (no prompt for cached rating)", prompter.idx)
+	}
+}
+
+func TestResolveEpisodeRating_SourceFoundRating_PromptsForConfirmation(t *testing.T) {
+	rc := emptyRatingCache(t)
+	src := &fakeRatingSource{showRating: RatingR16}
+	prompter := &scriptedPrompter{answers: []string{""}} // user presses Enter to confirm
+	p := &Processor{
+		ratingCache:           rc,
+		ratingSources:         []RatingSource{src},
+		prompter:              prompter,
+		sessionPromptedRating: make(map[string]NZRating),
+	}
+
+	got := p.resolveEpisodeRating("12345", "Test Show", "", 1, 1)
+	if got != RatingR16 {
+		t.Errorf("got %q, want R16 (confirmed source rating)", got)
 	}
 	if prompter.idx != 1 {
-		t.Errorf("prompter called %d times, want 1 (must prompt even with cached rating)", prompter.idx)
+		t.Errorf("prompter called %d times, want 1 (source rating must be confirmed)", prompter.idx)
 	}
 	if cached, ok := rc.GetShowRating("12345"); !ok || cached != RatingR16 {
 		t.Errorf("show cache has %q ok=%v, want R16", cached, ok)
 	}
 }
 
-func TestResolveEpisodeRating_CachedRating_OverrideOnInput(t *testing.T) {
+func TestResolveEpisodeRating_SourceFoundRating_CanBeOverridden(t *testing.T) {
 	rc := emptyRatingCache(t)
-	rc.SetShowRating("12345", RatingR16)
+	src := &fakeRatingSource{showRating: RatingR16}
 	prompter := &scriptedPrompter{answers: []string{"M"}} // user overrides to M
 	p := &Processor{
 		ratingCache:           rc,
-		ratingSources:         []RatingSource{},
+		ratingSources:         []RatingSource{src},
 		prompter:              prompter,
 		sessionPromptedRating: make(map[string]NZRating),
 	}
 
 	got := p.resolveEpisodeRating("12345", "Test Show", "", 1, 1)
 	if got != RatingM {
-		t.Errorf("got %q, want M (user override)", got)
+		t.Errorf("got %q, want M (user override of source rating)", got)
 	}
 	if cached, ok := rc.GetShowRating("12345"); !ok || cached != RatingM {
-		t.Errorf("show cache has %q ok=%v, want M (cache updated with override)", cached, ok)
+		t.Errorf("show cache has %q ok=%v, want M", cached, ok)
 	}
 }
 
