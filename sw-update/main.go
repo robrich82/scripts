@@ -23,7 +23,7 @@ Commands:
   clean              Remove state entries for apps no longer in the config
 
 Environment:
-  GITHUB_TOKEN       GitHub personal access token
+  GITHUB_PERSONAL_ACCESS_TOKEN       GitHub personal access token
                      Without it: 60 API requests/hour (shared by IP)
                      With it:  5000 requests/hour
 `

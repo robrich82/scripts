@@ -679,7 +679,7 @@ sw-update clean              # Remove state entries for apps no longer in the co
 
 | Variable | Description |
 |----------|-------------|
-| `GITHUB_TOKEN` | Personal access token — raises GitHub API limit from 60 to 5000 req/hour |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | Personal access token — raises GitHub API limit from 60 to 5000 req/hour |
 
 ### Configuration
 
