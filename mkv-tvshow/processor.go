@@ -657,13 +657,11 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 	}
 
 	// Cache hits: return silently without prompting.
-	if !p.cfg.OverwriteRatings {
-		if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok {
-			return r
-		}
-		if r, ok := p.ratingCache.GetShowRating(tmdbID); ok {
-			return r
-		}
+	if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok {
+		return r
+	}
+	if r, ok := p.ratingCache.GetShowRating(tmdbID); ok {
+		return r
 	}
 
 	// Try external sources. If a source finds a rating it is stored as a
@@ -692,18 +690,6 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 			if r != RatingNone {
 				suggested = r
 				break
-			}
-		}
-	}
-
-	// Cache fallback when --overwrite-ratings skipped the cache checks above.
-	if suggested == RatingNone && p.cfg.OverwriteRatings {
-		if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok && r != RatingNone {
-			suggested = r
-		}
-		if suggested == RatingNone {
-			if r, ok := p.ratingCache.GetShowRating(tmdbID); ok && r != RatingNone {
-				suggested = r
 			}
 		}
 	}
