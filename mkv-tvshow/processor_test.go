@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -679,6 +680,49 @@ func TestResolveEpisodeRating_BlankUsesPlexFilePathFallback(t *testing.T) {
 	}
 	if cached, ok := rc.GetShowRating("12345"); !ok || cached != Rating16 {
 		t.Errorf("show cache has %q ok=%v, want 16", cached, ok)
+	}
+}
+
+func TestResolveEpisodeRating_CachedRating_PromptShownAndConfirmedOnEnter(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("12345", RatingR16)
+	prompter := &scriptedPrompter{answers: []string{""}} // user presses Enter to confirm
+	p := &Processor{
+		ratingCache:           rc,
+		ratingSources:         []RatingSource{},
+		prompter:              prompter,
+		sessionPromptedRating: make(map[string]NZRating),
+	}
+
+	got := p.resolveEpisodeRating("12345", "Test Show", "", 1, 1)
+	if got != RatingR16 {
+		t.Errorf("got %q, want R16 (confirmed from cache)", got)
+	}
+	if prompter.idx != 1 {
+		t.Errorf("prompter called %d times, want 1 (must prompt even with cached rating)", prompter.idx)
+	}
+	if cached, ok := rc.GetShowRating("12345"); !ok || cached != RatingR16 {
+		t.Errorf("show cache has %q ok=%v, want R16", cached, ok)
+	}
+}
+
+func TestResolveEpisodeRating_CachedRating_OverrideOnInput(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("12345", RatingR16)
+	prompter := &scriptedPrompter{answers: []string{"M"}} // user overrides to M
+	p := &Processor{
+		ratingCache:           rc,
+		ratingSources:         []RatingSource{},
+		prompter:              prompter,
+		sessionPromptedRating: make(map[string]NZRating),
+	}
+
+	got := p.resolveEpisodeRating("12345", "Test Show", "", 1, 1)
+	if got != RatingM {
+		t.Errorf("got %q, want M (user override)", got)
+	}
+	if cached, ok := rc.GetShowRating("12345"); !ok || cached != RatingM {
+		t.Errorf("show cache has %q ok=%v, want M (cache updated with override)", cached, ok)
 	}
 }
 
@@ -1539,14 +1583,7 @@ func TestRunLanguageOnly_ManualDataLanguageOverride(t *testing.T) {
 // (as individual elements, in any order).
 func containsAll(haystack []string, needles ...string) bool {
 	for _, n := range needles {
-		found := false
-		for _, h := range haystack {
-			if h == n {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(haystack, n) {
 			return false
 		}
 	}

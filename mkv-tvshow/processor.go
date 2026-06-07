@@ -639,25 +639,23 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 	return success
 }
 
-// resolveEpisodeRating returns the best NZ rating for a single episode,
-// trying sources in priority order and prompting the user as a last resort.
-// The result (including RatingNone) is cached at the show level to avoid
-// re-prompting for subsequent episodes of the same show within one run.
-// filePath is the absolute path to the MKV being processed; it is used as a
+// resolveEpisodeRating returns the NZ rating for a single episode,
+// always prompting the user once per show per run. Any cached or source-derived
+// rating is shown as the default so the user can confirm with Enter or override.
+// filePath is the absolute path to the MKV being processed; used as a
 // last-resort Plex lookup when TMDB GUID and title matching both fail.
 func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, season, episode int) NZRating {
 	if p.ratingCache == nil {
 		return RatingNone
 	}
 
-	// 1. Episode-level cache hit.
-	if !p.cfg.OverwriteRatings {
-		if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok {
-			return r
-		}
+	// Session cache: already prompted for this show this run — reuse the answer.
+	if r, alreadyPrompted := p.sessionPromptedRating[tmdbID]; alreadyPrompted {
+		return r
 	}
 
-	// 2. Episode-level sources (currently none return data, but the interface is open).
+	// Try external sources for a fresh rating (episode-level, then show-level).
+	var suggested NZRating
 	for _, src := range p.ratingSources {
 		r, err := src.FetchEpisodeRating(tmdbID, showName, season, episode)
 		if err != nil {
@@ -666,47 +664,38 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 		}
 		if r != RatingNone {
 			p.ratingCache.SetEpisodeRating(tmdbID, season, episode, r)
-			return r
+			suggested = r
+			break
+		}
+	}
+	if suggested == RatingNone {
+		for _, src := range p.ratingSources {
+			r, err := src.FetchShowRating(tmdbID, showName)
+			if err != nil {
+				fmt.Printf("  [!] %s show rating error: %v\n", src.Name(), err)
+				continue
+			}
+			if r != RatingNone {
+				p.ratingCache.SetShowRating(tmdbID, r)
+				suggested = r
+				break
+			}
 		}
 	}
 
-	// 3. Show-level cache hit.
-	if !p.cfg.OverwriteRatings {
-		if r, ok := p.ratingCache.GetShowRating(tmdbID); ok {
-			return r
+	// Fall back to previously cached ratings as the default suggestion.
+	if suggested == RatingNone {
+		if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok && r != RatingNone {
+			suggested = r
+		}
+	}
+	if suggested == RatingNone {
+		if r, ok := p.ratingCache.GetShowRating(tmdbID); ok && r != RatingNone {
+			suggested = r
 		}
 	}
 
-	// 4. Show-level sources (TMDB, Classification Office).
-	for _, src := range p.ratingSources {
-		r, err := src.FetchShowRating(tmdbID, showName)
-		if err != nil {
-			fmt.Printf("  [!] %s show rating error: %v\n", src.Name(), err)
-			continue
-		}
-		if r != RatingNone {
-			p.ratingCache.SetShowRating(tmdbID, r)
-			return r
-		}
-	}
-
-	// 5. Cache fallback — use any previously-saved rating rather than re-prompting.
-	//    This applies even with --overwrite-ratings: external sources are tried
-	//    first (steps 3-4 skipped above), but a manually-entered cached value is
-	//    always preferred over interrupting the user again.
-	if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok && r != RatingNone {
-		return r
-	}
-	if r, ok := p.ratingCache.GetShowRating(tmdbID); ok && r != RatingNone {
-		return r
-	}
-
-	// 6. User prompt — at most once per show per run.
-	if r, alreadyPrompted := p.sessionPromptedRating[tmdbID]; alreadyPrompted {
-		return r
-	}
-
-	// Check Plex for an existing rating to use as the default on blank input.
+	// Check Plex for an existing rating (shown when no other source has data).
 	// Try TMDB-ID lookup first, then title match, then file-path lookup (most
 	// reliable for anime whose Plex title differs from the folder name).
 	var plexDefault NZRating
@@ -745,15 +734,23 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 		}
 	}
 
-	// Build the initial prompt message.
+	// Prompt the user — always once per show per run.
+	// When a suggested rating exists (from sources or cache), show it as the
+	// default so the user can confirm with Enter or type a new value to override.
 	const validRatings = "G/PG/M/13/RP13/R13/15/RP15/R15/16/RP16/R16/R/18/RP18/R18"
 	var promptMsg string
-	if plexDefault != RatingNone {
+	switch {
+	case suggested != RatingNone:
+		promptMsg = fmt.Sprintf(
+			"NZ rating for %q: %s — press enter to confirm, or enter a new rating (%s): ",
+			showName, suggested, validRatings,
+		)
+	case plexDefault != RatingNone:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
 			showName, plexDefault, validRatings,
 		)
-	} else {
+	default:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
 			showName, validRatings,
@@ -764,11 +761,14 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 		ans, _ := p.prompter.Ask(promptMsg)
 		ans = strings.TrimSpace(ans)
 		if ans == "" {
-			if plexDefault != RatingNone {
+			if suggested != RatingNone {
+				r = suggested
+				p.ratingCache.SetShowRating(tmdbID, r)
+			} else if plexDefault != RatingNone {
 				r = plexDefault
 				p.ratingCache.SetShowRating(tmdbID, r)
 			}
-			break // user skipped (or accepted Plex default)
+			break
 		}
 		parsed, ok := ParseNZRating(ans)
 		if ok {
