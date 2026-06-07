@@ -357,6 +357,15 @@ func (p *Processor) Run() Stats {
 				fmt.Printf("  [i] No air date for episode; using show first air date as placeholder: %s\n", showFirstAirDate)
 			}
 
+			// Manual date overrides all TMDB-derived dates (including placeholders).
+			epKey := fmt.Sprintf("S%02dE%02d", sNum, eNum)
+			if entry, ok := p.manualData[showFolder]; ok {
+				if dateStr, ok := entry.Dates[epKey]; ok && dateStr != "" {
+					relDate = dateStr + "T00:00:00Z"
+					stampDate = relDate
+				}
+			}
+
 			title := cleanMetadataTitle(file)
 			if cached, ok := p.titleCache.Get(filePath); ok {
 				title = cached

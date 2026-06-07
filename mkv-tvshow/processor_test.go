@@ -1303,6 +1303,85 @@ func TestProcessorRun_ManualExtra_NoEntry_Skipped(t *testing.T) {
 	}
 }
 
+// --- manual dates ---
+
+func TestProcessorRun_ManualDate_NoTMDBDate_SetsTimestamp(t *testing.T) {
+	// When TMDB has no air date but manual_data.json provides one, it is used
+	// as a real date (stampDate is set, so filesystem timestamps are written).
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S01E03.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	tmdb := &fakeTMDB{
+		showDetails:  ShowDetails{FirstAirDate: "2020-01-01"},
+		seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 3, AirDate: ""}}},
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	timer := &captureFileTimer{}
+	manualData := map[string]ManualEntry{
+		"My Show": {Dates: map[string]string{"S01E03": "2023-04-15"}},
+	}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Fatalf("expected Success=1, got %+v", stats)
+	}
+	want := time.Date(2023, 4, 15, 0, 0, 0, 0, time.Local)
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected SetTimes to be called for manual date")
+	}
+	if !timer.setTimesCalls[0].t.Equal(want) {
+		t.Errorf("SetTimes got %v, want %v", timer.setTimesCalls[0].t, want)
+	}
+	if len(runner.calls) == 0 {
+		t.Fatal("expected Apply to be called")
+	}
+	if !containsAll(runner.calls[0].args, "date=2023-04-15T00:00:00Z") {
+		t.Errorf("expected manual date in mkvpropedit args, got %v", runner.calls[0].args)
+	}
+}
+
+func TestProcessorRun_ManualDate_OverridesTMDBDate(t *testing.T) {
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "My Show")
+	os.MkdirAll(showDir, 0755)
+	os.WriteFile(filepath.Join(showDir, "My Show - S01E01.mkv"), []byte{}, 0644)
+
+	cache := cacheWith(t, map[string]string{"My Show": "999"})
+	tmdb := &fakeTMDB{
+		seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2022-06-01"}}},
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	timer := &captureFileTimer{}
+	manualData := map[string]ManualEntry{
+		"My Show": {Dates: map[string]string{"S01E01": "2022-12-25"}},
+	}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, manualData, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
+
+	stats := p.Run()
+
+	if stats.Success != 1 {
+		t.Fatalf("expected Success=1, got %+v", stats)
+	}
+	want := time.Date(2022, 12, 25, 0, 0, 0, 0, time.Local)
+	if len(timer.setTimesCalls) == 0 {
+		t.Fatal("expected SetTimes to be called")
+	}
+	if !timer.setTimesCalls[0].t.Equal(want) {
+		t.Errorf("SetTimes got %v (TMDB date), want %v (manual override)", timer.setTimesCalls[0].t, want)
+	}
+	if len(runner.calls) == 0 {
+		t.Fatal("expected Apply to be called")
+	}
+	if !containsAll(runner.calls[0].args, "date=2022-12-25T00:00:00Z") {
+		t.Errorf("expected overridden date in mkvpropedit args, got %v", runner.calls[0].args)
+	}
+}
+
 // --- RunLanguageOnly ---
 
 func TestRunLanguageOnly_SetsLanguageForCachedShows(t *testing.T) {
