@@ -52,6 +52,14 @@ func TestCleanMetadataTitle_AllReplacements(t *testing.T) {
 	}
 }
 
+func TestCleanSearchQuery_DecimalInTitle(t *testing.T) {
+	got := cleanSearchQuery("2.5 Dimensional Seduction (2024)")
+	want := "2.5 Dimensional Seduction"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestCleanSearchQuery_StripYearSuffix(t *testing.T) {
 	got := cleanSearchQuery("Attack on Titan (2013)")
 	want := "Attack on Titan"

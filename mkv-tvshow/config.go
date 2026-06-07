@@ -158,8 +158,13 @@ func cleanMetadataTitle(nameOrFilename string) string {
 
 // cleanSearchQuery prepares a folder name for use as a TMDB search query by
 // stripping year suffixes, decorative brackets, and filesystem-safe lookalikes.
+// It does NOT strip file extensions — folder names like "2.5 Dimensional Seduction"
+// must not have their decimal-prefixed portion treated as an extension.
 func cleanSearchQuery(folder string) string {
 	name := yearSuffixRe.ReplaceAllString(folder, "")
 	name = strings.Trim(name, "【】 ")
-	return cleanMetadataTitle(name)
+	for _, rc := range reverseChars {
+		name = strings.ReplaceAll(name, rc.from, rc.to)
+	}
+	return name
 }
