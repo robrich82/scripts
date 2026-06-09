@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -105,8 +104,7 @@ func (s *sfChecker) check(app App) (*CheckResult, error) {
 		name := path.Base(item.Title)
 		if len(patterns) > 0 {
 			for _, pat := range patterns {
-				matched, _ := filepath.Match(pat, name)
-				if matched {
+				if matchAssetPattern(pat, name) {
 					assets = append(assets, Asset{Name: name, URL: item.Link})
 					break
 				}
