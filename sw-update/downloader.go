@@ -52,11 +52,11 @@ func runOrOpen(path string) error {
 	switch {
 	case strings.HasSuffix(lower, ".exe"):
 		fmt.Printf("  Launching %s...\n", filepath.Base(path))
-		return exec.Command(path).Start()
+		return runElevated(path, "")
 
 	case strings.HasSuffix(lower, ".msi"):
 		fmt.Printf("  Running msiexec for %s...\n", filepath.Base(path))
-		return exec.Command("msiexec", "/i", path).Start()
+		return runElevated("msiexec", fmt.Sprintf(`/i "%s"`, path))
 
 	case strings.HasSuffix(lower, ".zip"):
 		destDir := strings.TrimSuffix(path, ".zip")
