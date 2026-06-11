@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -1197,6 +1198,10 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName, langOverri
 		return
 	}
 	if err := p.plex.SetAudioLanguage(showKey, lang); err != nil {
+		if errors.Is(err, ErrPlexNotFound) {
+			p.ratingCache.ClearPlexKey(tmdbID)
+			return
+		}
 		fmt.Printf("  [!] Plex: set audio language for %q: %v\n", showName, err)
 		return
 	}

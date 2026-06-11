@@ -233,6 +233,12 @@ func (c *RatingCache) SetPlexKey(tmdbID, key string) {
 	}
 }
 
+// ClearPlexKey removes the cached Plex ratingKey for the given TMDB show ID,
+// forcing a fresh library lookup on the next run.
+func (c *RatingCache) ClearPlexKey(tmdbID string) {
+	delete(c.data.PlexKeys, tmdbID)
+}
+
 // AllShowIDs returns all TMDB show IDs present in the cache.
 func (c *RatingCache) AllShowIDs() []string {
 	ids := make([]string, 0, len(c.data.Shows))

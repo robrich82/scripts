@@ -579,6 +579,9 @@ func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langCode string) err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 404 {
+		return ErrPlexNotFound
+	}
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("plex: set audio language got status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
