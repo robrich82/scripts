@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -272,6 +273,81 @@ func TestHTTPPlexMovieClient_GetContentRating_Empty(t *testing.T) {
 	}
 	if rating != RatingNone {
 		t.Errorf("got %q; want RatingNone when metadata is empty", rating)
+	}
+}
+
+// --- multiPlexMovieClient tests ---
+
+type fakeMultiPlexMovieClient struct {
+	setStreamsRatingKey string
+	setStreamsLangTag   string
+	setStreamsCalls     int
+	setStreamsErr       error
+}
+
+func (f *fakeMultiPlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
+	return "", ErrPlexMovieNotFound
+}
+func (f *fakeMultiPlexMovieClient) FindMovieByTitle(_, _ string) (string, error) {
+	return "", ErrPlexMovieNotFound
+}
+func (f *fakeMultiPlexMovieClient) GetContentRating(_ string) (NZRating, error) {
+	return RatingNone, nil
+}
+func (f *fakeMultiPlexMovieClient) SetContentRating(_ string, _ NZRating) error { return nil }
+func (f *fakeMultiPlexMovieClient) RefreshLibraries() error                     { return nil }
+func (f *fakeMultiPlexMovieClient) SetMovieStreams(rk, lang string) (bool, bool, error) {
+	f.setStreamsCalls++
+	f.setStreamsRatingKey = rk
+	f.setStreamsLangTag = lang
+	return true, true, f.setStreamsErr
+}
+
+func TestMultiPlexMovieClient_SetMovieStreams_CallsBoth(t *testing.T) {
+	primary := &fakeMultiPlexMovieClient{}
+	alt := &fakeMultiPlexMovieClient{}
+	mc := newMultiPlexMovieClient(primary, alt)
+	audioSet, subtitleSet, err := mc.SetMovieStreams("rk1", "ja")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !audioSet || !subtitleSet {
+		t.Error("expected audioSet and subtitleSet from primary")
+	}
+	if primary.setStreamsCalls != 1 || primary.setStreamsRatingKey != "rk1" || primary.setStreamsLangTag != "ja" {
+		t.Errorf("primary: calls=%d key=%q lang=%q", primary.setStreamsCalls, primary.setStreamsRatingKey, primary.setStreamsLangTag)
+	}
+	if alt.setStreamsCalls != 1 || alt.setStreamsRatingKey != "rk1" || alt.setStreamsLangTag != "ja" {
+		t.Errorf("alt: calls=%d key=%q lang=%q", alt.setStreamsCalls, alt.setStreamsRatingKey, alt.setStreamsLangTag)
+	}
+}
+
+func TestMultiPlexMovieClient_SetMovieStreams_PrimaryErrorPropagates(t *testing.T) {
+	primary := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("primary failed")}
+	alt := &fakeMultiPlexMovieClient{}
+	mc := newMultiPlexMovieClient(primary, alt)
+	if _, _, err := mc.SetMovieStreams("rk1", "ja"); err == nil {
+		t.Fatal("expected error from primary")
+	}
+	if alt.setStreamsCalls != 0 {
+		t.Error("alt should not be called when primary fails")
+	}
+}
+
+func TestMultiPlexMovieClient_SetMovieStreams_AltErrorDoesNotPropagate(t *testing.T) {
+	primary := &fakeMultiPlexMovieClient{}
+	alt := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("alt failed")}
+	mc := newMultiPlexMovieClient(primary, alt)
+	if _, _, err := mc.SetMovieStreams("rk1", "ja"); err != nil {
+		t.Fatalf("alt error should not propagate: %v", err)
+	}
+}
+
+func TestNewMultiPlexMovieClient_NilAltReturnsPrimary(t *testing.T) {
+	primary := &fakeMultiPlexMovieClient{}
+	mc := newMultiPlexMovieClient(primary, nil)
+	if mc != PlexMovieClient(primary) {
+		t.Error("expected primary to be returned when alt is nil")
 	}
 }
 

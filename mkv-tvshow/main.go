@@ -51,6 +51,7 @@ func main() {
 
 	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
+	plexAltToken := os.Getenv("PLEX_ALT_TOKEN")
 
 	var cutoff time.Time
 	if !*allFlag {
@@ -138,7 +139,11 @@ func main() {
 		}
 		var plexClient PlexClient
 		if plexURL != "" && plexToken != "" {
-			plexClient = newHTTPPlexClient(plexURL, plexToken)
+			var alt PlexClient
+			if plexAltToken != "" {
+				alt = newHTTPPlexClient(plexURL, plexAltToken)
+			}
+			plexClient = newMultiPlexClient(newHTTPPlexClient(plexURL, plexToken), alt)
 		}
 		cfg := Config{OverwriteLanguage: *overwriteLanguage}
 		processor := NewProcessor(cfg, cache, langManualData, tmdb, nil, nil, nil, nil, ratingCache, nil, plexClient, nil)
@@ -213,7 +218,11 @@ func main() {
 
 	var plexClient PlexClient
 	if plexURL != "" && plexToken != "" {
-		plexClient = newHTTPPlexClient(plexURL, plexToken)
+		var alt PlexClient
+		if plexAltToken != "" {
+			alt = newHTTPPlexClient(plexURL, plexAltToken)
+		}
+		plexClient = newMultiPlexClient(newHTTPPlexClient(plexURL, plexToken), alt)
 	}
 
 	if plexClient != nil {

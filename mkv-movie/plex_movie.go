@@ -476,6 +476,47 @@ func (c *httpPlexMovieClient) plexSetStream(partID int, param string, streamID i
 	return nil
 }
 
+// multiPlexMovieClient dispatches SetMovieStreams to both primary and alt,
+// routing all other calls to primary only. Used when PLEX_ALT_TOKEN is set so
+// that stream selection is applied for both Plex users.
+type multiPlexMovieClient struct {
+	primary PlexMovieClient
+	alt     PlexMovieClient
+}
+
+// newMultiPlexMovieClient returns a PlexMovieClient that calls SetMovieStreams
+// on both primary and alt. If alt is nil, primary is returned directly.
+func newMultiPlexMovieClient(primary, alt PlexMovieClient) PlexMovieClient {
+	if alt == nil {
+		return primary
+	}
+	return &multiPlexMovieClient{primary: primary, alt: alt}
+}
+
+func (m *multiPlexMovieClient) FindMovieByTMDBID(tmdbID string) (string, error) {
+	return m.primary.FindMovieByTMDBID(tmdbID)
+}
+func (m *multiPlexMovieClient) FindMovieByTitle(title, year string) (string, error) {
+	return m.primary.FindMovieByTitle(title, year)
+}
+func (m *multiPlexMovieClient) GetContentRating(ratingKey string) (NZRating, error) {
+	return m.primary.GetContentRating(ratingKey)
+}
+func (m *multiPlexMovieClient) SetContentRating(ratingKey string, rating NZRating) error {
+	return m.primary.SetContentRating(ratingKey, rating)
+}
+func (m *multiPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (audioSet, subtitleSet bool, err error) {
+	audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, audioLangTag)
+	if err != nil {
+		return
+	}
+	if _, _, altErr := m.alt.SetMovieStreams(ratingKey, audioLangTag); altErr != nil {
+		fmt.Printf("  [!] Plex alt token: set movie streams: %v\n", altErr)
+	}
+	return
+}
+func (m *multiPlexMovieClient) RefreshLibraries() error { return m.primary.RefreshLibraries() }
+
 // SetContentRating implements PlexMovieClient.
 func (c *httpPlexMovieClient) SetContentRating(ratingKey string, rating NZRating) error {
 	plexRating := "nz/" + string(rating)

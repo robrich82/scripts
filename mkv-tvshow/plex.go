@@ -586,6 +586,61 @@ func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langCode string) err
 	return nil
 }
 
+// multiPlexClient dispatches SetAudioLanguage to both primary and alt, routing
+// all other calls to primary only. Used when PLEX_ALT_TOKEN is set so that the
+// audio language preference is applied for both Plex users.
+type multiPlexClient struct {
+	primary PlexClient
+	alt     PlexClient
+}
+
+// newMultiPlexClient returns a PlexClient that calls SetAudioLanguage on both
+// primary and alt. If alt is nil, primary is returned directly.
+func newMultiPlexClient(primary, alt PlexClient) PlexClient {
+	if alt == nil {
+		return primary
+	}
+	return &multiPlexClient{primary: primary, alt: alt}
+}
+
+func (m *multiPlexClient) FindShowByTMDBID(tmdbID string) (string, error) {
+	return m.primary.FindShowByTMDBID(tmdbID)
+}
+func (m *multiPlexClient) FindShowByTitle(title string) (string, error) {
+	return m.primary.FindShowByTitle(title)
+}
+func (m *multiPlexClient) FindShowByFilePath(filePath string) (string, error) {
+	return m.primary.FindShowByFilePath(filePath)
+}
+func (m *multiPlexClient) GetSeasons(showRatingKey string) ([]PlexSeason, error) {
+	return m.primary.GetSeasons(showRatingKey)
+}
+func (m *multiPlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem, error) {
+	return m.primary.GetEpisodes(seasonRatingKey)
+}
+func (m *multiPlexClient) GetContentRating(ratingKey string) (NZRating, error) {
+	return m.primary.GetContentRating(ratingKey)
+}
+func (m *multiPlexClient) SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error {
+	return m.primary.SetContentRating(ratingKey, itemType, rating)
+}
+func (m *multiPlexClient) SetAudioLanguage(ratingKey, langCode string) error {
+	if err := m.primary.SetAudioLanguage(ratingKey, langCode); err != nil {
+		return err
+	}
+	if err := m.alt.SetAudioLanguage(ratingKey, langCode); err != nil {
+		fmt.Printf("  [!] Plex alt token: set audio language: %v\n", err)
+	}
+	return nil
+}
+func (m *multiPlexClient) RefreshLibraries() error { return m.primary.RefreshLibraries() }
+func (m *multiPlexClient) RefreshMetadata(ratingKey string) error {
+	return m.primary.RefreshMetadata(ratingKey)
+}
+func (m *multiPlexClient) SetEpisodeMetadata(ratingKey, title, originallyAvailableAt string) error {
+	return m.primary.SetEpisodeMetadata(ratingKey, title, originallyAvailableAt)
+}
+
 // SetContentRating implements PlexClient. It sends a PUT to the metadata
 // endpoint setting contentRating and locking the field.
 func (c *httpPlexClient) SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error {

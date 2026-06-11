@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -654,5 +655,51 @@ func TestGuidStringMatchesTMDBID(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("guidStringMatchesTMDBID(%q, %q) = %v; want %v", tc.s, tc.tmdbID, got, tc.want)
 		}
+	}
+}
+
+// --- multiPlexClient tests ---
+
+func TestMultiPlexClient_SetAudioLanguage_CallsBoth(t *testing.T) {
+	primary := &fakePlexClient{}
+	alt := &fakePlexClient{}
+	mc := newMultiPlexClient(primary, alt)
+	if err := mc.SetAudioLanguage("rk1", "ja"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(primary.setLangCalls) != 1 || primary.setLangCalls[0] != (setLangCall{"rk1", "ja"}) {
+		t.Errorf("primary calls: %+v", primary.setLangCalls)
+	}
+	if len(alt.setLangCalls) != 1 || alt.setLangCalls[0] != (setLangCall{"rk1", "ja"}) {
+		t.Errorf("alt calls: %+v", alt.setLangCalls)
+	}
+}
+
+func TestMultiPlexClient_SetAudioLanguage_PrimaryErrorPropagates(t *testing.T) {
+	primary := &fakePlexClient{setLangErr: errors.New("primary failed")}
+	alt := &fakePlexClient{}
+	mc := newMultiPlexClient(primary, alt)
+	if err := mc.SetAudioLanguage("rk1", "ja"); err == nil {
+		t.Fatal("expected error from primary")
+	}
+	if len(alt.setLangCalls) != 0 {
+		t.Error("alt should not be called when primary fails")
+	}
+}
+
+func TestMultiPlexClient_SetAudioLanguage_AltErrorDoesNotPropagate(t *testing.T) {
+	primary := &fakePlexClient{}
+	alt := &fakePlexClient{setLangErr: errors.New("alt failed")}
+	mc := newMultiPlexClient(primary, alt)
+	if err := mc.SetAudioLanguage("rk1", "ja"); err != nil {
+		t.Fatalf("alt error should not propagate: %v", err)
+	}
+}
+
+func TestNewMultiPlexClient_NilAltReturnsPrimary(t *testing.T) {
+	primary := &fakePlexClient{}
+	mc := newMultiPlexClient(primary, nil)
+	if mc != PlexClient(primary) {
+		t.Error("expected primary to be returned when alt is nil")
 	}
 }
