@@ -586,12 +586,30 @@ func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langCode string) err
 	return nil
 }
 
+// altErrReporter is implemented by multiPlexClient. After a successful
+// SetAudioLanguage call, callers can retrieve any error from the alt token.
+type altErrReporter interface {
+	getAltErr() error
+}
+
 // multiPlexClient dispatches SetAudioLanguage to both primary and alt, routing
 // all other calls to primary only. Used when PLEX_ALT_TOKEN is set so that the
 // audio language preference is applied for both Plex users.
 type multiPlexClient struct {
 	primary PlexClient
 	alt     PlexClient
+	altErr  error
+}
+
+func (m *multiPlexClient) getAltErr() error { return m.altErr }
+
+// plexAltErrSummary converts a Plex alt-token error to a short human-readable
+// string, collapsing noisy HTTP 404 responses to "not in library".
+func plexAltErrSummary(err error) string {
+	if strings.Contains(err.Error(), "status 404") {
+		return "not in library"
+	}
+	return err.Error()
 }
 
 // newMultiPlexClient returns a PlexClient that calls SetAudioLanguage on both
@@ -625,12 +643,11 @@ func (m *multiPlexClient) SetContentRating(ratingKey string, itemType PlexItemTy
 	return m.primary.SetContentRating(ratingKey, itemType, rating)
 }
 func (m *multiPlexClient) SetAudioLanguage(ratingKey, langCode string) error {
+	m.altErr = nil
 	if err := m.primary.SetAudioLanguage(ratingKey, langCode); err != nil {
 		return err
 	}
-	if err := m.alt.SetAudioLanguage(ratingKey, langCode); err != nil {
-		fmt.Printf("  [!] Plex alt token: set audio language: %v\n", err)
-	}
+	m.altErr = m.alt.SetAudioLanguage(ratingKey, langCode)
 	return nil
 }
 func (m *multiPlexClient) RefreshLibraries() error { return m.primary.RefreshLibraries() }

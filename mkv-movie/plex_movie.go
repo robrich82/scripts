@@ -476,12 +476,30 @@ func (c *httpPlexMovieClient) plexSetStream(partID int, param string, streamID i
 	return nil
 }
 
+// altMovieErrReporter is implemented by multiPlexMovieClient. After a
+// successful SetMovieStreams call, callers can retrieve any error from the alt token.
+type altMovieErrReporter interface {
+	getAltErr() error
+}
+
 // multiPlexMovieClient dispatches SetMovieStreams to both primary and alt,
 // routing all other calls to primary only. Used when PLEX_ALT_TOKEN is set so
 // that stream selection is applied for both Plex users.
 type multiPlexMovieClient struct {
 	primary PlexMovieClient
 	alt     PlexMovieClient
+	altErr  error
+}
+
+func (m *multiPlexMovieClient) getAltErr() error { return m.altErr }
+
+// plexMovieAltErrSummary converts a Plex alt-token error to a short human-readable
+// string, collapsing noisy HTTP 404 responses to "not in library".
+func plexMovieAltErrSummary(err error) string {
+	if strings.Contains(err.Error(), "status 404") {
+		return "not in library"
+	}
+	return err.Error()
 }
 
 // newMultiPlexMovieClient returns a PlexMovieClient that calls SetMovieStreams
@@ -506,13 +524,12 @@ func (m *multiPlexMovieClient) SetContentRating(ratingKey string, rating NZRatin
 	return m.primary.SetContentRating(ratingKey, rating)
 }
 func (m *multiPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (audioSet, subtitleSet bool, err error) {
+	m.altErr = nil
 	audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, audioLangTag)
 	if err != nil {
 		return
 	}
-	if _, _, altErr := m.alt.SetMovieStreams(ratingKey, audioLangTag); altErr != nil {
-		fmt.Printf("  [!] Plex alt token: set movie streams: %v\n", altErr)
-	}
+	_, _, m.altErr = m.alt.SetMovieStreams(ratingKey, audioLangTag)
 	return
 }
 func (m *multiPlexMovieClient) RefreshLibraries() error { return m.primary.RefreshLibraries() }

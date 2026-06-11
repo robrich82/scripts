@@ -687,12 +687,36 @@ func TestMultiPlexClient_SetAudioLanguage_PrimaryErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestMultiPlexClient_SetAudioLanguage_AltErrorDoesNotPropagate(t *testing.T) {
+func TestMultiPlexClient_SetAudioLanguage_AltErrorStoredNotPropagated(t *testing.T) {
 	primary := &fakePlexClient{}
-	alt := &fakePlexClient{setLangErr: errors.New("alt failed")}
+	altErr := errors.New("alt failed")
+	alt := &fakePlexClient{setLangErr: altErr}
 	mc := newMultiPlexClient(primary, alt)
 	if err := mc.SetAudioLanguage("rk1", "ja"); err != nil {
 		t.Fatalf("alt error should not propagate: %v", err)
+	}
+	r, ok := mc.(altErrReporter)
+	if !ok {
+		t.Fatal("multiPlexClient should implement altErrReporter")
+	}
+	if r.getAltErr() != altErr {
+		t.Errorf("getAltErr() = %v; want %v", r.getAltErr(), altErr)
+	}
+}
+
+func TestMultiPlexClient_SetAudioLanguage_AltErrClearedOnSuccess(t *testing.T) {
+	primary := &fakePlexClient{}
+	alt := &fakePlexClient{}
+	mc := newMultiPlexClient(primary, alt)
+	// First call with alt error.
+	alt.setLangErr = errors.New("alt failed")
+	mc.SetAudioLanguage("rk1", "ja") //nolint
+	// Second call with alt success — altErr should be cleared.
+	alt.setLangErr = nil
+	mc.SetAudioLanguage("rk1", "ja") //nolint
+	r := mc.(altErrReporter)
+	if r.getAltErr() != nil {
+		t.Errorf("getAltErr() should be nil after successful alt call, got %v", r.getAltErr())
 	}
 }
 

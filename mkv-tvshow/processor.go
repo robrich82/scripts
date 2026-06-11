@@ -1201,5 +1201,11 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName, langOverri
 		return
 	}
 	p.ratingCache.SetLanguageApplied(tmdbID, lang)
-	fmt.Printf("  [i] Plex: audio language for %q set to %q\n", showName, lang)
+	altSuffix := ""
+	if r, ok := p.plex.(altErrReporter); ok {
+		if altErr := r.getAltErr(); altErr != nil {
+			altSuffix = "; alt: " + plexAltErrSummary(altErr)
+		}
+	}
+	fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, lang, altSuffix)
 }

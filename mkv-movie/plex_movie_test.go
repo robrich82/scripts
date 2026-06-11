@@ -334,12 +334,34 @@ func TestMultiPlexMovieClient_SetMovieStreams_PrimaryErrorPropagates(t *testing.
 	}
 }
 
-func TestMultiPlexMovieClient_SetMovieStreams_AltErrorDoesNotPropagate(t *testing.T) {
+func TestMultiPlexMovieClient_SetMovieStreams_AltErrorStoredNotPropagated(t *testing.T) {
 	primary := &fakeMultiPlexMovieClient{}
-	alt := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("alt failed")}
+	altErr := errors.New("alt failed")
+	alt := &fakeMultiPlexMovieClient{setStreamsErr: altErr}
 	mc := newMultiPlexMovieClient(primary, alt)
 	if _, _, err := mc.SetMovieStreams("rk1", "ja"); err != nil {
 		t.Fatalf("alt error should not propagate: %v", err)
+	}
+	r, ok := mc.(altMovieErrReporter)
+	if !ok {
+		t.Fatal("multiPlexMovieClient should implement altMovieErrReporter")
+	}
+	if r.getAltErr() != altErr {
+		t.Errorf("getAltErr() = %v; want %v", r.getAltErr(), altErr)
+	}
+}
+
+func TestMultiPlexMovieClient_SetMovieStreams_AltErrClearedOnSuccess(t *testing.T) {
+	primary := &fakeMultiPlexMovieClient{}
+	alt := &fakeMultiPlexMovieClient{}
+	mc := newMultiPlexMovieClient(primary, alt)
+	alt.setStreamsErr = errors.New("alt failed")
+	mc.SetMovieStreams("rk1", "ja") //nolint
+	alt.setStreamsErr = nil
+	mc.SetMovieStreams("rk1", "ja") //nolint
+	r := mc.(altMovieErrReporter)
+	if r.getAltErr() != nil {
+		t.Errorf("getAltErr() should be nil after successful alt call, got %v", r.getAltErr())
 	}
 }
 

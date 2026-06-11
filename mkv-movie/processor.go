@@ -353,6 +353,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	// Push rating and stream selection to Plex when either needs updating.
 	// Both are independent of needsApply so corrected cache entries are always propagated.
 	var langSet string
+	var langAltSuffix string
 	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet(details.OriginalLanguage) {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
 		if plexErr != nil {
@@ -385,6 +386,11 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					if audioSet || subtitleSet {
 						langSet = details.OriginalLanguage
 					}
+					if r, ok := rr.plex.(altMovieErrReporter); ok {
+						if altErr := r.getAltErr(); altErr != nil {
+							langAltSuffix = "; alt: " + plexMovieAltErrSummary(altErr)
+						}
+					}
 				}
 			}
 		}
@@ -414,7 +420,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		fmt.Printf(" (rating: %s)", rating)
 	}
 	if langSet != "" {
-		fmt.Printf(" (lang: %s)", langSet)
+		fmt.Printf(" (lang: %s%s)", langSet, langAltSuffix)
 	}
 	fmt.Println()
 	return ResultUpdated
