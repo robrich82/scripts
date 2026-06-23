@@ -841,6 +841,30 @@ func TestUpdateCoverCBZ_DryRun(t *testing.T) {
 	}
 }
 
+// TestProcessCBZ_PreexistingCoverPreserved verifies that an image already named
+// cover.* stays as the cover even when numerically-named pages sort before it.
+func TestProcessCBZ_PreexistingCoverPreserved(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", portrait},
+		{"001.png", portrait},
+		{"002.png", portrait},
+	})
+
+	if _, err := processCBZ(path, false, false, true, true); err != nil {
+		t.Fatalf("processCBZ: %v", err)
+	}
+
+	names := readCBZNames(t, path)
+	if !containsEntry(names, "cover.png") {
+		t.Errorf("cover.png should remain as cover; got %v", names)
+	}
+	for _, old := range []string{"001.png", "002.png"} {
+		if containsEntry(names, old) {
+			t.Errorf("original entry %q should have been renamed", old)
+		}
+	}
+}
+
 // TestProcessCBZ_NeedsFixing verifies that a CBZ requiring processing returns
 // skipped=false.
 func TestProcessCBZ_NeedsFixing(t *testing.T) {
