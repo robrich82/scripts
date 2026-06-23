@@ -82,14 +82,6 @@ func processCBZ(path string, dryRun, verbose, noBlank, noBackup bool) (skipped b
 		sort.Slice(imgs, func(i, j int) bool {
 			return naturalLess(imgs[i].Name, imgs[j].Name)
 		})
-		// If any image is already named cover.*, pin it to position 0 so a
-		// pre-named cover isn't displaced by numerically-sorted pages.
-		for i, f := range imgs {
-			if strings.HasPrefix(strings.ToLower(filepath.Base(f.Name)), "cover.") {
-				imgs[0], imgs[i] = imgs[i], imgs[0]
-				break
-			}
-		}
 	}
 
 	// ── Idempotency guard ──────────────────────────────────────────────────
