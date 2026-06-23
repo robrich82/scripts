@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	reCalibreNext = regexp.MustCompile(`(?i)<a\s[^>]*class=["']calibreANext["'][^>]*>`)
-	reHref        = regexp.MustCompile(`(?i)\bhref=["']([^"']*)["']`)
-	reImgSrc      = regexp.MustCompile(`(?i)<img\s[^>]*\bsrc=["']([^"']*)["']`)
+	reCalibreNext  = regexp.MustCompile(`(?i)<a\s[^>]*class=["']calibreANext["'][^>]*>`)
+	reHref         = regexp.MustCompile(`(?i)\bhref=["']([^"']*)["']`)
+	reImgSrc       = regexp.MustCompile(`(?i)<img\s[^>]*\bsrc=["']([^"']*)["']`)
+	reSvgImageHref = regexp.MustCompile(`(?i)<image\s[^>]*\bxlink:href=["']([^"']*)["']`)
 )
 
 // kfxPageOrder detects a calibre-exported KFX CBZ (root HTML + matching
@@ -144,11 +145,14 @@ func calibreNextLink(s string) string {
 	return hm[1]
 }
 
-// calibreImgSrc returns the src of the first <img> in s.
+// calibreImgSrc returns the image path from the first <img src> or SVG
+// <image xlink:href> element in s.
 func calibreImgSrc(s string) string {
-	m := reImgSrc.FindStringSubmatch(s)
-	if m == nil {
-		return ""
+	if m := reImgSrc.FindStringSubmatch(s); m != nil {
+		return m[1]
 	}
-	return m[1]
+	if m := reSvgImageHref.FindStringSubmatch(s); m != nil {
+		return m[1]
+	}
+	return ""
 }

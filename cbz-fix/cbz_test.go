@@ -711,6 +711,82 @@ func TestKFXPageOrder(t *testing.T) {
 	}
 }
 
+// makeKFXCBZSVG is like makeKFXCBZ but XHTML pages embed images via SVG
+// <image xlink:href="..."> instead of <img src="...">, matching the format
+// produced by some Calibre KFX exports.
+func makeKFXCBZSVG(t *testing.T, pages []string) string {
+	t.Helper()
+
+	const filesDir = "kfxtest_files/OEBPS/"
+
+	xhtmlFor := func(imgName, nextPage string) string {
+		next := ""
+		if nextPage != "" {
+			next = `<a href="` + nextPage + `" class="calibreANext">next page</a>`
+		}
+		return `<html><body>` +
+			`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">` +
+			`<image xlink:href="` + imgName + `" width="100" height="200"/>` +
+			`</svg>` +
+			next +
+			`</body></html>`
+	}
+
+	var entries []zipEntry
+
+	firstXHTML := ""
+	if len(pages) > 0 {
+		firstXHTML = filesDir + "page_" + pages[0] + ".xhtml"
+	}
+	rootHTML := `<html><body><a href="` + firstXHTML + `" class="calibreANext">start</a></body></html>`
+	entries = append(entries, zipEntry{"kfxtest.html", []byte(rootHTML)})
+
+	for i, img := range pages {
+		xhtmlName := "page_" + img + ".xhtml"
+		nextXHTML := ""
+		if i+1 < len(pages) {
+			nextXHTML = "page_" + pages[i+1] + ".xhtml"
+		}
+		entries = append(entries, zipEntry{filesDir + xhtmlName, []byte(xhtmlFor(img+".png", nextXHTML))})
+		entries = append(entries, zipEntry{filesDir + img + ".png", portrait})
+	}
+
+	return makeCBZ(t, entries)
+}
+
+// TestKFXPageOrder_SVGImage verifies that kfxPageOrder correctly extracts
+// images referenced via SVG <image xlink:href="..."> rather than <img src>.
+func TestKFXPageOrder_SVGImage(t *testing.T) {
+	// Natural sort: img_a, img_b, img_c. HTML chain: img_c → img_a → img_b.
+	pages := []string{"img_c", "img_a", "img_b"}
+	path := makeKFXCBZSVG(t, pages)
+
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	ordered := kfxPageOrder(&zr.Reader)
+	if ordered == nil {
+		t.Fatal("kfxPageOrder returned nil for SVG-image KFX CBZ")
+	}
+	if len(ordered) != 3 {
+		t.Fatalf("got %d images, want 3", len(ordered))
+	}
+
+	want := []string{
+		"kfxtest_files/OEBPS/img_c.png",
+		"kfxtest_files/OEBPS/img_a.png",
+		"kfxtest_files/OEBPS/img_b.png",
+	}
+	for i, f := range ordered {
+		if f.Name != want[i] {
+			t.Errorf("ordered[%d] = %q, want %q", i, f.Name, want[i])
+		}
+	}
+}
+
 // TestKFXPageOrder_NonKFX verifies that kfxPageOrder returns nil for a
 // regular CBZ (no HTML file).
 func TestKFXPageOrder_NonKFX(t *testing.T) {
