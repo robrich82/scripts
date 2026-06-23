@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"hash/crc32"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	pngenc "image/png"
 )
@@ -319,8 +321,12 @@ func buildPages(entries []entry, oldInfo map[int]pageInfo, blankW, blankH int) [
 	return pages
 }
 
-// writeNewCBZ streams entries (and ComicInfo.xml) into a new temp file.
+// writeNewCBZ writes entries (and ComicInfo.xml) into a new temp file.
 // Returns the temp file path on success.
+//
+// All entries are written via CreateRaw so that CRC32 and sizes appear in
+// the local file header rather than a trailing data descriptor (ZIP bit 3).
+// 7-Zip's update handler cannot modify archives that contain data descriptors.
 func writeNewCBZ(dir string, entries []entry, ciData []byte) (string, error) {
 	tmp, err := os.CreateTemp(dir, "cbzfix-*.tmp")
 	if err != nil {
@@ -337,38 +343,38 @@ func writeNewCBZ(dir string, entries []entry, ciData []byte) (string, error) {
 	}
 
 	for _, e := range entries {
-		w, err := zw.Create(e.newName)
-		if err != nil {
-			cleanup()
-			return "", fmt.Errorf("create entry %s: %w", e.newName, err)
-		}
 		if e.original != nil {
-			rc, err := e.original.Open()
+			// Copy the source entry's raw compressed bytes directly.
+			// Clearing bit 3 (data descriptor) lets us write CRC32 and sizes
+			// in the local header — values come from the central directory,
+			// which always has them even when bit 3 was set in the source.
+			fh := e.original.FileHeader
+			fh.Name = e.newName
+			fh.Flags &^= 0x8
+			w, err := zw.CreateRaw(&fh)
 			if err != nil {
 				cleanup()
-				return "", fmt.Errorf("open source entry %s: %w", e.original.Name, err)
+				return "", fmt.Errorf("create entry %s: %w", e.newName, err)
+			}
+			rc, err := e.original.OpenRaw()
+			if err != nil {
+				cleanup()
+				return "", fmt.Errorf("open raw source entry %s: %w", e.original.Name, err)
 			}
 			_, cpErr := io.Copy(w, rc)
-			rc.Close()
 			if cpErr != nil {
 				cleanup()
 				return "", fmt.Errorf("copy entry %s: %w", e.original.Name, cpErr)
 			}
 		} else {
-			if _, err := w.Write(e.data); err != nil {
+			if err := writeStored(zw, e.newName, e.data); err != nil {
 				cleanup()
 				return "", fmt.Errorf("write blank page: %w", err)
 			}
 		}
 	}
 
-	// Write ComicInfo.xml.
-	w, err := zw.Create("ComicInfo.xml")
-	if err != nil {
-		cleanup()
-		return "", fmt.Errorf("create ComicInfo.xml: %w", err)
-	}
-	if _, err := w.Write(ciData); err != nil {
+	if err := writeStored(zw, "ComicInfo.xml", ciData); err != nil {
 		cleanup()
 		return "", fmt.Errorf("write ComicInfo.xml: %w", err)
 	}
@@ -383,6 +389,25 @@ func writeNewCBZ(dir string, entries []entry, ciData []byte) (string, error) {
 		return "", err
 	}
 	return tmpPath, nil
+}
+
+// writeStored writes data as an uncompressed (Store) zip entry using CreateRaw
+// with all header fields pre-populated, ensuring no data descriptor (bit 3).
+func writeStored(zw *zip.Writer, name string, data []byte) error {
+	fh := &zip.FileHeader{
+		Name:               name,
+		Method:             zip.Store,
+		Modified:           time.Now(),
+		CRC32:              crc32.ChecksumIEEE(data),
+		UncompressedSize64: uint64(len(data)),
+		CompressedSize64:   uint64(len(data)),
+	}
+	w, err := zw.CreateRaw(fh)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(data)
+	return err
 }
 
 func readZipEntry(f *zip.File) ([]byte, error) {
