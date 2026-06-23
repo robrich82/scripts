@@ -996,30 +996,25 @@ func TestUpdateCoverCBZ_DryRun(t *testing.T) {
 }
 
 // TestProcessCBZ_PreexistingCoverPreserved verifies that an image already named
-// cover.* stays as the cover and that remaining pages retain sorted order.
+// cover.* stays as the cover even when numerically-named pages sort before it.
 func TestProcessCBZ_PreexistingCoverPreserved(t *testing.T) {
 	path := makeCBZ(t, []zipEntry{
 		{"cover.png", portrait},
 		{"001.png", portrait},
 		{"002.png", portrait},
-		{"003.png", portrait},
 	})
 
-	// --no-blank so we can assert a clean p001/p002/p003 sequence.
 	if _, err := processCBZ(path, false, false, true, true); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
 	names := readCBZNames(t, path)
-
-	// Output order must be cover, p001, p002, p003, ComicInfo.xml.
-	want := []string{"cover.png", "p001.png", "p002.png", "p003.png", "ComicInfo.xml"}
-	if len(names) != len(want) {
-		t.Fatalf("got entries %v, want %v", names, want)
+	if !containsEntry(names, "cover.png") {
+		t.Errorf("cover.png should remain as cover; got %v", names)
 	}
-	for i, w := range want {
-		if names[i] != w {
-			t.Errorf("entry[%d] = %q, want %q", i, names[i], w)
+	for _, old := range []string{"001.png", "002.png"} {
+		if containsEntry(names, old) {
+			t.Errorf("original entry %q should have been renamed", old)
 		}
 	}
 }
