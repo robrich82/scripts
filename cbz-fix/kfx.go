@@ -88,13 +88,14 @@ func kfxPageOrder(zr *zip.Reader) []*zip.File {
 			}
 		}
 
-		// Advance to next XHTML; stop when we leave the _files tree.
+		// Advance to next page; stop when the link leaves the HTML/XHTML chain.
 		nextRel := calibreNextLink(body)
 		if nextRel == "" {
 			break
 		}
 		nextAbs := path.Clean(dir + nextRel)
-		if !strings.EqualFold(path.Ext(nextAbs), ".xhtml") {
+		ext := strings.ToLower(path.Ext(nextAbs))
+		if ext != ".xhtml" && ext != ".html" {
 			break
 		}
 		current = nextAbs
