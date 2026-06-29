@@ -119,18 +119,32 @@ func kfxPageOrder(zr *zip.Reader) []*zip.File {
 		if !strings.HasPrefix(strings.ToLower(path.Base(f.Name)), "cover.") || !isImageFile(f.Name) {
 			continue
 		}
-		// Remove from ordered if already present (e.g. linked at end of chain).
-		for i, o := range ordered {
-			if o.Name == f.Name {
-				ordered = append(ordered[:i], ordered[i+1:]...)
-				break
-			}
-		}
+		// Drop any copy already in the chain. Calibre AZW3/KFX exports often
+		// store the cover twice: as *_files/cover.* and as the first reading
+		// page (a byte-identical image under a different name). Match on either
+		// the same name or identical content (CRC32 + size from the zip central
+		// directory) so the duplicate page doesn't reappear as p001.
+		ordered = filterFiles(ordered, func(o *zip.File) bool {
+			return o.Name != f.Name &&
+				!(o.CRC32 == f.CRC32 && o.UncompressedSize64 == f.UncompressedSize64)
+		})
 		ordered = append([]*zip.File{f}, ordered...)
 		break
 	}
 
 	return ordered
+}
+
+// filterFiles returns the elements of fs for which keep returns true, preserving
+// order. It reuses the backing array since the result is never longer than fs.
+func filterFiles(fs []*zip.File, keep func(*zip.File) bool) []*zip.File {
+	out := fs[:0]
+	for _, f := range fs {
+		if keep(f) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // calibreNextLink returns the href of the first <a class="calibreANext"> in s.

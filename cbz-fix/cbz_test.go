@@ -23,6 +23,20 @@ func makePNG(w, h int) []byte {
 	return buf.Bytes()
 }
 
+// makePNGShade is like makePNG but fills the image with the given gray level so
+// that distinct shades produce byte-distinct (and CRC-distinct) PNGs.
+func makePNGShade(w, h int, shade uint8) []byte {
+	img := image.NewGray(image.Rect(0, 0, w, h))
+	for i := range img.Pix {
+		img.Pix[i] = shade
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
 type zipEntry struct {
 	name string
 	data []byte
@@ -669,11 +683,13 @@ func makeKFXCBZWithCover(t *testing.T, pages []string, linkedAtEnd bool) string 
 			nextXHTML = "../cover.jpeg" // last page links back to cover
 		}
 		entries = append(entries, zipEntry{filesDir + xhtmlName, []byte(xhtmlFor(img+".png", nextXHTML))})
-		entries = append(entries, zipEntry{filesDir + img + ".png", portrait})
+		// Distinct shade per page so the cover is not byte-identical to any page.
+		entries = append(entries, zipEntry{filesDir + img + ".png", makePNGShade(100, 200, uint8(i+1))})
 	}
 
-	// cover.jpeg lives at *_files/ root, not inside OEBPS/.
-	entries = append(entries, zipEntry{"kfxtest_files/cover.jpeg", portrait})
+	// cover.jpeg lives at *_files/ root, not inside OEBPS/. Use a distinct shade
+	// so it is a genuinely separate image from the interior pages.
+	entries = append(entries, zipEntry{"kfxtest_files/cover.jpeg", makePNGShade(100, 200, 200)})
 
 	return makeCBZ(t, entries)
 }
@@ -938,6 +954,73 @@ func TestKFXPageOrder_CoverLinkedAtEnd(t *testing.T) {
 	// cover must not also appear at the end
 	if filepath.Base(ordered[len(ordered)-1].Name) == "cover.jpeg" {
 		t.Error("cover.jpeg appears at both first and last positions")
+	}
+}
+
+// TestKFXPageOrder_CoverDuplicatedAsFirstPage verifies that when the cover is
+// stored both as *_files/cover.* and as a byte-identical first reading page
+// under a different name (Calibre AZW3 export pattern), the duplicate page is
+// dropped and only the promoted cover remains at position 0.
+func TestKFXPageOrder_CoverDuplicatedAsFirstPage(t *testing.T) {
+	const filesDir = "kfxtest_files/OEBPS/"
+
+	xhtmlFor := func(imgName, nextPage string) string {
+		next := ""
+		if nextPage != "" {
+			next = `<a href="` + nextPage + `" class="calibreANext">next page</a>`
+		}
+		return `<html><body><img src="` + imgName + `" alt="page"/>` + next + `</body></html>`
+	}
+
+	coverBytes := makePNGShade(100, 200, 42)
+	pages := []string{"00001", "00002", "00003"}
+
+	var entries []zipEntry
+	entries = append(entries, zipEntry{"kfxtest.html", []byte(
+		`<html><body><a href="` + filesDir + `page_` + pages[0] + `.xhtml" class="calibreANext">start</a></body></html>`,
+	)})
+	for i, img := range pages {
+		nextXHTML := ""
+		if i+1 < len(pages) {
+			nextXHTML = "page_" + pages[i+1] + ".xhtml"
+		}
+		entries = append(entries, zipEntry{filesDir + "page_" + img + ".xhtml", []byte(xhtmlFor(img+".jpeg", nextXHTML))})
+		// First page is byte-identical to the cover; the rest are distinct.
+		data := makePNGShade(100, 200, uint8(i+1))
+		if i == 0 {
+			data = coverBytes
+		}
+		entries = append(entries, zipEntry{filesDir + img + ".jpeg", data})
+	}
+	// cover.jpeg at *_files/ root, byte-identical to images/00001.jpeg.
+	entries = append(entries, zipEntry{"kfxtest_files/cover.jpeg", coverBytes})
+
+	path := makeCBZ(t, entries)
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	ordered := kfxPageOrder(&zr.Reader)
+	if ordered == nil {
+		t.Fatal("kfxPageOrder returned nil")
+	}
+	// 3 pages, but page 1 duplicates the cover → cover + 2 unique pages = 3.
+	if len(ordered) != 3 {
+		var ns []string
+		for _, f := range ordered {
+			ns = append(ns, f.Name)
+		}
+		t.Fatalf("got %d images, want 3 (cover + 2 unique pages); got %v", len(ordered), ns)
+	}
+	if filepath.Base(ordered[0].Name) != "cover.jpeg" {
+		t.Errorf("ordered[0] = %q, want cover.jpeg", ordered[0].Name)
+	}
+	for _, f := range ordered[1:] {
+		if filepath.Base(f.Name) == "00001.jpeg" {
+			t.Error("byte-identical duplicate 00001.jpeg should have been removed")
+		}
 	}
 }
 

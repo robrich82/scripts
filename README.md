@@ -52,11 +52,14 @@ Normalises CBZ comic archives for consistent two-page-spread viewing:
 
 1. **Backs up** each CBZ to `<file>.cbz.bak` alongside the original.
 2. **Reads `ComicInfo.xml`** (if present) to gather page metadata.
-3. **Determines page order**: for calibre KFX exports (a root `.html` file next
-   to a matching `*_files/` directory), the XHTML navigation chain is followed
-   to get the correct reading order — image filenames in these archives are
-   opaque hashes that sort incorrectly by name. For all other CBZs, images are
-   sorted by natural (numeric) order.
+3. **Determines page order**: for calibre KFX/AZW3 exports (a root `.html` file
+   next to a matching `*_files/` directory), the XHTML navigation chain is
+   followed to get the correct reading order — image filenames in these archives
+   are opaque hashes that sort incorrectly by name. The cover (`*_files/cover.*`)
+   is promoted to the front; if it is also stored as the first reading page under
+   a different name (a byte-identical duplicate, common in AZW3 exports), that
+   duplicate page is dropped so the cover isn't repeated as `p001`. For all other
+   CBZs, images are sorted by natural (numeric) order.
 4. **Renames the cover** (first image in reading order) to `cover.<ext>`.
 5. **Inserts a blank page** — white, same dimensions as the first non-double-page
    after the cover — so that interior pages land on the correct side in a
