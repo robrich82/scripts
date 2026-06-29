@@ -705,6 +705,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `repo` | Repository in `owner/repo` form |
 | `prerelease` | `true` to include pre-releases (default: `false`) |
 | `asset_patterns` | Glob patterns to select specific release assets |
+| `version_regex` | Go regex; when set, the version is taken from the first matched asset's filename (capture group 1) instead of the tag — for projects that tag by date but version the asset |
 | `version_rewrite` | `[regex, replacement]` applied to the tag name (e.g. rewrite `gs10071` to `10.07.1`) |
 
 **`html` checker fields:**

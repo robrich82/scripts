@@ -300,6 +300,37 @@ func TestGithubChecker(t *testing.T) {
 		}
 	})
 
+	t.Run("version_regex extracts version from asset name", func(t *testing.T) {
+		// Releases tagged by date, with the real version in the asset filename.
+		rels := []ghRelease{
+			{TagName: "251105T2353", Prerelease: true, Assets: []ghAsset{
+				{Name: "hakuneko-electron-v39.1.0-win32-x64.zip", BrowserDownloadURL: "https://example.com/x64.zip"},
+				{Name: "hakuneko-electron-v39.1.0-win32-ia32.zip", BrowserDownloadURL: "https://example.com/ia32.zip"},
+			}},
+		}
+		srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(rels)
+		}))
+		defer srv2.Close()
+		appAsset := App{
+			Name: "haruneko",
+			Checker: CheckerConfig{
+				Type:          "github",
+				Repo:          "owner/haruneko",
+				Prerelease:    true,
+				AssetPatterns: []string{`hakuneko-electron-.*-win32-x64\.zip`},
+				VersionRegex:  `hakuneko-electron-v([0-9.]+)-win32-x64\.zip`,
+			},
+		}
+		r, err := (&githubChecker{client: clientFor(srv2)}).check(appAsset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Version != "39.1.0" {
+			t.Errorf("version = %q, want %q", r.Version, "39.1.0")
+		}
+	})
+
 	t.Run("no releases returns error", func(t *testing.T) {
 		srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode([]ghRelease{})

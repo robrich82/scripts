@@ -119,7 +119,22 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 			continue
 		}
 		assets = sortAndLimitAssets(assets, app.Checker.AssetSort)
-		version, err := applyVersionRewrite(strings.TrimPrefix(rel.TagName, "v"), app.Checker.VersionRewrite)
+
+		// Version normally comes from the tag name, but some projects tag
+		// releases by date (e.g. "251105T2353") while encoding the real
+		// version in the asset filename. When version_regex is set, extract
+		// the version from the first matched asset instead of the tag.
+		rawVersion := strings.TrimPrefix(rel.TagName, "v")
+		if app.Checker.VersionRegex != "" {
+			if len(assets) == 0 {
+				continue
+			}
+			rawVersion, err = applyVersionRegex(assets[0].Name, app.Checker.VersionRegex)
+			if err != nil {
+				return nil, err
+			}
+		}
+		version, err := applyVersionRewrite(rawVersion, app.Checker.VersionRewrite)
 		if err != nil {
 			return nil, err
 		}
