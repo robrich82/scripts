@@ -119,8 +119,12 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 			continue
 		}
 		assets = sortAndLimitAssets(assets, app.Checker.AssetSort)
+		version, err := applyVersionRewrite(strings.TrimPrefix(rel.TagName, "v"), app.Checker.VersionRewrite)
+		if err != nil {
+			return nil, err
+		}
 		return &CheckResult{
-			Version: strings.TrimPrefix(rel.TagName, "v"),
+			Version: version,
 			Assets:  assets,
 		}, nil
 	}

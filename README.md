@@ -705,6 +705,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `repo` | Repository in `owner/repo` form |
 | `prerelease` | `true` to include pre-releases (default: `false`) |
 | `asset_patterns` | Glob patterns to select specific release assets |
+| `version_rewrite` | `[regex, replacement]` applied to the tag name (e.g. rewrite `gs10071` to `10.07.1`) |
 
 **`html` checker fields:**
 
