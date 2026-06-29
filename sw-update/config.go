@@ -34,6 +34,15 @@ type LocalConfig struct {
 	VersionDateLayout []string `json:"version_date_layout,omitempty"` // [parse-layout, format-layout] Go time layouts to normalise a date version
 }
 
+// UpdateConfig describes a custom command used to update an app in place,
+// instead of downloading and running a release asset (e.g. "yt-dlp.exe -U",
+// "pip install --upgrade <pkg>", or a self-updater script).
+type UpdateConfig struct {
+	Command  string   `json:"command"`            // executable or script to run
+	Args     []string `json:"args,omitempty"`     // arguments passed to the command
+	Elevated bool     `json:"elevated,omitempty"` // run with a UAC elevation prompt (for tools that write to Program Files)
+}
+
 // App represents a single tracked application.
 type App struct {
 	Name    string        `json:"name"`
@@ -41,6 +50,7 @@ type App struct {
 	URL     string        `json:"url,omitempty"` // original bookmark URL (for reference)
 	Checker CheckerConfig `json:"checker"`
 	Local   LocalConfig   `json:"local"`
+	Update  *UpdateConfig `json:"update,omitempty"` // custom in-place update command (optional)
 }
 
 // Config is the top-level configuration file.

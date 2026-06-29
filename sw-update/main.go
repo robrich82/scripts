@@ -14,6 +14,8 @@ Commands:
                      -v / --verbose: also show up-to-date apps
   list               List all configured apps and their known versions
   install <name>     Download latest release and run/open installer
+                     (runs the app's custom update command if configured)
+  update <name>      Alias for install — run the app's update command/installer
   add                Add a new app interactively
   remove <name>      Remove an app from the config
   enable <name>      Enable an app for checking
@@ -43,7 +45,7 @@ func main() {
 		err = cmdCheck(args)
 	case "list":
 		err = cmdList(args)
-	case "install":
+	case "install", "update":
 		err = cmdInstall(args)
 	case "add":
 		err = cmdAdd(args)

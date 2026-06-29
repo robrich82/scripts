@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -23,6 +25,12 @@ func cmdInstall(args []string) error {
 	app := cfg.FindApp(name)
 	if app == nil {
 		return fmt.Errorf("app %q not found", name)
+	}
+
+	// Apps with a custom update command self-update in place rather than
+	// downloading a release asset.
+	if app.Update != nil && app.Update.Command != "" {
+		return runUpdate(name, app)
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -108,4 +116,67 @@ func cmdInstall(args []string) error {
 	}
 
 	return nil
+}
+
+// runUpdate runs an app's configured custom update command after confirmation.
+func runUpdate(name string, app *App) error {
+	command, args := buildUpdateInvocation(app.Update)
+	display := command
+	if len(args) > 0 {
+		display += " " + strings.Join(args, " ")
+	}
+	fmt.Printf("Update command for %s:\n  %s\n", name, display)
+	if app.Update.Elevated {
+		fmt.Println("  (will prompt for administrator elevation)")
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("\nRun update command? [y/N]: ")
+	line, _ := reader.ReadString('\n')
+	if !strings.EqualFold(strings.TrimSpace(line), "y") {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	if app.Update.Elevated {
+		if err := runElevated(command, joinArgsForShell(args)); err != nil {
+			return fmt.Errorf("update command failed: %w", err)
+		}
+		fmt.Println("\nUpdate started in an elevated window.")
+		return nil
+	}
+
+	cmd := exec.Command(command, args...)
+	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("update command failed: %w", err)
+	}
+	fmt.Println("\nUpdate command finished.")
+	return nil
+}
+
+// buildUpdateInvocation resolves the command and args to execute, routing
+// .bat/.cmd scripts through cmd.exe on Windows (they cannot be exec'd directly).
+func buildUpdateInvocation(u *UpdateConfig) (string, []string) {
+	if runtime.GOOS == "windows" {
+		lower := strings.ToLower(u.Command)
+		if strings.HasSuffix(lower, ".bat") || strings.HasSuffix(lower, ".cmd") {
+			return "cmd", append([]string{"/c", u.Command}, u.Args...)
+		}
+	}
+	return u.Command, u.Args
+}
+
+// joinArgsForShell joins args into a single command-line string, quoting any
+// argument that contains whitespace (used when passing params to ShellExecuteW).
+func joinArgsForShell(args []string) string {
+	parts := make([]string, len(args))
+	for i, a := range args {
+		if strings.ContainsAny(a, " \t") {
+			parts[i] = `"` + a + `"`
+		} else {
+			parts[i] = a
+		}
+	}
+	return strings.Join(parts, " ")
 }

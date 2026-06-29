@@ -666,6 +666,7 @@ sw-update check              # Check all enabled apps for updates
 sw-update check <name>       # Check a specific app
 sw-update list               # List all apps and their known versions
 sw-update install <name>     # Download latest release and run/open installer
+sw-update update <name>      # Alias for install; runs the app's update command if configured
 sw-update add                # Add a new app interactively
 sw-update remove <name>      # Remove an app from config
 sw-update enable <name>      # Enable an app for checking
@@ -746,6 +747,25 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `exe` | Runs an executable with given args and extracts version from output |
 | `file-version` | Reads the Windows file-version resource from an exe/dll |
 | `filename` | Globs a path pattern and extracts version from the matched filename |
+
+#### Custom update commands
+
+By default `install`/`update` downloads a release asset and runs it. Apps that
+self-update or are managed by a package manager can instead define an `update`
+block, which `install`/`update` runs (after confirmation) in place of the
+download flow:
+
+| Field | Description |
+|-------|-------------|
+| `command` | Executable or script to run. `.bat`/`.cmd` scripts are automatically run through `cmd.exe` |
+| `args` | Arguments passed to the command |
+| `elevated` | `true` to launch with a UAC elevation prompt — needed when the tool writes to `Program Files` (e.g. `yt-dlp.exe -U`, an mpv `updater.bat`) |
+
+Examples: `yt-dlp.exe -U` (elevated), `pip install --upgrade <pkg>`,
+`cmd /c pipx upgrade <pkg>`. Non-elevated commands stream their output inline;
+elevated ones run in a separate administrator window.
+
+#### Local detector fields
 
 The `exe`, `file-version`, and `filename` detectors accept `version_regex`
 (capture group 1 is the version), then optionally `version_date_layout`
