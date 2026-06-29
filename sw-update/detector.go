@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // LocalDetector detects the locally installed version of an app.
@@ -44,7 +45,26 @@ func (d *detectorDispatch) InstalledVersion(app App) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	ver, err = applyDateLayout(ver, app.Local.VersionDateLayout)
+	if err != nil {
+		return "", err
+	}
 	return applyVersionRewrite(ver, app.Local.VersionRewrite)
+}
+
+// applyDateLayout parses ver as a date using layout[0] (a Go reference-time
+// layout) and reformats it with layout[1]. This normalises human date strings
+// such as "Jun 10 2026" to a sortable form like "20260610" so they can be
+// compared against date-based release tags. A nil/short layout is a no-op.
+func applyDateLayout(ver string, layout []string) (string, error) {
+	if len(layout) != 2 {
+		return ver, nil
+	}
+	t, err := time.Parse(layout[0], strings.TrimSpace(ver))
+	if err != nil {
+		return "", fmt.Errorf("version_date_layout: parsing %q with layout %q: %w", ver, layout[0], err)
+	}
+	return t.Format(layout[1]), nil
 }
 
 func applyVersionRegex(ver, pattern string) (string, error) {

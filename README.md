@@ -706,6 +706,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `prerelease` | `true` to include pre-releases (default: `false`) |
 | `asset_patterns` | Glob patterns to select specific release assets |
 | `version_regex` | Go regex; when set, the version is taken from the first matched asset's filename (capture group 1) instead of the tag — for projects that tag by date but version the asset |
+| `version_date_layout` | `[parse-layout, format-layout]` Go time layouts; parses the version as a date and reformats it (e.g. normalise a build date to a sortable `20060102`) |
 | `version_rewrite` | `[regex, replacement]` applied to the tag name (e.g. rewrite `gs10071` to `10.07.1`) |
 
 **`html` checker fields:**
@@ -745,6 +746,14 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `exe` | Runs an executable with given args and extracts version from output |
 | `file-version` | Reads the Windows file-version resource from an exe/dll |
 | `filename` | Globs a path pattern and extracts version from the matched filename |
+
+The `exe`, `file-version`, and `filename` detectors accept `version_regex`
+(capture group 1 is the version), then optionally `version_date_layout`
+(`[parse-layout, format-layout]`) and `version_rewrite` (`[regex, replacement]`)
+to normalise the result so it matches the upstream version string. For example,
+mpv's `mpv.exe --version` reports `built on Jun 10 2026`, which
+`version_date_layout: ["Jan _2 2006", "20060102"]` turns into `20260610` to match
+the date-based release tag.
 
 ---
 

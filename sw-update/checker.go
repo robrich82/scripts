@@ -134,7 +134,11 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 				return nil, err
 			}
 		}
-		version, err := applyVersionRewrite(rawVersion, app.Checker.VersionRewrite)
+		version, err := applyDateLayout(rawVersion, app.Checker.VersionDateLayout)
+		if err != nil {
+			return nil, err
+		}
+		version, err = applyVersionRewrite(version, app.Checker.VersionRewrite)
 		if err != nil {
 			return nil, err
 		}
@@ -354,6 +358,10 @@ func (h *htmlChecker) check(app App) (*CheckResult, error) {
 		version = string(m[1])
 	}
 
+	version, err = applyDateLayout(version, app.Checker.VersionDateLayout)
+	if err != nil {
+		return nil, err
+	}
 	version, err = applyVersionRewrite(version, app.Checker.VersionRewrite)
 	if err != nil {
 		return nil, err

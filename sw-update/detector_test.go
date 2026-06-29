@@ -32,6 +32,36 @@ func TestApplyVersionRegex(t *testing.T) {
 	}
 }
 
+func TestApplyDateLayout(t *testing.T) {
+	tests := []struct {
+		ver     string
+		layout  []string
+		want    string
+		wantErr bool
+	}{
+		// Wrong length — no-op
+		{"1.2.3", nil, "1.2.3", false},
+		{"Jun 10 2026", []string{"Jan _2 2006"}, "Jun 10 2026", false},
+		// mpv build date (space-padded day) to sortable YYYYMMDD
+		{"Jun 10 2026", []string{"Jan _2 2006", "20060102"}, "20260610", false},
+		{"Jun  3 2026", []string{"Jan _2 2006", "20060102"}, "20260603", false},
+		// Reformat to dashed date
+		{"Jun 10 2026", []string{"Jan _2 2006", "2006-01-02"}, "2026-06-10", false},
+		// Unparseable input
+		{"not a date", []string{"Jan _2 2006", "20060102"}, "", true},
+	}
+	for _, tt := range tests {
+		got, err := applyDateLayout(tt.ver, tt.layout)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("applyDateLayout(%q, %v) error = %v, wantErr %v", tt.ver, tt.layout, err, tt.wantErr)
+			continue
+		}
+		if err == nil && got != tt.want {
+			t.Errorf("applyDateLayout(%q, %v) = %q, want %q", tt.ver, tt.layout, got, tt.want)
+		}
+	}
+}
+
 func TestApplyVersionRewrite(t *testing.T) {
 	tests := []struct {
 		ver     string
