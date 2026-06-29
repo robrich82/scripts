@@ -345,6 +345,7 @@ func (h *htmlChecker) check(app App) (*CheckResult, error) {
 	}
 
 	assets := extractHTMLAssets(body, app.Checker.URL, app.Checker.AssetPatterns)
+	assets = sortAndLimitAssets(assets, app.Checker.AssetSort)
 	return &CheckResult{Version: version, Assets: assets}, nil
 }
 
