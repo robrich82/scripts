@@ -76,6 +76,12 @@ dimensions (width > height = landscape = double spread).
 Files whose first image is already named `cover.*` and second image `p001.*`
 are treated as already processed and skipped.
 
+A `.cbz` whose contents are actually a different archive format is detected by
+its file header and renamed to the correct comic extension instead of being
+processed: RAR → `.cbr`, 7z → `.cb7`, ACE → `.cba`, tar → `.cbt`. In `--dry-run`
+or `--check` mode the rename is reported but not performed; if the target name
+already exists the file is left untouched and an error is reported.
+
 ### Usage
 
 Run from (or pass as an argument) the directory containing your CBZ files:

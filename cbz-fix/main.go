@@ -38,7 +38,7 @@ func main() {
 		return s == "y" || s == "yes", nil
 	}
 
-	var needsFix, errCount int
+	var needsFix, renamed, errCount int
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -50,6 +50,38 @@ func main() {
 			return nil
 		}
 		if !strings.EqualFold(filepath.Ext(path), ".cbz") {
+			return nil
+		}
+
+		// A .cbz that is really a RAR/7z/ACE/tar archive can't be processed as
+		// a zip. Rename it to the correct comic extension and move on.
+		mis, sniffErr := sniffArchive(path)
+		if sniffErr != nil {
+			fmt.Printf("%s\n", path)
+			fmt.Fprintf(os.Stderr, "  ERROR: %v\n", sniffErr)
+			errCount++
+			return nil
+		}
+		if mis != nil {
+			fmt.Printf("%s\n", path)
+			newPath := strings.TrimSuffix(path, filepath.Ext(path)) + mis.correctExt
+			if impliedDryRun {
+				fmt.Printf("  is a %s archive, not a zip; would rename to %s (not processed)\n", mis.format, filepath.Base(newPath))
+				renamed++
+				return nil
+			}
+			if _, statErr := os.Stat(newPath); statErr == nil {
+				fmt.Fprintf(os.Stderr, "  ERROR: is a %s archive but %s already exists; leaving as-is\n", mis.format, filepath.Base(newPath))
+				errCount++
+				return nil
+			}
+			if renErr := os.Rename(path, newPath); renErr != nil {
+				fmt.Fprintf(os.Stderr, "  ERROR: rename to %s: %v\n", filepath.Base(newPath), renErr)
+				errCount++
+				return nil
+			}
+			fmt.Printf("  is a %s archive, not a zip; renamed to %s (not processed)\n", mis.format, filepath.Base(newPath))
+			renamed++
 			return nil
 		}
 
@@ -85,13 +117,13 @@ func main() {
 
 	switch {
 	case *check:
-		fmt.Printf("\nDone — needs fixing: %d  errors: %d\n", needsFix, errCount)
-		if needsFix > 0 || errCount > 0 {
+		fmt.Printf("\nDone — needs fixing: %d  renamed: %d  errors: %d\n", needsFix, renamed, errCount)
+		if needsFix > 0 || renamed > 0 || errCount > 0 {
 			os.Exit(1)
 		}
 	case *dryRun:
-		fmt.Printf("\nDone — would process: %d  errors: %d\n", needsFix, errCount)
+		fmt.Printf("\nDone — would process: %d  would rename: %d  errors: %d\n", needsFix, renamed, errCount)
 	default:
-		fmt.Printf("\nDone — processed: %d  errors: %d\n", needsFix, errCount)
+		fmt.Printf("\nDone — processed: %d  renamed: %d  errors: %d\n", needsFix, renamed, errCount)
 	}
 }
