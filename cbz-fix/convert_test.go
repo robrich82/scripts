@@ -51,7 +51,7 @@ func TestProcessCBZ_ConvertsNonJPEGPNG(t *testing.T) {
 		{"003.png", portrait},        // already PNG, raw-copied
 	})
 
-	if _, err := processCBZ(path, false, false, false, true); err != nil {
+	if _, err := processCBZ(path, false, false, false, true, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 	if calls != 2 {
@@ -102,7 +102,7 @@ func TestProcessCBZ_ConvertDryRunSkipsMagick(t *testing.T) {
 	})
 	before := readCBZNames(t, path)
 
-	skipped, err := processCBZ(path, true, false, false, true) // dry-run
+	skipped, err := processCBZ(path, true, false, false, true, false) // dry-run
 	if err != nil {
 		t.Fatalf("processCBZ dry-run: %v", err)
 	}
@@ -114,6 +114,63 @@ func TestProcessCBZ_ConvertDryRunSkipsMagick(t *testing.T) {
 	}
 	if after := readCBZNames(t, path); len(before) != len(after) {
 		t.Errorf("dry-run changed file: before=%v after=%v", before, after)
+	}
+}
+
+// TestProcessCBZ_ForceConvertsLeftoverNonPNG covers the motivating case: an
+// already-processed archive still contains a non-PNG page (e.g. from an older
+// run). --force reprocesses it, converting the leftover page to PNG without
+// adding a second blank.
+func TestProcessCBZ_ForceConvertsLeftoverNonPNG(t *testing.T) {
+	restore := convertImage
+	var calls int
+	convertImage = func(src []byte) ([]byte, error) {
+		calls++
+		return portrait, nil
+	}
+	defer func() { convertImage = restore }()
+
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", portrait},
+		{"p001.png", portrait},        // existing blank
+		{"p002.webp", fakeNonImage()}, // leftover non-PNG page
+	})
+
+	// Without --force it would be skipped.
+	skipped, err := processCBZ(path, false, false, false, true, false)
+	if err != nil {
+		t.Fatalf("processCBZ (no force): %v", err)
+	}
+	if !skipped {
+		t.Fatal("expected skipped=true without --force")
+	}
+	if calls != 0 {
+		t.Errorf("convertImage called %d times without --force, want 0", calls)
+	}
+
+	// With --force the leftover page is converted; no second blank is added.
+	skipped, err = processCBZ(path, false, false, false, true, true)
+	if err != nil {
+		t.Fatalf("processCBZ (force): %v", err)
+	}
+	if skipped {
+		t.Error("expected skipped=false with --force")
+	}
+	if calls != 1 {
+		t.Errorf("convertImage called %d times with --force, want 1", calls)
+	}
+
+	names := readCBZNames(t, path)
+	for _, want := range []string{"cover.png", "p001.png", "p002.png", "ComicInfo.xml"} {
+		if !containsEntry(names, want) {
+			t.Errorf("missing %q in output; got %v", want, names)
+		}
+	}
+	if containsEntry(names, "p002.webp") {
+		t.Error("leftover p002.webp should have been converted away")
+	}
+	if containsEntry(names, "p003.png") {
+		t.Errorf("force must not insert a second blank page; got %v", names)
 	}
 }
 
@@ -131,7 +188,7 @@ func TestProcessCBZ_ConvertError(t *testing.T) {
 		{"002.png", portrait},
 	})
 
-	if _, err := processCBZ(path, false, false, false, true); err == nil {
+	if _, err := processCBZ(path, false, false, false, true, false); err == nil {
 		t.Fatal("expected error when conversion fails, got nil")
 	}
 }

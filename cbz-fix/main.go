@@ -15,6 +15,7 @@ func main() {
 	verbose := flag.Bool("verbose", false, "print each file rename")
 	noBlank := flag.Bool("no-blank", false, "skip blank page insertion")
 	backup := flag.Bool("backup", false, "create a .bak file before overwriting")
+	force := flag.Bool("force", false, "reprocess files that already look processed (skips a second blank page)")
 	updateCover := flag.Bool("update-cover", false, "replace cover.* in each CBZ with a larger cover.jpg from the same directory")
 	flag.Parse()
 
@@ -94,7 +95,7 @@ func main() {
 		if *updateCover {
 			skipped, processErr = updateCoverCBZ(path, impliedDryRun, *verbose, !*backup, prompt)
 		} else {
-			skipped, processErr = processCBZ(path, impliedDryRun, *verbose, *noBlank, !*backup)
+			skipped, processErr = processCBZ(path, impliedDryRun, *verbose, *noBlank, !*backup, *force)
 		}
 		if processErr != nil {
 			if *check {

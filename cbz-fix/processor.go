@@ -48,7 +48,11 @@ type pageInfo struct {
 // processCBZ processes a single CBZ file. It returns (true, nil) when the file
 // is already in the expected layout and no work is needed, (false, nil) on
 // success (real or dry-run), and (false, err) on failure.
-func processCBZ(path string, dryRun, verbose, noBlank, noBackup bool) (skipped bool, err error) {
+//
+// When force is true, files that already look processed are reprocessed anyway
+// (e.g. to convert leftover non-PNG pages); blank insertion is suppressed for
+// those files since the blank page is already present.
+func processCBZ(path string, dryRun, verbose, noBlank, noBackup, force bool) (skipped bool, err error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return false, fmt.Errorf("open: %w", err)
@@ -88,15 +92,24 @@ func processCBZ(path string, dryRun, verbose, noBlank, noBackup bool) (skipped b
 
 	// ── Idempotency guard ──────────────────────────────────────────────────
 	// If the first image is already "cover.*" and the second is "p001.*" the
-	// file has been processed before; skip it.
+	// file has been processed before. Skip it unless --force was given, in
+	// which case reprocess but don't insert a second blank page.
 	coverBase := strings.ToLower(filepath.Base(imgs[0].Name))
-	if strings.HasPrefix(coverBase, "cover.") &&
-		len(imgs) > 1 && strings.HasPrefix(strings.ToLower(filepath.Base(imgs[1].Name)), "p001.") {
-		zr.Close()
-		if verbose {
-			fmt.Println("  already processed, skipping")
+	alreadyProcessed := strings.HasPrefix(coverBase, "cover.") &&
+		len(imgs) > 1 && strings.HasPrefix(strings.ToLower(filepath.Base(imgs[1].Name)), "p001.")
+	if alreadyProcessed {
+		if !force {
+			zr.Close()
+			if verbose {
+				fmt.Println("  already processed, skipping")
+			}
+			return true, nil
 		}
-		return true, nil
+		// The blank page is already in place; re-adding one would duplicate it.
+		noBlank = true
+		if verbose {
+			fmt.Println("  already processed, reprocessing (--force)")
+		}
 	}
 
 	// ── Parse ComicInfo.xml ────────────────────────────────────────────────

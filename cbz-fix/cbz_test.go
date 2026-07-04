@@ -158,7 +158,7 @@ func TestProcessCBZ_BasicRename(t *testing.T) {
 		{"003.png", portrait},
 	})
 
-	if _, err := processCBZ(path, false, false, false, true); err != nil {
+	if _, err := processCBZ(path, false, false, false, true, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -195,7 +195,7 @@ func TestProcessCBZ_BlankIsWhite(t *testing.T) {
 		{"002.png", portrait},
 	})
 
-	if _, err := processCBZ(path, false, false, false, true); err != nil {
+	if _, err := processCBZ(path, false, false, false, true, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -225,7 +225,7 @@ func TestProcessCBZ_DoublePageSkipped(t *testing.T) {
 		{"003.png", portrait},  // first non-double page
 	})
 
-	if _, err := processCBZ(path, false, false, false, true); err != nil {
+	if _, err := processCBZ(path, false, false, false, true, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -276,7 +276,7 @@ func TestProcessCBZ_ComicInfoUpdated(t *testing.T) {
 		{"ComicInfo.xml", []byte(ci)},
 	})
 
-	if _, err := processCBZ(path, false, false, false, true); err != nil {
+	if _, err := processCBZ(path, false, false, false, true, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -311,7 +311,7 @@ func TestProcessCBZ_BackupCreated(t *testing.T) {
 		{"002.png", portrait},
 	})
 
-	if _, err := processCBZ(path, false, false, false, false); err != nil {
+	if _, err := processCBZ(path, false, false, false, false, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -330,7 +330,7 @@ func TestProcessCBZ_DryRun(t *testing.T) {
 	// Record original names.
 	before := readCBZNames(t, path)
 
-	if _, err := processCBZ(path, true, false, false, true); err != nil {
+	if _, err := processCBZ(path, true, false, false, true, false); err != nil {
 		t.Fatalf("processCBZ dry-run: %v", err)
 	}
 
@@ -354,7 +354,7 @@ func TestProcessCBZ_Idempotent(t *testing.T) {
 
 	before := readCBZNames(t, path)
 
-	skipped, err := processCBZ(path, false, false, false, true)
+	skipped, err := processCBZ(path, false, false, false, true, false)
 	if err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
@@ -365,6 +365,36 @@ func TestProcessCBZ_Idempotent(t *testing.T) {
 	after := readCBZNames(t, path)
 	if len(before) != len(after) {
 		t.Errorf("idempotency broken: before=%v after=%v", before, after)
+	}
+}
+
+// TestProcessCBZ_ForceReprocesses verifies that --force reprocesses an
+// already-processed CBZ instead of skipping it, and does not insert a second
+// blank page (which would shift every page and grow the count).
+func TestProcessCBZ_ForceReprocesses(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", portrait},
+		{"p001.png", portrait}, // blank already present
+		{"p002.png", portrait},
+	})
+
+	skipped, err := processCBZ(path, false, false, false, true, true) // force
+	if err != nil {
+		t.Fatalf("processCBZ: %v", err)
+	}
+	if skipped {
+		t.Error("expected skipped=false when --force reprocesses")
+	}
+
+	names := readCBZNames(t, path)
+	for _, want := range []string{"cover.png", "p001.png", "p002.png", "ComicInfo.xml"} {
+		if !containsEntry(names, want) {
+			t.Errorf("missing %q in output; got %v", want, names)
+		}
+	}
+	// A second blank would have introduced p003.png and shifted pages.
+	if containsEntry(names, "p003.png") {
+		t.Errorf("force must not insert a second blank page; got %v", names)
 	}
 }
 
@@ -1030,7 +1060,7 @@ func TestProcessCBZ_KFXOrdering(t *testing.T) {
 	// HTML chain: img_c → img_a → img_b (all portrait → blank inserted after cover).
 	path := makeKFXCBZ(t, []string{"img_c", "img_a", "img_b"})
 
-	if _, err := processCBZ(path, false, false, false, true); err != nil {
+	if _, err := processCBZ(path, false, false, false, true, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 
@@ -1086,7 +1116,7 @@ func TestProcessCBZ_NeedsFixing(t *testing.T) {
 		{"002.png", portrait},
 	})
 
-	skipped, err := processCBZ(path, true, false, false, true) // dry-run
+	skipped, err := processCBZ(path, true, false, false, true, false) // dry-run
 	if err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
@@ -1104,7 +1134,7 @@ func TestProcessCBZ_SubdirImages(t *testing.T) {
 		{"Comic Name/003.png", portrait},
 	})
 
-	if _, err := processCBZ(path, false, false, false, true); err != nil {
+	if _, err := processCBZ(path, false, false, false, true, false); err != nil {
 		t.Fatalf("processCBZ: %v", err)
 	}
 

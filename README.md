@@ -81,7 +81,9 @@ A double-page spread is detected by checking `DoublePage="true"` or
 dimensions (width > height = landscape = double spread).
 
 Files whose first image is already named `cover.*` and second image `p001.*`
-are treated as already processed and skipped.
+are treated as already processed and skipped. Pass `--force` to reprocess them
+anyway (e.g. to convert leftover non-PNG pages from an earlier run); a second
+blank page is not inserted since one is already present.
 
 A `.cbz` whose contents are actually a different archive format is detected by
 its file header and renamed to the correct comic extension instead of being
@@ -100,6 +102,7 @@ cbz-fix --check      # list files that need fixing; exit 1 if any found
 cbz-fix --dry-run    # preview without making changes
 cbz-fix --verbose    # show per-file rename details
 cbz-fix --no-blank   # rename and renumber without inserting a blank page
+cbz-fix --force      # reprocess files that already look processed
 cbz-fix --backup     # create a .bak file before overwriting
 cbz-fix --update-cover  # replace in-archive cover with a higher-res cover.jpg sibling
 ```
@@ -112,6 +115,7 @@ cbz-fix --update-cover  # replace in-archive cover with a higher-res cover.jpg s
 | `--dry-run` | Preview all changes without modifying any files |
 | `--backup` | Create a `.bak` file before overwriting the original |
 | `--no-blank` | Skip blank page insertion (rename and renumber only) |
+| `--force` | Reprocess files that already look processed (`cover.*` + `p001.*`). Useful for converting leftover non-PNG pages; no second blank page is inserted. |
 | `--verbose` | Print each filename mapping for every CBZ processed |
 | `--update-cover` | For each CBZ, look for a `cover.jpg` in the same directory. If it is larger in both dimensions, replace the `cover.*` entry inside the CBZ. If only one dimension is greater, prompt interactively. |
 
