@@ -60,13 +60,20 @@ Normalises CBZ comic archives for consistent two-page-spread viewing:
    a different name (a byte-identical duplicate, common in AZW3 exports), that
    duplicate page is dropped so the cover isn't repeated as `p001`. For all other
    CBZs, images are sorted by natural (numeric) order.
-4. **Renames the cover** (first image in reading order) to `cover.<ext>`.
-5. **Inserts a blank page** — white, same dimensions as the first non-double-page
+4. **Converts non-JPEG/PNG pages to PNG**: any page whose stored bytes are not
+   already a JPEG or PNG (judged by content, not extension — e.g. WebP, GIF, BMP,
+   TIFF) is converted to a white-flattened PNG via ImageMagick and renamed with a
+   `.png` extension. This requires the ImageMagick `magick` CLI on your `PATH`;
+   it is run as `magick <in> -background white -flatten <out>.png` (transparency
+   and layers are composited onto white). Pages already in JPEG/PNG are copied
+   through untouched.
+5. **Renames the cover** (first image in reading order) to `cover.<ext>`.
+6. **Inserts a blank page** — white, same dimensions as the first non-double-page
    after the cover — so that interior pages land on the correct side in a
    two-page-spread viewer.
-6. **Renames all remaining pages** to `p001.<ext>`, `p002.<ext>`, … in reading order,
+7. **Renames all remaining pages** to `p001.<ext>`, `p002.<ext>`, … in reading order,
    moving every image to the root of the zip.
-7. **Updates `ComicInfo.xml`** `PageCount` and `Pages` to reflect the new layout.
+8. **Updates `ComicInfo.xml`** `PageCount` and `Pages` to reflect the new layout.
    Creates a minimal `ComicInfo.xml` if one did not exist.
 
 A double-page spread is detected by checking `DoublePage="true"` or
