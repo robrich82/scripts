@@ -61,9 +61,10 @@ Normalises CBZ comic archives for consistent two-page-spread viewing:
    duplicate page is dropped so the cover isn't repeated as `p001`. For all other
    CBZs, images are sorted by natural (numeric) order.
 4. **Converts non-JPEG/PNG pages to PNG**: any page whose stored bytes are not
-   already a JPEG or PNG (judged by content, not extension — e.g. WebP, GIF, BMP,
-   TIFF) is converted to a white-flattened PNG via ImageMagick and renamed with a
-   `.png` extension. This requires the ImageMagick `magick` CLI on your `PATH`;
+   already a JPEG or PNG (judged by content, not extension — e.g. JPEG XL, WebP,
+   GIF, BMP, TIFF, AVIF, HEIC) is converted to a white-flattened PNG via
+   ImageMagick and renamed with a `.png` extension. This requires the ImageMagick
+   `magick` CLI on your `PATH`;
    it is run as `magick <in> -background white -flatten <out>.png` (transparency
    and layers are composited onto white). Pages already in JPEG/PNG are copied
    through untouched.

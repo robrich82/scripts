@@ -22,7 +22,8 @@ import (
 var imageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true,
 	".gif": true, ".webp": true, ".bmp": true,
-	".tiff": true, ".tif": true,
+	".tiff": true, ".tif": true, ".jxl": true,
+	".avif": true, ".heic": true, ".heif": true,
 }
 
 func isImageFile(name string) bool {
