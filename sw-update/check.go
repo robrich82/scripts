@@ -99,7 +99,13 @@ func cmdCheck(args []string) error {
 
 			e.result = result
 			e.err = checkErr
-			if installed != "" {
+			switch {
+			case e.app.Local.Type == "" || e.app.Local.Type == "none":
+				// No local detector: clear any stale installed_version so a
+				// prior detection (or an earlier detector config) can't shadow
+				// last_seen_version in KnownVersion.
+				e.state.InstalledVersion = ""
+			case installed != "":
 				e.state.InstalledVersion = installed
 			}
 			if result != nil {
