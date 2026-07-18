@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -50,12 +51,6 @@ type MovieSearchCandidate struct {
 
 // TMDBOriginClient fetches content-origin metadata from TMDB.
 type TMDBOriginClient interface {
-	// GetTVOrigin searches for a TV show by title and optional year and
-	// returns the TMDB-reported original language and first origin country.
-	// Returns (OriginInfo{}, false, nil) when no result is found.
-	GetTVOrigin(title, year string) (OriginInfo, bool, error)
-	// GetMovieOrigin does the same for movies.
-	GetMovieOrigin(title, year string) (OriginInfo, bool, error)
 	// GetTVOriginByID fetches origin info directly via a known TMDB show ID,
 	// skipping the search step.
 	GetTVOriginByID(id string) (OriginInfo, bool, error)
@@ -77,72 +72,26 @@ func newHTTPTMDBOriginClient(apiKey string) *httpTMDBOriginClient {
 	return &httpTMDBOriginClient{apiKey: apiKey, client: &http.Client{Timeout: 30 * time.Second}}
 }
 
-// GetTVOrigin searches /search/tv which returns both original_language and
-// origin_country in each result, so only one API call is needed.
-func (c *httpTMDBOriginClient) GetTVOrigin(title, year string) (OriginInfo, bool, error) {
-	params := url.Values{"api_key": {c.apiKey}, "query": {title}}
-	if year != "" {
-		params.Set("first_air_date_year", year)
-	}
-	resp, err := c.client.Get(tmdbOriginBase + "/search/tv?" + params.Encode())
+// getTMDB performs a GET and rejects non-2xx responses. TMDB returns a JSON
+// error body (e.g. invalid api_key, rate-limit) that would otherwise decode
+// into an empty struct and be indistinguishable from "no result found".
+func (c *httpTMDBOriginClient) getTMDB(u string) (*http.Response, error) {
+	resp, err := c.client.Get(u)
 	if err != nil {
-		return OriginInfo{}, false, err
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Results []struct {
-			OriginalLanguage string   `json:"original_language"`
-			OriginCountry    []string `json:"origin_country"`
-		} `json:"results"`
+	if resp.StatusCode/100 != 2 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		resp.Body.Close()
+		return nil, fmt.Errorf("TMDB request failed: status %s: %s", resp.Status, strings.TrimSpace(string(snippet)))
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return OriginInfo{}, false, fmt.Errorf("decode TV search: %w", err)
-	}
-	if len(result.Results) == 0 {
-		return OriginInfo{}, false, nil
-	}
-	r := result.Results[0]
-	country := ""
-	if len(r.OriginCountry) > 0 {
-		country = r.OriginCountry[0]
-	}
-	return OriginInfo{OrigLang: r.OriginalLanguage, OriginCountry: country}, true, nil
-}
-
-// GetMovieOrigin searches /search/movie (for original_language and ID), then
-// fetches /movie/{id} for production_countries to determine the origin country.
-func (c *httpTMDBOriginClient) GetMovieOrigin(title, year string) (OriginInfo, bool, error) {
-	params := url.Values{"api_key": {c.apiKey}, "query": {title}}
-	if year != "" {
-		params.Set("year", year)
-	}
-	resp, err := c.client.Get(tmdbOriginBase + "/search/movie?" + params.Encode())
-	if err != nil {
-		return OriginInfo{}, false, err
-	}
-	defer resp.Body.Close()
-
-	var searchResult struct {
-		Results []struct {
-			ID               int    `json:"id"`
-			OriginalLanguage string `json:"original_language"`
-		} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
-		return OriginInfo{}, false, fmt.Errorf("decode movie search: %w", err)
-	}
-	if len(searchResult.Results) == 0 {
-		return OriginInfo{}, false, nil
-	}
-	hit := searchResult.Results[0]
-	return c.GetMovieOriginByID(fmt.Sprintf("%d", hit.ID))
+	return resp, nil
 }
 
 // GetTVOriginByID fetches origin data from /tv/{id} using a known TMDB show ID.
 func (c *httpTMDBOriginClient) GetTVOriginByID(id string) (OriginInfo, bool, error) {
 	detURL := fmt.Sprintf("%s/tv/%s?api_key=%s", tmdbOriginBase, id, url.QueryEscape(c.apiKey))
-	resp, err := c.client.Get(detURL)
+	resp, err := c.getTMDB(detURL)
 	if err != nil {
 		return OriginInfo{}, false, err
 	}
@@ -168,7 +117,7 @@ func (c *httpTMDBOriginClient) GetTVOriginByID(id string) (OriginInfo, bool, err
 // GetMovieOriginByID fetches origin data from /movie/{id} using a known TMDB movie ID.
 func (c *httpTMDBOriginClient) GetMovieOriginByID(id string) (OriginInfo, bool, error) {
 	detURL := fmt.Sprintf("%s/movie/%s?api_key=%s", tmdbOriginBase, id, url.QueryEscape(c.apiKey))
-	detResp, err := c.client.Get(detURL)
+	detResp, err := c.getTMDB(detURL)
 	if err != nil {
 		return OriginInfo{}, false, err
 	}
@@ -199,7 +148,7 @@ func (c *httpTMDBOriginClient) SearchTV(title, year string) ([]TVSearchCandidate
 	if year != "" {
 		params.Set("first_air_date_year", year)
 	}
-	resp, err := c.client.Get(tmdbOriginBase + "/search/tv?" + params.Encode())
+	resp, err := c.getTMDB(tmdbOriginBase + "/search/tv?" + params.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +180,7 @@ func (c *httpTMDBOriginClient) SearchMovie(title, year string) ([]MovieSearchCan
 	if year != "" {
 		params.Set("year", year)
 	}
-	resp, err := c.client.Get(tmdbOriginBase + "/search/movie?" + params.Encode())
+	resp, err := c.getTMDB(tmdbOriginBase + "/search/movie?" + params.Encode())
 	if err != nil {
 		return nil, err
 	}

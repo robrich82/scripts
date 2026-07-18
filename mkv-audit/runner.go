@@ -293,6 +293,23 @@ type trimCandidate struct {
 	originLang string
 }
 
+// applyLangFixes returns a copy of tracks with the language and IETF tag of each
+// fixed track updated to the fix's target. Used so a trim plan computed after
+// the lang-mismatch phase sees the corrected languages already written to disk.
+func applyLangFixes(tracks []Track, fixes []langFix) []Track {
+	out := make([]Track, len(tracks))
+	copy(out, tracks)
+	for _, f := range fixes {
+		for i := range out {
+			if out[i].ID == f.trackID {
+				out[i].Properties.Language = f.targetLang
+				out[i].Properties.LanguageIETF = f.targetIETF
+			}
+		}
+	}
+	return out
+}
+
 // RunAll scans root for MKV/MKA files and fixes each one.
 // stateDir is where failed_files.json and unknown_codecs.json are stored.
 // lib is the active library config (may be nil for no overrides).
@@ -490,7 +507,10 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 						}
 						var candidate langMismatchCandidate
 						candidate.path = p
-						for _, t := range info.Tracks {
+						// Use the post-normalisation track state so a track that
+						// AnalyzeFile is already correcting in this same pass isn't
+						// also queued for a redundant manual lang fix.
+						for _, t := range res.UpdatedTracks {
 							if t.Type != "video" && t.Type != "audio" {
 								continue
 							}
@@ -590,6 +610,12 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 
 	wg.Wait()
 
+	// Records lang fixes actually written to disk, keyed by path, so the trim
+	// phase below plans against the corrected track state rather than the
+	// pre-fix snapshot captured during the parallel scan (otherwise a track
+	// whose language was just corrected here could be dropped as foreign).
+	appliedLangFixes := make(map[string][]langFix)
+
 	// Sequential lang-mismatch fix phase: prompt per file, then apply.
 	if len(langMismatches) > 0 {
 		autoAll := false
@@ -623,6 +649,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			} else {
 				fmt.Printf("[LANGFIX] %s: language set to %s\n", basename, lm.fixes[0].targetLang)
 				stats.LangFixes++
+				appliedLangFixes[lm.path] = append(appliedLangFixes[lm.path], lm.fixes...)
 			}
 		}
 	}
@@ -631,6 +658,11 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 	if remuxer != nil {
 		autoAll := false
 		for _, tc := range trimCandidates {
+			// Reflect any lang fixes applied above so the plan doesn't drop a
+			// track whose language was just corrected on disk.
+			if fixes, ok := appliedLangFixes[tc.path]; ok {
+				tc.info.Tracks = applyLangFixes(tc.info.Tracks, fixes)
+			}
 			plan := PlanTrim(tc.info, tc.originLang)
 			if !plan.NeedsChange {
 				continue
