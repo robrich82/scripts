@@ -96,9 +96,26 @@ func newHTTPTMDBClient(apiKey, baseURL string) *httpTMDBClient {
 	}
 }
 
+// getTMDB performs a GET and rejects non-2xx responses. TMDB answers errors
+// (invalid api_key, rate-limit) with a JSON body that would otherwise decode
+// into an empty struct — indistinguishable from a genuine "no data" result, and
+// worse, that empty result then gets cached for the rest of the run.
+func (c *httpTMDBClient) getTMDB(u string) (*http.Response, error) {
+	resp, err := c.client.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		resp.Body.Close()
+		return nil, fmt.Errorf("TMDB request failed: status %s: %s", resp.Status, string(snippet))
+	}
+	return resp, nil
+}
+
 func (c *httpTMDBClient) SearchTV(query string) ([]ShowResult, error) {
 	params := url.Values{"api_key": {c.apiKey}, "query": {query}}
-	resp, err := c.client.Get(c.baseURL + "/search/tv?" + params.Encode())
+	resp, err := c.getTMDB(c.baseURL + "/search/tv?" + params.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +136,7 @@ func (c *httpTMDBClient) SearchTV(query string) ([]ShowResult, error) {
 
 func (c *httpTMDBClient) GetShow(id string) (ShowDetails, error) {
 	params := url.Values{"api_key": {c.apiKey}}
-	resp, err := c.client.Get(fmt.Sprintf("%s/tv/%s?%s", c.baseURL, id, params.Encode()))
+	resp, err := c.getTMDB(fmt.Sprintf("%s/tv/%s?%s", c.baseURL, id, params.Encode()))
 	if err != nil {
 		return ShowDetails{}, err
 	}
@@ -138,7 +155,7 @@ func (c *httpTMDBClient) GetShow(id string) (ShowDetails, error) {
 
 func (c *httpTMDBClient) GetContentRatings(showID string) (NZRating, error) {
 	params := url.Values{"api_key": {c.apiKey}}
-	resp, err := c.client.Get(
+	resp, err := c.getTMDB(
 		fmt.Sprintf("%s/tv/%s/content_ratings?%s", c.baseURL, showID, params.Encode()),
 	)
 	if err != nil {
@@ -184,7 +201,7 @@ func (c *httpTMDBClient) FetchEpisodeRating(_, _ string, _, _ int) (NZRating, er
 
 func (c *httpTMDBClient) GetSeason(showID string, season int) (SeasonResult, error) {
 	params := url.Values{"api_key": {c.apiKey}}
-	resp, err := c.client.Get(
+	resp, err := c.getTMDB(
 		fmt.Sprintf("%s/tv/%s/season/%d?%s", c.baseURL, showID, season, params.Encode()),
 	)
 	if err != nil {

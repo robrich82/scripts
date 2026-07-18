@@ -165,7 +165,7 @@ func (c *RatingCache) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.path, data, 0644)
+	return atomicWriteFile(c.path, data)
 }
 
 // GetShowRating returns the cached series-level rating for the given TMDB show ID.

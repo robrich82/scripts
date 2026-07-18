@@ -72,5 +72,5 @@ func (tc *TitleCache) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(tc.path, data, 0644)
+	return atomicWriteFile(tc.path, data)
 }

@@ -181,6 +181,10 @@ func (p *Processor) Run() Stats {
 		seasonCache := map[string]SeasonResult{}
 		currentDir := ""
 		showTouched := false
+		// Maps each local season number to the effective TMDB ID its rating was
+		// cached under, so applyPlexRatings pushes the right rating for seasons
+		// remapped to a different TMDB show via manual_data overrides.
+		seasonEffectiveID := map[int]string{}
 
 		for _, path := range showFiles[showFolder] {
 			file := filepath.Base(path)
@@ -298,6 +302,7 @@ func (p *Processor) Run() Stats {
 			eNum, _ := strconv.Atoi(epMatch[2])
 
 			currID, tmdbSeason, tmdbEpisode := p.resolveEpisode(showFolder, showID, sNum, eNum)
+			seasonEffectiveID[sNum] = currID
 
 			// Resolve NZ content rating for this episode.
 			rating := p.resolveEpisodeRating(currID, showName, filePath, tmdbSeason, tmdbEpisode)
@@ -404,7 +409,7 @@ func (p *Processor) Run() Stats {
 			}
 		}
 		langOverride := p.manualData[showFolder].Language
-		p.applyPlexRatings(showID, showName, showFolder, showTouched, langOverride)
+		p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, langOverride)
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -994,7 +999,7 @@ func (p *Processor) RunDebandOnly() Stats {
 // showFolder is the show's directory name, used to look up manual_data overrides.
 // langOverride, if non-empty, is used instead of TMDB original_language when
 // setting the show's preferred audio language.
-func (p *Processor) applyPlexRatings(tmdbID, showName, showFolder string, touched bool, langOverride string) {
+func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]string, showName, showFolder string, touched bool, langOverride string) {
 	if p.plex == nil || p.ratingCache == nil {
 		return
 	}
@@ -1053,9 +1058,15 @@ func (p *Processor) applyPlexRatings(tmdbID, showName, showFolder string, touche
 
 		seasonMax := RatingNone
 		for _, ep := range episodes {
-			r, ok := p.ratingCache.GetEpisodeRating(tmdbID, ep.SeasonNumber, ep.EpisodeNumber)
+			// Ratings for a season remapped via overrides were cached under the
+			// override's TMDB ID, not the folder-level one.
+			effID := tmdbID
+			if id, ok := seasonEffectiveID[ep.SeasonNumber]; ok && id != "" {
+				effID = id
+			}
+			r, ok := p.ratingCache.GetEpisodeRating(effID, ep.SeasonNumber, ep.EpisodeNumber)
 			if !ok {
-				r, ok = p.ratingCache.GetShowRating(tmdbID)
+				r, ok = p.ratingCache.GetShowRating(effID)
 			}
 			if !ok || r == RatingNone {
 				continue

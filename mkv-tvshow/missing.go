@@ -13,6 +13,19 @@ import (
 
 const tmdbWebBase = "https://www.themoviedb.org/tv"
 
+// parseSeasonKey parses a manual_data season key such as "S02" into its integer
+// season number. Returns (0, false) for anything that isn't an "SNN" key.
+func parseSeasonKey(sKey string) (int, bool) {
+	if len(sKey) < 2 || (sKey[0] != 'S' && sKey[0] != 's') {
+		return 0, false
+	}
+	n, err := strconv.Atoi(sKey[1:])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 // missingItem represents a season or episode that has aired on TMDB but is
 // not present in the local media directory.
 type missingItem struct {
@@ -117,9 +130,27 @@ func (mc *MissingChecker) Run() error {
 
 		var missing []missingItem
 
+		// Local seasons to check: the primary show's own seasons plus any season
+		// that exists only under a manual override. A split-cour show's second
+		// cour is often a separate TMDB entry not listed in the primary show's
+		// season array, so relying on details.Seasons alone would never check it.
+		localSeasons := make([]int, 0, len(details.Seasons)+len(manualEntry.Overrides))
+		seenSeason := make(map[int]bool)
 		for _, s := range details.Seasons {
-			localSeason := s.SeasonNumber
+			if !seenSeason[s.SeasonNumber] {
+				seenSeason[s.SeasonNumber] = true
+				localSeasons = append(localSeasons, s.SeasonNumber)
+			}
+		}
+		for sKey := range manualEntry.Overrides {
+			if n, ok := parseSeasonKey(sKey); ok && !seenSeason[n] {
+				seenSeason[n] = true
+				localSeasons = append(localSeasons, n)
+			}
+		}
+		sort.Ints(localSeasons)
 
+		for _, localSeason := range localSeasons {
 			if mc.ignoreList.IsSeasonIgnored(showID, localSeason) {
 				continue
 			}

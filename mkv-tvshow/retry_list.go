@@ -77,5 +77,5 @@ func (r *RetryList) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.path, data, 0644)
+	return atomicWriteFile(r.path, data)
 }

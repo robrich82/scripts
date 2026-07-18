@@ -143,5 +143,5 @@ func (l *MissingIgnoreList) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(l.path, data, 0644)
+	return atomicWriteFile(l.path, data)
 }
