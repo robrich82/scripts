@@ -2,9 +2,15 @@
 
 package main
 
-import "syscall"
+import (
+	"strings"
+	"syscall"
+)
 
 func isHiddenDir(name, path string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
 	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
 		return false

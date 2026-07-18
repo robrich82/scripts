@@ -79,8 +79,12 @@ func updateCoverCBZ(cbzPath string, dryRun, verbose, noBackup bool, prompt func(
 	case bothBetter:
 		replace = true
 		if verbose {
-			fmt.Printf("  cover.jpg (%dx%d) > %s (%dx%d); replacing\n",
-				newW, newH, filepath.Base(coverEntry.Name), oldW, oldH)
+			verb := "replacing"
+			if dryRun {
+				verb = "would replace"
+			}
+			fmt.Printf("  cover.jpg (%dx%d) > %s (%dx%d); %s\n",
+				newW, newH, filepath.Base(coverEntry.Name), oldW, oldH, verb)
 		}
 	case wOnly || hOnly:
 		if dryRun {

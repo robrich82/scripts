@@ -73,7 +73,7 @@ func newHTTPPlexMovieClient(baseURL, token string) *httpPlexMovieClient {
 	return &httpPlexMovieClient{
 		baseURL:       strings.TrimRight(baseURL, "/"),
 		token:         token,
-		httpClient:    &http.Client{},
+		httpClient:    &http.Client{Timeout: httpTimeout},
 		movieKeyCache: make(map[string]string),
 	}
 }

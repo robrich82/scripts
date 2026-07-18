@@ -7,7 +7,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
+
+// httpTimeout bounds every outbound Plex request so a hung connection can't
+// freeze a whole run indefinitely.
+const httpTimeout = 30 * time.Second
 
 // ErrArtistNotFound is returned by FindArtistByTitle when no matching artist
 // exists in any Plex music library section.
@@ -42,7 +47,7 @@ func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	return &httpPlexClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		token:      token,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: httpTimeout},
 	}
 }
 

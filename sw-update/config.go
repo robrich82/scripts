@@ -103,7 +103,7 @@ func SaveConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return atomicWriteFile(path, data, 0644)
 }
 
 // FindApp returns a pointer to the app with the given name, or nil.

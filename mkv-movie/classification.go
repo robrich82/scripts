@@ -26,7 +26,7 @@ type classificationSource struct {
 func newClassificationSource() *classificationSource {
 	return &classificationSource{
 		baseURL:    classificationBaseURL,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: httpTimeout},
 	}
 }
 

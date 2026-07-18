@@ -380,7 +380,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		} else {
 			fmt.Printf("    [OK] Renamed to: %s%s\n", targetName, ext)
 			p.markArtistTouched(videoDir)
-			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, postSuffix, videoDir, videoFile, audioPaths)
+			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath, audioPaths)
 			return "renamed"
 		}
 	case "i":

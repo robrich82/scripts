@@ -14,8 +14,12 @@ func detectFileVersion(path, field string) (string, error) {
 	if field == "" {
 		field = "FileVersion"
 	}
+	// Escape embedded single quotes for the PowerShell single-quoted string
+	// literal (a lone apostrophe in a path would otherwise terminate it early
+	// or allow injection). Doubling is the PowerShell escape for '.
+	safePath := strings.ReplaceAll(path, "'", "''")
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
-		fmt.Sprintf("(Get-Item '%s').VersionInfo.%s", path, field))
+		fmt.Sprintf("(Get-Item '%s').VersionInfo.%s", safePath, field))
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("detect file version of %s: %w", path, err)

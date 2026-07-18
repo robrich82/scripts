@@ -162,6 +162,10 @@ func sortAndLimitAssets(assets []Asset, sort string) []Asset {
 		slices.SortFunc(sorted, func(a, b Asset) int { return strings.Compare(a.Name, b.Name) })
 	case "name_desc":
 		slices.SortFunc(sorted, func(a, b Asset) int { return strings.Compare(b.Name, a.Name) })
+	default:
+		// Unrecognised asset_sort value: leave the list untouched rather than
+		// silently dropping every asset but the first.
+		return assets
 	}
 	return sorted[:1]
 }
@@ -184,7 +188,7 @@ func selectAssets(ghAssets []ghAsset, patterns []string) []Asset {
 		for _, pat := range patterns {
 			for _, a := range ghAssets {
 				if matchAssetPattern(pat, a.Name) {
-					out = append(out, Asset{Name: a.Name, URL: a.BrowserDownloadURL})
+					out = append(out, Asset{Name: filepath.Base(a.Name), URL: a.BrowserDownloadURL})
 				}
 			}
 		}
@@ -244,7 +248,7 @@ func autoSelectWindows(ghAssets []ghAsset) []Asset {
 
 	var out []Asset
 	for _, a := range candidates {
-		out = append(out, Asset{Name: a.Name, URL: a.BrowserDownloadURL})
+		out = append(out, Asset{Name: filepath.Base(a.Name), URL: a.BrowserDownloadURL})
 	}
 	return out
 }

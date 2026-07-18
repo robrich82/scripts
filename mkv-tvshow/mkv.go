@@ -108,7 +108,8 @@ func (r *realMKVRunner) WriteTempTags(xml string) (string, error) {
 }
 
 func (r *realMKVRunner) DownloadPoster(posterURL string) (string, bool) {
-	resp, err := http.Get(posterURL)
+	client := &http.Client{Timeout: httpTimeout}
+	resp, err := client.Get(posterURL)
 	if err != nil || resp.StatusCode != 200 {
 		if resp != nil {
 			resp.Body.Close()

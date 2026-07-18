@@ -8,7 +8,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
+
+// httpTimeout bounds every outbound HTTP request in this tool so a hung
+// connection (stalled TLS handshake, slow-loris response) can't freeze a whole
+// batch run indefinitely.
+const httpTimeout = 30 * time.Second
 
 // ShowResult is a single entry from the TMDB TV search endpoint.
 type ShowResult struct {
@@ -86,7 +92,7 @@ func newHTTPTMDBClient(apiKey, baseURL string) *httpTMDBClient {
 	return &httpTMDBClient{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: httpTimeout},
 	}
 }
 

@@ -41,6 +41,7 @@ type entry struct {
 // pageInfo holds the attributes we care about from a ComicInfo <Page> element.
 type pageInfo struct {
 	pageType      string
+	bookmark      string
 	doublePage    bool
 	imageSize     int64
 	width, height int
@@ -131,6 +132,7 @@ func processCBZ(path string, dryRun, verbose, noBlank, noBackup, force bool) (sk
 			for _, p := range ci.Pages.Pages {
 				oldInfo[p.Image] = pageInfo{
 					pageType:   p.Type,
+					bookmark:   p.Bookmark,
 					doublePage: p.DoublePage,
 					imageSize:  p.ImageSize,
 					width:      p.ImageWidth,
@@ -384,6 +386,8 @@ func buildPages(entries []entry, oldInfo map[int]pageInfo, blankW, blankH int) [
 			page.ImageHeight = blankH
 		default:
 			if pi, ok := oldInfo[e.origIdx]; ok {
+				page.Type = pi.pageType
+				page.Bookmark = pi.bookmark
 				page.DoublePage = pi.doublePage
 				page.ImageWidth = pi.width
 				page.ImageHeight = pi.height

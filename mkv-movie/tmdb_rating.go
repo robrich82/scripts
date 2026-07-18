@@ -7,7 +7,12 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
+
+// httpTimeout bounds every outbound HTTP request in this tool so a hung
+// connection can't freeze a whole batch run indefinitely.
+const httpTimeout = 30 * time.Second
 
 const tmdbAPIBase = "https://api.themoviedb.org/3"
 const tmdbImageBase = "https://image.tmdb.org/t/p/w500"
@@ -40,7 +45,7 @@ type tmdbMovieSource struct {
 }
 
 func newTMDBMovieSource(apiKey string) *tmdbMovieSource {
-	return &tmdbMovieSource{apiKey: apiKey, httpClient: &http.Client{}}
+	return &tmdbMovieSource{apiKey: apiKey, httpClient: &http.Client{Timeout: httpTimeout}}
 }
 
 // Name implements RatingSource.

@@ -100,7 +100,7 @@ func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	return &httpPlexClient{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		token:        token,
-		httpClient:   &http.Client{},
+		httpClient:   &http.Client{Timeout: httpTimeout},
 		showKeyCache: make(map[string]string),
 	}
 }

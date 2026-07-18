@@ -491,7 +491,8 @@ func writeTempTagFile(xml string) (string, error) {
 // downloadPoster fetches a poster image to a temp file and returns its path.
 // Returns "" on any failure.
 func downloadPoster(posterURL string) string {
-	resp, err := http.Get(posterURL)
+	client := &http.Client{Timeout: httpTimeout}
+	resp, err := client.Get(posterURL)
 	if err != nil || resp.StatusCode != 200 {
 		if resp != nil {
 			resp.Body.Close()
