@@ -34,7 +34,8 @@ type MKVApplier interface {
 }
 
 type realMKVApplier struct {
-	path string
+	path    string
+	extract string // mkvextract path; "" disables tag-preserving merge
 }
 
 func newRealMKVApplier() (*realMKVApplier, error) {
@@ -42,7 +43,8 @@ func newRealMKVApplier() (*realMKVApplier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &realMKVApplier{path: path}, nil
+	extract, _ := exec.LookPath("mkvextract") // best-effort; merge is skipped if absent
+	return &realMKVApplier{path: path, extract: extract}, nil
 }
 
 func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath string) error {
@@ -62,7 +64,22 @@ func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath st
 		}
 	}
 	if tagsPath != "" {
-		args = append(args, "--tags", "all:"+tagsPath)
+		effectiveTags := tagsPath
+		// Merge the tool-managed movie-level tags into the file's existing tags
+		// so that "--tags all:" doesn't wipe per-track statistics tags (or any
+		// other tags this tool doesn't manage). Falls back to the fresh document
+		// when mkvextract is unavailable or extraction/merge fails.
+		if a.extract != "" {
+			if fresh, rerr := os.ReadFile(tagsPath); rerr == nil {
+				if existing, eerr := extractMKVTags(a.extract, filePath); eerr == nil {
+					if mp, werr := writeTempTagFile(mergeMovieTags(existing, string(fresh))); werr == nil {
+						defer os.Remove(mp)
+						effectiveTags = mp
+					}
+				}
+			}
+		}
+		args = append(args, "--tags", "all:"+effectiveTags)
 	}
 	if posterPath != "" {
 		args = append(args,
@@ -538,14 +555,12 @@ func parseDate(s string) (time.Time, error) {
 	return time.ParseInLocation("2006-01-02", s, time.Local)
 }
 
-// extractYear returns the first 4-digit year found in filename (1900–2099),
-// or "" if none.
+// extractYear returns the last 4-digit year found in filename (1900–2099),
+// or "" if none. The last match is used so a number in the title isn't mistaken
+// for the release year (see lastYearMatch).
 func extractYear(filename string) string {
-	m := yearRe.FindStringSubmatch(" " + filename + " ")
-	if m != nil {
-		return m[1]
-	}
-	return ""
+	year, _ := lastYearMatch(filename)
+	return year
 }
 
 // walkAndProcess walks root for .mkv files and processes each one.

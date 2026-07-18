@@ -118,6 +118,8 @@ func TestExtractYear_FoundInFilename(t *testing.T) {
 		{"Inception (2010).mkv", "2010"},
 		{"Movie.2099.mkv", "2099"},
 		{"Movie.1900.mkv", "1900"},
+		{"1917.2019.1080p.BluRay.mkv", "2019"}, // title number must not win over the year
+		{"1917 (2019).mkv", "2019"},
 	}
 	for _, tc := range cases {
 		got := extractYear(tc.filename)

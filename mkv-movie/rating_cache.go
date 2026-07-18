@@ -70,16 +70,6 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	return c, nil
 }
 
-// IsApplied returns true if the file at filePath already has rating r written as tags.
-func (c *MovieRatingCache) IsApplied(filePath string, r NZRating) bool {
-	return NZRating(c.data.Applied[filePath]) == r && r != RatingNone
-}
-
-// MarkApplied records that the given file has had its rating tags successfully written.
-func (c *MovieRatingCache) MarkApplied(filePath string, r NZRating) {
-	c.data.Applied[filePath] = string(r)
-}
-
 // Get returns the cached rating for key (TMDB ID or "title:YEAR").
 func (c *MovieRatingCache) Get(key string) (NZRating, bool) {
 	s, ok := c.data.Movies[key]

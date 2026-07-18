@@ -55,6 +55,63 @@ func TestUpdateDebandInXML_NoTagBlock_DebandFalse_ReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestUpdateDebandInXML_InsertsIntoMovieBlockNotTrack(t *testing.T) {
+	xml := `<Tags>` +
+		`<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>2020</String></Simple></Tag>` +
+		`<Tag><Targets><TrackUID>111</TrackUID></Targets><Simple><Name>BPS</Name><String>1</String></Simple></Tag>` +
+		`</Tags>`
+	result := updateDebandInXML(xml, true)
+	di := strings.Index(result, "DEBAND")
+	bi := strings.Index(result, "<Name>BPS</Name>")
+	if di < 0 || bi < 0 || di > bi {
+		t.Errorf("DEBAND should land in the movie-level block, before the track tag: %s", result)
+	}
+}
+
+// --- mergeMovieTags / removeMovieTagBlock tests ---
+
+func TestMergeMovieTags_EmptyExisting_ReturnsFresh(t *testing.T) {
+	fresh := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>2020</String></Simple></Tag></Tags>`
+	if got := mergeMovieTags("", fresh); got != fresh {
+		t.Errorf("expected fresh doc returned, got %s", got)
+	}
+}
+
+func TestMergeMovieTags_PreservesTrackTagsReplacesMovieBlock(t *testing.T) {
+	existing := `<Tags>` +
+		`<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>1999</String></Simple></Tag>` +
+		`<Tag><Targets><TargetTypeValue>60</TargetTypeValue><TrackUID>111</TrackUID></Targets><Simple><Name>BPS</Name><String>5000000</String></Simple></Tag>` +
+		`</Tags>`
+	fresh := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>2020</String></Simple></Tag></Tags>`
+	got := mergeMovieTags(existing, fresh)
+	if !strings.Contains(got, "<Name>BPS</Name>") {
+		t.Errorf("per-track statistics tag should be preserved: %s", got)
+	}
+	if !strings.Contains(got, "<String>2020</String>") {
+		t.Errorf("fresh YEAR should be present: %s", got)
+	}
+	if strings.Contains(got, "<String>1999</String>") {
+		t.Errorf("old movie-level YEAR should be replaced: %s", got)
+	}
+	if n := strings.Count(got, "<TargetTypeValue>50</TargetTypeValue>"); n != 1 {
+		t.Errorf("expected exactly one movie-level block, got %d: %s", n, got)
+	}
+}
+
+func TestRemoveMovieTagBlock_KeepsTrackTags(t *testing.T) {
+	existing := `<Tags>` +
+		`<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>1999</String></Simple></Tag>` +
+		`<Tag><Targets><TrackUID>111</TrackUID></Targets><Simple><Name>BPS</Name><String>5000000</String></Simple></Tag>` +
+		`</Tags>`
+	got := removeMovieTagBlock(existing)
+	if strings.Contains(got, "<Name>YEAR</Name>") {
+		t.Errorf("movie-level YEAR should be removed: %s", got)
+	}
+	if !strings.Contains(got, "<Name>BPS</Name>") {
+		t.Errorf("track BPS should remain: %s", got)
+	}
+}
+
 // --- buildMovieTagXML deband test ---
 
 func TestBuildMovieTagXML_DebandTrue_ContainsDeband(t *testing.T) {

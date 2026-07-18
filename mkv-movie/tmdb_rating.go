@@ -238,9 +238,29 @@ func isNumeric(s string) bool {
 	return true
 }
 
-// yearRe matches a 4-digit year, optionally surrounded by dots, underscores,
-// spaces, or parentheses.
-var yearRe = regexp.MustCompile(`[\s._(\[]((?:19|20)\d{2})[\s._)\]]`)
+// yearTokenRe matches a bare 4-digit year in the range 1900–2099.
+var yearTokenRe = regexp.MustCompile(`(?:19|20)\d{2}`)
+
+// lastYearMatch returns the last such year in filename that is bounded by
+// non-digits, and the index in filename where it starts (or -1 if none).
+// Scanning for the LAST candidate stops a number embedded in the title (e.g.
+// "1917") from being mistaken for the release year that follows it, as in
+// "1917.2019.1080p.BluRay". A regex that consumed the surrounding delimiters
+// could not match two adjacent years (they share a delimiter), so the boundary
+// check is done manually here instead.
+func lastYearMatch(filename string) (year string, start int) {
+	s := " " + filename + " " // pad so boundary lookups never go out of range
+	year, start = "", -1
+	for _, loc := range yearTokenRe.FindAllStringIndex(s, -1) {
+		if !isASCIIDigit(s[loc[0]-1]) && !isASCIIDigit(s[loc[1]]) {
+			year = s[loc[0]:loc[1]]
+			start = loc[0] - 1 // map the padded index back to a filename index
+		}
+	}
+	return year, start
+}
+
+func isASCIIDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 // reverseChars maps Unicode lookalike characters back to their ASCII originals.
 // These are used as filesystem-safe substitutes for characters illegal in filenames.
@@ -287,10 +307,10 @@ func titleFromFilename(filename, year string) string {
 			}
 		}
 	} else {
-		// Try to detect a year automatically.
-		if m := yearRe.FindStringIndex(" " + filename + " "); m != nil {
-			// m[0] is the space/dot before the year; chop before it.
-			filename = strings.TrimRight(filename[:m[0]], ". _([")
+		// Try to detect a year automatically, using the last year so a number
+		// in the title isn't mistaken for the release year.
+		if _, start := lastYearMatch(filename); start > 0 {
+			filename = strings.TrimRight(filename[:start], ". _([")
 		}
 	}
 

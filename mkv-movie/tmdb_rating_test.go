@@ -135,6 +135,7 @@ func TestTitleFromFilename(t *testing.T) {
 		{"NoYearHere.mkv", "", "NoYearHere"},
 		{"film.mkv", "2021", "film"},
 		{"SPY x FAMILY CODE꞉ White (2023).mkv", "2023", "SPY x FAMILY CODE: White"},
+		{"1917.2019.1080p.BluRay.mkv", "", "1917"}, // auto-detect: chop at the release year, keep the title
 	}
 	for _, tc := range tests {
 		got := titleFromFilename(tc.filename, tc.year)

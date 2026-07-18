@@ -90,7 +90,17 @@ func (c *httpPlexMovieClient) plexGet(path string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	return c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	// Reject non-2xx so a 401/404/500 surfaces as an error instead of being
+	// decoded into a zero-value struct that looks like an empty success.
+	if resp.StatusCode/100 != 2 {
+		resp.Body.Close()
+		return nil, fmt.Errorf("plex: GET %s: unexpected status %s", path, resp.Status)
+	}
+	return resp, nil
 }
 
 // FindMovieByTMDBID implements PlexMovieClient.
