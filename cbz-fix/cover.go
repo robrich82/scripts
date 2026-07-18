@@ -228,13 +228,11 @@ func writeCBZWithNewCover(zr *zip.ReadCloser, oldCoverName string, newCoverData,
 		os.Remove(tmpPath)
 	}
 
-	// New cover goes first.
-	w, err := zw.Create("cover.jpg")
-	if err != nil {
-		cleanup()
-		return "", fmt.Errorf("create cover.jpg: %w", err)
-	}
-	if _, err := w.Write(newCoverData); err != nil {
+	// New cover goes first. writeStored uses CreateRaw so CRC32/sizes live in
+	// the local header rather than a trailing data descriptor — 7-Zip's update
+	// handler cannot modify archives that contain data descriptors, so every
+	// entry here must avoid them (matching writeNewCBZ).
+	if err := writeStored(zw, "cover.jpg", newCoverData); err != nil {
 		cleanup()
 		return "", fmt.Errorf("write cover.jpg: %w", err)
 	}
@@ -245,28 +243,31 @@ func writeCBZWithNewCover(zr *zip.ReadCloser, oldCoverName string, newCoverData,
 		if f.Name == oldCoverName {
 			continue
 		}
-		w, err := zw.Create(f.Name)
-		if err != nil {
-			cleanup()
-			return "", fmt.Errorf("create entry %s: %w", f.Name, err)
-		}
 		if ciData != nil && strings.EqualFold(filepath.Base(f.Name), "comicinfo.xml") {
-			if _, err := w.Write(ciData); err != nil {
+			if err := writeStored(zw, f.Name, ciData); err != nil {
 				cleanup()
 				return "", fmt.Errorf("write ComicInfo.xml: %w", err)
 			}
 			continue
 		}
-		rc, err := f.Open()
+		// Copy the source entry's raw (already-compressed) bytes, clearing bit 3
+		// so the CRC32/sizes from the central directory are written into the
+		// local header.
+		fh := f.FileHeader
+		fh.Flags &^= 0x8
+		w, err := zw.CreateRaw(&fh)
 		if err != nil {
 			cleanup()
-			return "", fmt.Errorf("open entry %s: %w", f.Name, err)
+			return "", fmt.Errorf("create entry %s: %w", f.Name, err)
 		}
-		_, cpErr := io.Copy(w, rc)
-		rc.Close()
-		if cpErr != nil {
+		rc, err := f.OpenRaw()
+		if err != nil {
 			cleanup()
-			return "", fmt.Errorf("copy entry %s: %w", f.Name, cpErr)
+			return "", fmt.Errorf("open raw entry %s: %w", f.Name, err)
+		}
+		if _, err := io.Copy(w, rc); err != nil {
+			cleanup()
+			return "", fmt.Errorf("copy entry %s: %w", f.Name, err)
 		}
 	}
 
