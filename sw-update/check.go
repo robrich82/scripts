@@ -14,6 +14,7 @@ type checkEntry struct {
 	state     *AppState
 	result    *CheckResult
 	err       error
+	detectErr error
 	hasUpdate bool
 }
 
@@ -95,10 +96,11 @@ func cmdCheck(args []string) error {
 
 			e := &entries[idx]
 			result, checkErr := checker.Check(e.app)
-			installed, _ := detector.InstalledVersion(e.app)
+			installed, detectErr := detector.InstalledVersion(e.app)
 
 			e.result = result
 			e.err = checkErr
+			e.detectErr = detectErr
 			switch {
 			case e.app.Local.Type == "" || e.app.Local.Type == "none":
 				// No local detector: clear any stale installed_version so a
@@ -170,6 +172,23 @@ func cmdCheck(args []string) error {
 		fmt.Printf("\n=== ERRORS (%d) ===\n", len(errors))
 		for _, e := range errors {
 			fmt.Printf("  [ERR]  %-*s  %v\n", nameWidth, e.app.Name, e.err)
+		}
+	}
+
+	// Detector warnings are reported separately from checker errors: the remote
+	// check may have succeeded while local-version detection failed (stale path,
+	// changed --version output, etc.). Without this, a broken detector would
+	// silently leave installed_version untouched and updates could go unnoticed.
+	var detectWarnings []checkEntry
+	for _, e := range entries {
+		if e.detectErr != nil {
+			detectWarnings = append(detectWarnings, e)
+		}
+	}
+	if len(detectWarnings) > 0 {
+		fmt.Printf("\n=== DETECTOR WARNINGS (%d) ===\n", len(detectWarnings))
+		for _, e := range detectWarnings {
+			fmt.Printf("  [WARN] %-*s  %v\n", nameWidth, e.app.Name, e.detectErr)
 		}
 	}
 
