@@ -5,5 +5,6 @@ package main
 import "strings"
 
 func isHiddenDir(name, path string) bool {
-	return strings.HasPrefix(name, ".")
+	// Dot-prefixed directories are hidden, but never the walk roots "." or "..".
+	return name != "." && name != ".." && strings.HasPrefix(name, ".")
 }

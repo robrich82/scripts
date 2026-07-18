@@ -8,7 +8,9 @@ import (
 )
 
 func isHiddenDir(name, path string) bool {
-	if strings.HasPrefix(name, ".") {
+	// Treat dot-prefixed directories (.git, .stfolder, …) as hidden, but never
+	// the walk roots "." or "..", or an entire run started from "." is skipped.
+	if name != "." && name != ".." && strings.HasPrefix(name, ".") {
 		return true
 	}
 	p, err := syscall.UTF16PtrFromString(path)
