@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -223,6 +224,10 @@ func computeDiff(cleanVideo, matchedBase string) string {
 // It first tries keys that share the same track-number prefix, then falls back.
 func findMatch(cleanVideoIgnored string, audioData map[string]string) (string, bool) {
 	choices := mapKeys(audioData)
+	// Sort so that when several candidates tie on similarity ratio, the same
+	// one wins every run — map iteration order is otherwise randomised, making
+	// match selection non-deterministic between invocations.
+	slices.Sort(choices)
 	track := trackNumber(cleanVideoIgnored)
 	if track != "" {
 		var trackMatches []string
@@ -375,6 +380,14 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 	switch choice {
 	case "r":
 		newPath := filepath.Join(videoDir, targetName+ext)
+		if newPath != fullPath {
+			if _, statErr := os.Stat(newPath); statErr == nil {
+				// os.Rename would silently clobber an existing file (e.g. two
+				// videos matching the same track). Refuse rather than destroy it.
+				fmt.Printf("    [SKIP] Target already exists, not overwriting: %s%s\n", targetName, ext)
+				return "skipped"
+			}
+		}
 		if err := p.renamer(fullPath, newPath); err != nil {
 			fmt.Printf("    [ERROR] Could not rename: %v\n", err)
 		} else {

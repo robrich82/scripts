@@ -65,7 +65,7 @@ func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	return c.httpClient.Do(req)
+	return doPlexRequest(c.httpClient, req, path)
 }
 
 // FindArtistByTitle implements PlexClient. It scans all "artist" (music)
@@ -146,7 +146,23 @@ func (c *httpPlexClient) plexPut(path string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	return c.httpClient.Do(req)
+	return doPlexRequest(c.httpClient, req, path)
+}
+
+// doPlexRequest issues req and rejects non-2xx responses with an error, so a
+// 401/404/500 from Plex surfaces as a failure instead of being decoded as a
+// zero-value "success" (which would make FindArtistByTitle report "not found"
+// and RefreshMetadata/AnalyzeMedia report success on a server error).
+func doPlexRequest(client *http.Client, req *http.Request, path string) (*http.Response, error) {
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		resp.Body.Close()
+		return nil, fmt.Errorf("plex: %s %s: unexpected status %s", req.Method, path, resp.Status)
+	}
+	return resp, nil
 }
 
 // RefreshMetadata implements PlexClient.
