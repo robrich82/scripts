@@ -291,6 +291,9 @@ type trimCandidate struct {
 	path       string
 	info       MKVInfo
 	originLang string
+	// accountLangs are the ISO 639-2/B audio languages the Plex accounts are
+	// configured to watch this title in, from the sibling tool's manual_data.json.
+	accountLangs []string
 }
 
 // applyLangFixes returns a copy of tracks with the language and IETF tag of each
@@ -363,6 +366,10 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 		libType = lib.Type
 	}
 	origins := fetchOrigins(filesToScan, libRoot, libType, tmdb, prompter)
+
+	// Per-title audio language preferences from mkv-tvshow / mkv-movie, so trim
+	// keeps the audio each Plex account actually watches.
+	accountLangs := loadAccountLangs(libType)
 
 	// First pass: identify files whose first audio track has language 'und'.
 	// This runs before the main analysis so that language fixes are applied
@@ -599,9 +606,10 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				trimInfo := *info
 				trimInfo.Tracks = res.UpdatedTracks
 				trimCandidates = append(trimCandidates, trimCandidate{
-					path:       p,
-					info:       trimInfo,
-					originLang: originLang,
+					path:         p,
+					info:         trimInfo,
+					originLang:   originLang,
+					accountLangs: accountLangs.forFile(p, libRoot),
 				})
 			}
 			mu.Unlock()
@@ -663,7 +671,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			if fixes, ok := appliedLangFixes[tc.path]; ok {
 				tc.info.Tracks = applyLangFixes(tc.info.Tracks, fixes)
 			}
-			plan := PlanTrim(tc.info, tc.originLang)
+			plan := PlanTrim(tc.info, tc.originLang, tc.accountLangs)
 			if !plan.NeedsChange {
 				continue
 			}

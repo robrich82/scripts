@@ -28,14 +28,24 @@ type TrimPlan struct {
 
 // PlanTrim decides which tracks to keep/remove and how to order audio and subtitles.
 //
+// accountLangs lists the ISO 639-2/B audio languages configured for the Plex
+// accounts in the sibling tools' manual_data.json ("language", "alt-language",
+// "alt2-language"). Someone watches in each of them, so their audio is kept
+// alongside the original language.
+//
 // Audio keep rules (applied when originLang is non-empty and not "und"):
 //   - Keep if lang == originLang (the content's original language)
-//   - Keep if lang == "eng" (English is always retained)
+//   - Keep if lang is one of accountLangs (someone watches in that language)
 //   - Keep if lang == "und" (language unknown; keep to be safe)
 //   - If originLang is empty or "und", all audio tracks are kept.
 //
 // Subtitle keep rules (always applied):
-//   - Keep if lang == "eng" or lang == "und"
+//   - Keep if lang == "und"
+//   - Keep non-forced "eng" subtitles
+//   - Keep forced/signs "eng" subtitles only when English audio is also kept,
+//     i.e. English is the original language or an account watches the English
+//     dub and so needs the signs/songs track. With nobody watching in English
+//     they are dead weight, so they are removed.
 //   - All other subtitle tracks are removed.
 //
 // Audio ordering:
@@ -47,7 +57,7 @@ type TrimPlan struct {
 // Subtitle ordering:
 //   - Within each language group the best main subtitle (by region score and
 //     codec priority) is placed first, with forced/signs tracks last.
-func PlanTrim(info MKVInfo, originLang string) *TrimPlan {
+func PlanTrim(info MKVInfo, originLang string, accountLangs []string) *TrimPlan {
 	plan := &TrimPlan{}
 
 	var audioTracks, subTracks []Track
@@ -60,14 +70,30 @@ func PlanTrim(info MKVInfo, originLang string) *TrimPlan {
 		}
 	}
 
+	// Languages whose audio someone actually watches: the content's original
+	// language plus every Plex account's configured preference.
+	unknownOrigin := originLang == "" || originLang == "und"
+	keepLang := map[string]bool{"und": true}
+	if !unknownOrigin {
+		keepLang[originLang] = true
+	} else {
+		// Nothing is known about what is watched, so keep English as before
+		// rather than guessing.
+		keepLang["eng"] = true
+	}
+	for _, lang := range accountLangs {
+		if lang != "" {
+			keepLang[lang] = true
+		}
+	}
+
 	// --- Audio: filter then reorder ---
 	var keptAudio []Track
-	if originLang == "" || originLang == "und" {
+	if unknownOrigin {
 		keptAudio = audioTracks
 	} else {
 		for _, t := range audioTracks {
-			lang := normalizeLanguage(t.Properties.Language)
-			if lang == originLang || lang == "eng" || lang == "und" {
+			if keepLang[normalizeLanguage(t.Properties.Language)] {
 				keptAudio = append(keptAudio, t)
 			} else {
 				plan.RemoveAudio = append(plan.RemoveAudio, t)
@@ -86,13 +112,18 @@ func PlanTrim(info MKVInfo, originLang string) *TrimPlan {
 		}
 	}
 
-	// --- Subtitles: English + und only, with within-lang winner-first reordering ---
+	// --- Subtitles: English + und only, with within-lang winner-first reordering.
+	// Forced/signs English subtitles are kept only when English audio is kept,
+	// since they exist to caption on-screen text for someone watching in English.
 	var keptSubs []Track
 	for _, t := range subTracks {
 		lang := normalizeLanguage(t.Properties.Language)
-		if lang == "eng" || lang == "und" {
+		forced := containsAny(t.Properties.TrackName, forcedKeywords)
+		switch {
+		case lang == "und",
+			lang == "eng" && (!forced || keepLang["eng"]):
 			keptSubs = append(keptSubs, t)
-		} else {
+		default:
 			plan.RemoveSubs = append(plan.RemoveSubs, t)
 		}
 	}

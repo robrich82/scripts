@@ -194,8 +194,28 @@ removed or reordered. For each such file it prints what will change and prompts:
 - **`a`** — remux this and all remaining files without further prompting
 
 Keep rules:
-- **Audio**: retain tracks in the original language and English; all others are removed. If the original language is unknown (no TMDB lookup), all audio is kept.
-- **Subtitles**: retain English and undetermined (`und`) tracks only.
+- **Audio**: retain tracks in the original language and in any language a Plex account is configured to watch in (see below); all others are removed. If the original language is unknown (no TMDB lookup), all audio is kept.
+- **Subtitles**: retain English and undetermined (`und`) tracks only. Forced/signs English subtitles are kept only when English audio is also kept — they exist to caption on-screen text for someone watching in English, so with nobody watching in English they are removed.
+
+#### Per-account audio languages
+
+Trim reads the `language`, `alt-language`, and `alt2-language` keys from the
+sibling tool's `manual_data.json` — `%APPDATA%\mkv-tvshow\` for a `"tv"` library,
+`%APPDATA%\mkv-movie\` for a `"movie"` one (set by the library's `type`). These
+are the same keys those tools use to set each Plex account's preferred audio
+language, so trim keeps exactly the audio someone actually watches:
+
+| Original language | Configured languages | Audio kept | English subtitles kept |
+|---|---|---|---|
+| `ja` | none | `ja` | main only |
+| `ja` | `"alt-language": "en"` | `ja`, `en` | main + forced/signs |
+| `ja` | `"alt-language": "fr"` | `ja`, `fr` | main only |
+| `en` | none | `en` | main + forced/signs |
+
+Without a `type` on the library, or with no `manual_data.json` entry for the
+title, trim falls back to the original language alone — for foreign-language
+content that means English audio is removed. Set `language`/`alt-language`/
+`alt2-language` to `"en"` for any title whose English dub you want to keep.
 
 Ordering rules (Plex uses the first track for a language, ignoring the default flag):
 - **Audio order**: within each language group, the best-quality track (most channels, then codec priority) is placed first, with commentary/SDH tracks last. When the original language is non-English, the original-language group precedes English.

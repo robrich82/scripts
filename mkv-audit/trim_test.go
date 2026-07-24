@@ -279,7 +279,7 @@ func TestPlanTrim_SubsReordered(t *testing.T) {
 		subTrack(2, "eng", "S_TEXT/ASS", "Signs/Songs", false, true),
 		subTrack(3, "eng", "S_TEXT/ASS", "", true, false),
 	}}
-	plan := PlanTrim(info, "")
+	plan := PlanTrim(info, "", nil)
 	if !plan.SubsReordered {
 		t.Error("expected SubsReordered=true")
 	}
@@ -299,7 +299,7 @@ func TestPlanTrim_SubsAlreadyOrdered(t *testing.T) {
 		subTrack(2, "eng", "S_TEXT/ASS", "", true, false),
 		subTrack(3, "eng", "S_TEXT/ASS", "Signs/Songs", false, true),
 	}}
-	plan := PlanTrim(info, "")
+	plan := PlanTrim(info, "", nil)
 	if plan.SubsReordered {
 		t.Error("expected SubsReordered=false when subs already in correct order")
 	}
@@ -311,12 +311,110 @@ func TestPlanTrim_AudioWinnerFirst_NoOriginLang(t *testing.T) {
 		audioTrack(1, "eng", "A_AC3", 2, false),
 		audioTrack(2, "eng", "A_TRUEHD", 6, false),
 	}}
-	plan := PlanTrim(info, "")
+	plan := PlanTrim(info, "", nil)
 	if !plan.AudioReordered {
 		t.Error("expected AudioReordered=true")
 	}
 	if plan.KeepAudio[0].ID != 2 {
 		t.Errorf("want TrueHD first, got id=%d", plan.KeepAudio[0].ID)
+	}
+}
+
+// --- PlanTrim account-language awareness ---
+
+// subbedShow is a Japanese-original file carrying both audio languages plus a
+// main and a signs English subtitle track.
+func subbedShow() MKVInfo {
+	return MKVInfo{Tracks: []Track{
+		videoTrack(0, "jpn"),
+		audioTrack(1, "jpn", "A_FLAC", 6, true),
+		audioTrack(2, "eng", "A_AC3", 6, false),
+		subTrack(3, "eng", "S_TEXT/ASS", "", true, false),
+		subTrack(4, "eng", "S_TEXT/ASS", "Signs/Songs", false, true),
+	}}
+}
+
+func TestPlanTrim_NoAccountLangs_DropsEnglishAudioAndForcedSubs(t *testing.T) {
+	plan := PlanTrim(subbedShow(), "jpn", nil)
+	if !intsEqual(trackIDs(plan.KeepAudio), []int{1}) {
+		t.Errorf("KeepAudio = %v; want only the jpn track [1]", trackIDs(plan.KeepAudio))
+	}
+	if !intsEqual(trackIDs(plan.RemoveAudio), []int{2}) {
+		t.Errorf("RemoveAudio = %v; want the eng track [2]", trackIDs(plan.RemoveAudio))
+	}
+	if !intsEqual(trackIDs(plan.KeepSubs), []int{3}) {
+		t.Errorf("KeepSubs = %v; want only the non-forced eng sub [3]", trackIDs(plan.KeepSubs))
+	}
+	if !intsEqual(trackIDs(plan.RemoveSubs), []int{4}) {
+		t.Errorf("RemoveSubs = %v; want the signs sub [4]", trackIDs(plan.RemoveSubs))
+	}
+}
+
+func TestPlanTrim_EnglishAccountLang_KeepsEnglishAudioAndForcedSubs(t *testing.T) {
+	plan := PlanTrim(subbedShow(), "jpn", []string{"eng"})
+	if !intsEqual(trackIDs(plan.KeepAudio), []int{1, 2}) {
+		t.Errorf("KeepAudio = %v; want [1,2] (jpn then eng)", trackIDs(plan.KeepAudio))
+	}
+	if len(plan.RemoveAudio) != 0 {
+		t.Errorf("RemoveAudio = %v; want none", trackIDs(plan.RemoveAudio))
+	}
+	if !intsEqual(trackIDs(plan.KeepSubs), []int{3, 4}) {
+		t.Errorf("KeepSubs = %v; want both eng subs [3,4]", trackIDs(plan.KeepSubs))
+	}
+	if len(plan.RemoveSubs) != 0 {
+		t.Errorf("RemoveSubs = %v; want none", trackIDs(plan.RemoveSubs))
+	}
+}
+
+func TestPlanTrim_OtherAccountLangKeptButForcedEngStillDropped(t *testing.T) {
+	info := subbedShow()
+	info.Tracks = append(info.Tracks, audioTrack(5, "fre", "A_AC3", 6, false))
+	// An account watches in French: keep French audio, but nobody watches in
+	// English so the signs track is still dead weight.
+	plan := PlanTrim(info, "jpn", []string{"fre"})
+	if !intsEqual(trackIDs(plan.KeepAudio), []int{1, 5}) {
+		t.Errorf("KeepAudio = %v; want [1,5] (jpn then fre)", trackIDs(plan.KeepAudio))
+	}
+	if !intsEqual(trackIDs(plan.RemoveAudio), []int{2}) {
+		t.Errorf("RemoveAudio = %v; want the eng track [2]", trackIDs(plan.RemoveAudio))
+	}
+	if !intsEqual(trackIDs(plan.RemoveSubs), []int{4}) {
+		t.Errorf("RemoveSubs = %v; want the signs sub [4]", trackIDs(plan.RemoveSubs))
+	}
+}
+
+func TestPlanTrim_EnglishOrigin_KeepsForcedSubs(t *testing.T) {
+	info := MKVInfo{Tracks: []Track{
+		videoTrack(0, "eng"),
+		audioTrack(1, "eng", "A_FLAC", 6, true),
+		subTrack(2, "eng", "S_TEXT/ASS", "", true, false),
+		subTrack(3, "eng", "S_TEXT/ASS", "Signs/Songs", false, true),
+	}}
+	plan := PlanTrim(info, "eng", nil)
+	if len(plan.RemoveSubs) != 0 {
+		t.Errorf("RemoveSubs = %v; want none for English-original content", trackIDs(plan.RemoveSubs))
+	}
+}
+
+func TestPlanTrim_UnknownOrigin_KeepsEverything(t *testing.T) {
+	plan := PlanTrim(subbedShow(), "", nil)
+	if len(plan.RemoveAudio) != 0 || len(plan.RemoveSubs) != 0 {
+		t.Errorf("unknown origin should remove nothing; removed audio %v subs %v",
+			trackIDs(plan.RemoveAudio), trackIDs(plan.RemoveSubs))
+	}
+}
+
+func TestPlanTrim_UndTracksAlwaysKept(t *testing.T) {
+	info := MKVInfo{Tracks: []Track{
+		videoTrack(0, "jpn"),
+		audioTrack(1, "jpn", "A_FLAC", 6, true),
+		audioTrack(2, "", "A_AC3", 6, false),
+		subTrack(3, "", "S_TEXT/ASS", "Signs/Songs", false, true),
+	}}
+	plan := PlanTrim(info, "jpn", nil)
+	if len(plan.RemoveAudio) != 0 || len(plan.RemoveSubs) != 0 {
+		t.Errorf("und tracks should be kept; removed audio %v subs %v",
+			trackIDs(plan.RemoveAudio), trackIDs(plan.RemoveSubs))
 	}
 }
 
