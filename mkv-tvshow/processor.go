@@ -1207,7 +1207,8 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, ent
 	if langs.Default == "" {
 		return
 	}
-	if applied, ok := p.ratingCache.GetLanguageApplied(tmdbID); ok && applied == langs.String() && !p.cfg.OverwriteLanguage {
+	sig := appliedLangSignature(p.plex, langs)
+	if applied, ok := p.ratingCache.GetLanguageApplied(tmdbID); ok && applied == sig && !p.cfg.OverwriteLanguage {
 		return
 	}
 	if err := p.plex.SetAudioLanguage(showKey, langs); err != nil {
@@ -1218,10 +1219,10 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, ent
 		fmt.Printf("  [!] Plex: set audio language for %q: %v\n", showName, err)
 		return
 	}
-	p.ratingCache.SetLanguageApplied(tmdbID, langs.String())
+	p.ratingCache.SetLanguageApplied(tmdbID, sig)
 	altSuffix := ""
-	if r, ok := p.plex.(altErrReporter); ok {
+	if r, ok := p.plex.(multiAccountReporter); ok {
 		altSuffix = r.altErrSuffix()
 	}
-	fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, langs.String(), altSuffix)
+	fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, sig, altSuffix)
 }

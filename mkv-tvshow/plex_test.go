@@ -722,9 +722,9 @@ func TestMultiPlexClient_SetAudioLanguage_AltErrorStoredNotPropagated(t *testing
 	if err := mc.SetAudioLanguage("rk1", AudioLangs{Default: "ja"}); err != nil {
 		t.Fatalf("alt error should not propagate: %v", err)
 	}
-	r, ok := mc.(altErrReporter)
+	r, ok := mc.(multiAccountReporter)
 	if !ok {
-		t.Fatal("multiPlexClient should implement altErrReporter")
+		t.Fatal("multiPlexClient should implement multiAccountReporter")
 	}
 	want := "; alt: alt failed; alt2: not in library"
 	if got := r.altErrSuffix(); got != want {
@@ -742,7 +742,7 @@ func TestMultiPlexClient_SetAudioLanguage_AltErrClearedOnSuccess(t *testing.T) {
 	// Second call with alt success — the stored error should be cleared.
 	alt.setLangErr = nil
 	mc.SetAudioLanguage("rk1", AudioLangs{Default: "ja"}) //nolint
-	r := mc.(altErrReporter)
+	r := mc.(multiAccountReporter)
 	if got := r.altErrSuffix(); got != "" {
 		t.Errorf("altErrSuffix() should be empty after successful alt call, got %q", got)
 	}
@@ -756,38 +756,49 @@ func TestNewMultiPlexClient_NoAltsReturnsPrimary(t *testing.T) {
 	}
 }
 
-func TestAudioLangs_String(t *testing.T) {
+func TestAppliedLangSignature(t *testing.T) {
+	alts := []namedPlexClient{
+		{name: altAccount, client: &fakePlexClient{}},
+		{name: alt2Account, client: &fakePlexClient{}},
+	}
 	cases := []struct {
 		name  string
+		alts  []namedPlexClient
 		langs AudioLangs
 		want  string
 	}{
-		{"no overrides", AudioLangs{Default: "ja"}, "ja"},
 		{
-			"override equal to default is omitted",
-			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "ja"}},
-			"ja",
+			// No alt tokens: the bare language, so caches written before
+			// per-account languages existed still match and do not re-apply.
+			"no alt accounts", nil, AudioLangs{Default: "ja"}, "ja",
 		},
 		{
-			"one override",
+			// Listed even though they inherit "ja" — otherwise adding a token
+			// would leave already-applied titles skipped forever.
+			"alt accounts inheriting the default", alts, AudioLangs{Default: "ja"},
+			"ja|alt=ja|alt2=ja",
+		},
+		{
+			"one account overriding", alts,
 			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}},
-			"ja|alt=en",
+			"ja|alt=en|alt2=ja",
 		},
 		{
-			"both overrides, always in account order",
-			AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "fr", altAccount: "en"}},
+			"both accounts overriding", alts,
+			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en", alt2Account: "fr"}},
 			"ja|alt=en|alt2=fr",
 		},
 		{
-			"only alt2 overrides",
+			"only alt2 configured", alts[1:],
 			AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "fr"}},
 			"ja|alt2=fr",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.langs.String(); got != tc.want {
-				t.Errorf("String() = %q; want %q", got, tc.want)
+			client := newMultiPlexClient(&fakePlexClient{}, tc.alts...)
+			if got := appliedLangSignature(client, tc.langs); got != tc.want {
+				t.Errorf("appliedLangSignature = %q; want %q", got, tc.want)
 			}
 		})
 	}

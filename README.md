@@ -363,6 +363,8 @@ When Plex is configured, after processing each movie the tool pushes the resolve
 
 Stream selection is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same selection is applied for those accounts — or a different audio language per account via `alt-language` / `alt2-language` in `manual_data.json`. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a movie it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
 
+The cached "already applied" value records the language given to every configured account (`ja|alt=ja|alt2=en`), so adding a token re-applies on the next run rather than being skipped because the language itself did not change.
+
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` is available.
 
@@ -538,6 +540,8 @@ When Plex is configured, after processing each show the tool:
 2. Sets the show's preferred audio language in Plex to the TMDB original language (e.g. `ja` for anime). This is applied once per show and cached in `rating_cache.json` so you can override it inside Plex without it being reset on the next run. Use `--overwrite-language` to force a re-apply.
 
 The audio language preference is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same language is applied for those accounts — or a different one per account via `alt-language` / `alt2-language` in `manual_data.json`. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a show it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
+
+The cached "already applied" value records the language given to every configured account (`ja|alt=ja|alt2=en`), so adding a token re-applies on the next run rather than being skipped because the language itself did not change. It is also what the log line reports, making it visible which accounts were written.
 
 ### Configuration
 

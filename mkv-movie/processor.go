@@ -323,13 +323,19 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	stem := strings.TrimSuffix(basename, filepath.Ext(basename))
 	entry := manualData[stem]
 	langs := entry.audioLangs(details.OriginalLanguage)
+	// What to cache as "already applied": the language every configured account
+	// receives, so adding an account re-applies rather than being skipped.
+	langSig := ""
+	if rr != nil && rr.plex != nil {
+		langSig = appliedLangSignature(rr.plex, langs)
+	}
 
 	plexStreamsNeedSet := func() bool {
 		if rr == nil || rr.plex == nil || langs.Default == "" {
 			return false
 		}
 		applied, ok := cache.GetStreamsApplied(tmdbID)
-		return force || !ok || applied != langs.String() || rr.overwriteStreams
+		return force || !ok || applied != langSig || rr.overwriteStreams
 	}
 
 	// 5. Resolve NZ rating early so we can include it in the needs-update check.
@@ -390,7 +396,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 				cache.SetPlexRating(tmdbID, rating)
 			}
 			if langs.Default != "" {
-				cache.SetStreamsApplied(tmdbID, langs.String())
+				cache.SetStreamsApplied(tmdbID, langSig)
 			}
 		} else if plexErr == nil {
 			if plexRatingNeedsUpdate(rating) {
@@ -403,13 +409,13 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			if plexStreamsNeedSet() {
 				audioSet, subtitleSet, err := rr.plex.SetMovieStreams(rk, langs)
 				if err != nil {
-					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, langs.String(), err)
+					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, langSig, err)
 				} else {
-					cache.SetStreamsApplied(tmdbID, langs.String())
+					cache.SetStreamsApplied(tmdbID, langSig)
 					if audioSet || subtitleSet {
-						langSet = langs.String()
+						langSet = langSig
 					}
-					if r, ok := rr.plex.(altMovieErrReporter); ok {
+					if r, ok := rr.plex.(multiAccountReporter); ok {
 						langAltSuffix = r.altErrSuffix()
 					}
 				}

@@ -593,10 +593,25 @@ func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) er
 	return nil
 }
 
-// altErrReporter is implemented by multiPlexClient. After a successful
-// SetAudioLanguage call, callers can retrieve a summary of any alt-token errors.
-type altErrReporter interface {
+// multiAccountReporter is implemented by multiPlexClient, the client that fans
+// SetAudioLanguage out to more than one Plex account. It lets the caller record
+// what was applied per account and report any per-account failures.
+type multiAccountReporter interface {
+	appliedSignature(langs AudioLangs) string
 	altErrSuffix() string
+}
+
+// appliedLangSignature returns the value to cache as "already applied" for a
+// title: the language given to the primary account, plus one entry per
+// configured alt account, e.g. "ja|alt=ja|alt2=en". Alt accounts are listed
+// even when they simply inherit the default, so adding PLEX_ALT2_TOKEN
+// invalidates the cache and the new account is actually written on the next
+// run instead of being skipped because the language itself did not change.
+func appliedLangSignature(client PlexClient, langs AudioLangs) string {
+	if r, ok := client.(multiAccountReporter); ok {
+		return r.appliedSignature(langs)
+	}
+	return langs.Default
 }
 
 // Labels for the additional Plex accounts. Each is both the manual_data.json
@@ -623,20 +638,19 @@ func (a AudioLangs) forAccount(name string) string {
 	return a.Default
 }
 
-// String renders the per-account languages as one stable value, e.g. "ja" or
-// "ja|alt=en". It doubles as the "already applied" cache value: any change to
-// any account's language changes the string and so triggers a re-apply. An alt
-// override equal to Default is omitted, so with no differing overrides the
-// value is just the language code and caches written before per-account
-// languages existed still match.
-func (a AudioLangs) String() string {
-	s := a.Default
-	for _, name := range []string{altAccount, alt2Account} {
-		if lang := a.Alts[name]; lang != "" && lang != a.Default {
-			s += "|" + name + "=" + lang
-		}
+// appliedSignature implements multiAccountReporter. Every configured alt
+// account is listed with the language it receives — which is Default unless it
+// has an "alt-language" / "alt2-language" override of its own.
+func (m *multiPlexClient) appliedSignature(langs AudioLangs) string {
+	var b strings.Builder
+	b.WriteString(langs.Default)
+	for _, a := range m.alts {
+		b.WriteString("|")
+		b.WriteString(a.name)
+		b.WriteString("=")
+		b.WriteString(langs.forAccount(a.name))
 	}
-	return s
+	return b.String()
 }
 
 // namedPlexClient pairs an additional Plex account's client with its label.
