@@ -93,7 +93,6 @@ func main() {
 
 	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
-	plexAltToken := os.Getenv("PLEX_ALT_TOKEN")
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
@@ -103,11 +102,7 @@ func main() {
 
 	var plex PlexMovieClient
 	if plexURL != "" && plexToken != "" {
-		var alt PlexMovieClient
-		if plexAltToken != "" {
-			alt = newHTTPPlexMovieClient(plexURL, plexAltToken)
-		}
-		plex = newMultiPlexMovieClient(newHTTPPlexMovieClient(plexURL, plexToken), alt)
+		plex = newMultiPlexMovieClient(newHTTPPlexMovieClient(plexURL, plexToken), altPlexMovieClients(plexURL)...)
 	}
 
 	sources := []RatingSource{

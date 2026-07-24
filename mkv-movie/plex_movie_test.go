@@ -303,10 +303,13 @@ func (f *fakeMultiPlexMovieClient) SetMovieStreams(rk, lang string) (bool, bool,
 	return true, true, f.setStreamsErr
 }
 
-func TestMultiPlexMovieClient_SetMovieStreams_CallsBoth(t *testing.T) {
+func TestMultiPlexMovieClient_SetMovieStreams_CallsAll(t *testing.T) {
 	primary := &fakeMultiPlexMovieClient{}
 	alt := &fakeMultiPlexMovieClient{}
-	mc := newMultiPlexMovieClient(primary, alt)
+	alt2 := &fakeMultiPlexMovieClient{}
+	mc := newMultiPlexMovieClient(primary,
+		namedPlexMovieClient{name: "alt", client: alt},
+		namedPlexMovieClient{name: "alt2", client: alt2})
 	audioSet, subtitleSet, err := mc.SetMovieStreams("rk1", "ja")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -314,18 +317,17 @@ func TestMultiPlexMovieClient_SetMovieStreams_CallsBoth(t *testing.T) {
 	if !audioSet || !subtitleSet {
 		t.Error("expected audioSet and subtitleSet from primary")
 	}
-	if primary.setStreamsCalls != 1 || primary.setStreamsRatingKey != "rk1" || primary.setStreamsLangTag != "ja" {
-		t.Errorf("primary: calls=%d key=%q lang=%q", primary.setStreamsCalls, primary.setStreamsRatingKey, primary.setStreamsLangTag)
-	}
-	if alt.setStreamsCalls != 1 || alt.setStreamsRatingKey != "rk1" || alt.setStreamsLangTag != "ja" {
-		t.Errorf("alt: calls=%d key=%q lang=%q", alt.setStreamsCalls, alt.setStreamsRatingKey, alt.setStreamsLangTag)
+	for name, c := range map[string]*fakeMultiPlexMovieClient{"primary": primary, "alt": alt, "alt2": alt2} {
+		if c.setStreamsCalls != 1 || c.setStreamsRatingKey != "rk1" || c.setStreamsLangTag != "ja" {
+			t.Errorf("%s: calls=%d key=%q lang=%q", name, c.setStreamsCalls, c.setStreamsRatingKey, c.setStreamsLangTag)
+		}
 	}
 }
 
 func TestMultiPlexMovieClient_SetMovieStreams_PrimaryErrorPropagates(t *testing.T) {
 	primary := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("primary failed")}
 	alt := &fakeMultiPlexMovieClient{}
-	mc := newMultiPlexMovieClient(primary, alt)
+	mc := newMultiPlexMovieClient(primary, namedPlexMovieClient{name: "alt", client: alt})
 	if _, _, err := mc.SetMovieStreams("rk1", "ja"); err == nil {
 		t.Fatal("expected error from primary")
 	}
@@ -336,9 +338,11 @@ func TestMultiPlexMovieClient_SetMovieStreams_PrimaryErrorPropagates(t *testing.
 
 func TestMultiPlexMovieClient_SetMovieStreams_AltErrorStoredNotPropagated(t *testing.T) {
 	primary := &fakeMultiPlexMovieClient{}
-	altErr := errors.New("alt failed")
-	alt := &fakeMultiPlexMovieClient{setStreamsErr: altErr}
-	mc := newMultiPlexMovieClient(primary, alt)
+	alt := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("alt failed")}
+	alt2 := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("plex: set audio stream: status 404: nope")}
+	mc := newMultiPlexMovieClient(primary,
+		namedPlexMovieClient{name: "alt", client: alt},
+		namedPlexMovieClient{name: "alt2", client: alt2})
 	if _, _, err := mc.SetMovieStreams("rk1", "ja"); err != nil {
 		t.Fatalf("alt error should not propagate: %v", err)
 	}
@@ -346,30 +350,51 @@ func TestMultiPlexMovieClient_SetMovieStreams_AltErrorStoredNotPropagated(t *tes
 	if !ok {
 		t.Fatal("multiPlexMovieClient should implement altMovieErrReporter")
 	}
-	if r.getAltErr() != altErr {
-		t.Errorf("getAltErr() = %v; want %v", r.getAltErr(), altErr)
+	want := "; alt: alt failed; alt2: not in library"
+	if got := r.altErrSuffix(); got != want {
+		t.Errorf("altErrSuffix() = %q; want %q", got, want)
 	}
 }
 
 func TestMultiPlexMovieClient_SetMovieStreams_AltErrClearedOnSuccess(t *testing.T) {
 	primary := &fakeMultiPlexMovieClient{}
 	alt := &fakeMultiPlexMovieClient{}
-	mc := newMultiPlexMovieClient(primary, alt)
+	mc := newMultiPlexMovieClient(primary, namedPlexMovieClient{name: "alt", client: alt})
 	alt.setStreamsErr = errors.New("alt failed")
 	mc.SetMovieStreams("rk1", "ja") //nolint
 	alt.setStreamsErr = nil
 	mc.SetMovieStreams("rk1", "ja") //nolint
 	r := mc.(altMovieErrReporter)
-	if r.getAltErr() != nil {
-		t.Errorf("getAltErr() should be nil after successful alt call, got %v", r.getAltErr())
+	if got := r.altErrSuffix(); got != "" {
+		t.Errorf("altErrSuffix() should be empty after successful alt call, got %q", got)
 	}
 }
 
-func TestNewMultiPlexMovieClient_NilAltReturnsPrimary(t *testing.T) {
+func TestNewMultiPlexMovieClient_NoAltsReturnsPrimary(t *testing.T) {
 	primary := &fakeMultiPlexMovieClient{}
-	mc := newMultiPlexMovieClient(primary, nil)
+	mc := newMultiPlexMovieClient(primary)
 	if mc != PlexMovieClient(primary) {
-		t.Error("expected primary to be returned when alt is nil")
+		t.Error("expected primary to be returned when there are no alts")
+	}
+}
+
+func TestAltPlexMovieClients_ReadsBothTokens(t *testing.T) {
+	t.Setenv("PLEX_ALT_TOKEN", "")
+	t.Setenv("PLEX_ALT2_TOKEN", "")
+	if got := altPlexMovieClients("http://plex"); got != nil {
+		t.Errorf("no tokens set: got %d clients; want 0", len(got))
+	}
+
+	t.Setenv("PLEX_ALT2_TOKEN", "tok2")
+	got := altPlexMovieClients("http://plex")
+	if len(got) != 1 || got[0].name != "alt2" {
+		t.Fatalf("only PLEX_ALT2_TOKEN set: got %+v; want one client named alt2", got)
+	}
+
+	t.Setenv("PLEX_ALT_TOKEN", "tok1")
+	got = altPlexMovieClients("http://plex")
+	if len(got) != 2 || got[0].name != "alt" || got[1].name != "alt2" {
+		t.Fatalf("both tokens set: got %+v; want alt then alt2", got)
 	}
 }
 

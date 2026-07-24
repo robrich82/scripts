@@ -337,8 +337,11 @@ Updated: 8  OK: 42  Skipped: 3  Errors: 0
 - `mkvpropedit` — writes metadata to MKV files (optional; a warning is shown if missing)
 - `mkvextract` — required for `--deband-only` mode (part of MKVToolNix)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
+- `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; stream selection is applied for these accounts too
 
 When Plex is configured, after processing each movie the tool pushes the resolved NZ content rating and selects the appropriate audio and subtitle streams: the audio track matching the TMDB original language (e.g. Japanese for anime) and the first non-forced English subtitle. Stream selection is cached in `movie_rating_cache.json` and only applied once per movie; use `--overwrite-streams` to force a re-apply.
+
+Stream selection is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same selection is applied for those accounts. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a movie it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` is available.
@@ -497,10 +500,13 @@ runs. You can ignore a single episode, a whole season, or the entire show.
 - TMDB API (requires `TMDB_API_KEY` environment variable)
 - `mkvpropedit` — applies metadata edits
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to push NZ ratings and set per-show audio language in Plex
+- `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; the audio language is set for these accounts too
 
 When Plex is configured, after processing each show the tool:
 1. Pushes the resolved NZ content rating to every episode, season, and the show itself.
 2. Sets the show's preferred audio language in Plex to the TMDB original language (e.g. `ja` for anime). This is applied once per show and cached in `rating_cache.json` so you can override it inside Plex without it being reset on the next run. Use `--overwrite-language` to force a re-apply.
+
+The audio language preference is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same language is applied for those accounts. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a show it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
 
 ### Configuration
 

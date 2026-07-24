@@ -660,25 +660,27 @@ func TestGuidStringMatchesTMDBID(t *testing.T) {
 
 // --- multiPlexClient tests ---
 
-func TestMultiPlexClient_SetAudioLanguage_CallsBoth(t *testing.T) {
+func TestMultiPlexClient_SetAudioLanguage_CallsAll(t *testing.T) {
 	primary := &fakePlexClient{}
 	alt := &fakePlexClient{}
-	mc := newMultiPlexClient(primary, alt)
+	alt2 := &fakePlexClient{}
+	mc := newMultiPlexClient(primary,
+		namedPlexClient{name: "alt", client: alt},
+		namedPlexClient{name: "alt2", client: alt2})
 	if err := mc.SetAudioLanguage("rk1", "ja"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(primary.setLangCalls) != 1 || primary.setLangCalls[0] != (setLangCall{"rk1", "ja"}) {
-		t.Errorf("primary calls: %+v", primary.setLangCalls)
-	}
-	if len(alt.setLangCalls) != 1 || alt.setLangCalls[0] != (setLangCall{"rk1", "ja"}) {
-		t.Errorf("alt calls: %+v", alt.setLangCalls)
+	for name, c := range map[string]*fakePlexClient{"primary": primary, "alt": alt, "alt2": alt2} {
+		if len(c.setLangCalls) != 1 || c.setLangCalls[0] != (setLangCall{"rk1", "ja"}) {
+			t.Errorf("%s calls: %+v", name, c.setLangCalls)
+		}
 	}
 }
 
 func TestMultiPlexClient_SetAudioLanguage_PrimaryErrorPropagates(t *testing.T) {
 	primary := &fakePlexClient{setLangErr: errors.New("primary failed")}
 	alt := &fakePlexClient{}
-	mc := newMultiPlexClient(primary, alt)
+	mc := newMultiPlexClient(primary, namedPlexClient{name: "alt", client: alt})
 	if err := mc.SetAudioLanguage("rk1", "ja"); err == nil {
 		t.Fatal("expected error from primary")
 	}
@@ -689,9 +691,11 @@ func TestMultiPlexClient_SetAudioLanguage_PrimaryErrorPropagates(t *testing.T) {
 
 func TestMultiPlexClient_SetAudioLanguage_AltErrorStoredNotPropagated(t *testing.T) {
 	primary := &fakePlexClient{}
-	altErr := errors.New("alt failed")
-	alt := &fakePlexClient{setLangErr: altErr}
-	mc := newMultiPlexClient(primary, alt)
+	alt := &fakePlexClient{setLangErr: errors.New("alt failed")}
+	alt2 := &fakePlexClient{setLangErr: errors.New("plex: set audio language got status 404: nope")}
+	mc := newMultiPlexClient(primary,
+		namedPlexClient{name: "alt", client: alt},
+		namedPlexClient{name: "alt2", client: alt2})
 	if err := mc.SetAudioLanguage("rk1", "ja"); err != nil {
 		t.Fatalf("alt error should not propagate: %v", err)
 	}
@@ -699,31 +703,52 @@ func TestMultiPlexClient_SetAudioLanguage_AltErrorStoredNotPropagated(t *testing
 	if !ok {
 		t.Fatal("multiPlexClient should implement altErrReporter")
 	}
-	if r.getAltErr() != altErr {
-		t.Errorf("getAltErr() = %v; want %v", r.getAltErr(), altErr)
+	want := "; alt: alt failed; alt2: not in library"
+	if got := r.altErrSuffix(); got != want {
+		t.Errorf("altErrSuffix() = %q; want %q", got, want)
 	}
 }
 
 func TestMultiPlexClient_SetAudioLanguage_AltErrClearedOnSuccess(t *testing.T) {
 	primary := &fakePlexClient{}
 	alt := &fakePlexClient{}
-	mc := newMultiPlexClient(primary, alt)
+	mc := newMultiPlexClient(primary, namedPlexClient{name: "alt", client: alt})
 	// First call with alt error.
 	alt.setLangErr = errors.New("alt failed")
 	mc.SetAudioLanguage("rk1", "ja") //nolint
-	// Second call with alt success — altErr should be cleared.
+	// Second call with alt success — the stored error should be cleared.
 	alt.setLangErr = nil
 	mc.SetAudioLanguage("rk1", "ja") //nolint
 	r := mc.(altErrReporter)
-	if r.getAltErr() != nil {
-		t.Errorf("getAltErr() should be nil after successful alt call, got %v", r.getAltErr())
+	if got := r.altErrSuffix(); got != "" {
+		t.Errorf("altErrSuffix() should be empty after successful alt call, got %q", got)
 	}
 }
 
-func TestNewMultiPlexClient_NilAltReturnsPrimary(t *testing.T) {
+func TestNewMultiPlexClient_NoAltsReturnsPrimary(t *testing.T) {
 	primary := &fakePlexClient{}
-	mc := newMultiPlexClient(primary, nil)
+	mc := newMultiPlexClient(primary)
 	if mc != PlexClient(primary) {
-		t.Error("expected primary to be returned when alt is nil")
+		t.Error("expected primary to be returned when there are no alts")
+	}
+}
+
+func TestAltPlexClients_ReadsBothTokens(t *testing.T) {
+	t.Setenv("PLEX_ALT_TOKEN", "")
+	t.Setenv("PLEX_ALT2_TOKEN", "")
+	if got := altPlexClients("http://plex"); got != nil {
+		t.Errorf("no tokens set: got %d clients; want 0", len(got))
+	}
+
+	t.Setenv("PLEX_ALT2_TOKEN", "tok2")
+	got := altPlexClients("http://plex")
+	if len(got) != 1 || got[0].name != "alt2" {
+		t.Fatalf("only PLEX_ALT2_TOKEN set: got %+v; want one client named alt2", got)
+	}
+
+	t.Setenv("PLEX_ALT_TOKEN", "tok1")
+	got = altPlexClients("http://plex")
+	if len(got) != 2 || got[0].name != "alt" || got[1].name != "alt2" {
+		t.Fatalf("both tokens set: got %+v; want alt then alt2", got)
 	}
 }

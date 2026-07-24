@@ -404,9 +404,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 						langSet = details.OriginalLanguage
 					}
 					if r, ok := rr.plex.(altMovieErrReporter); ok {
-						if altErr := r.getAltErr(); altErr != nil {
-							langAltSuffix = "; alt: " + plexMovieAltErrSummary(altErr)
-						}
+						langAltSuffix = r.altErrSuffix()
 					}
 				}
 			}

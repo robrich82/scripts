@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -590,21 +591,62 @@ func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langCode string) err
 }
 
 // altErrReporter is implemented by multiPlexClient. After a successful
-// SetAudioLanguage call, callers can retrieve any error from the alt token.
+// SetAudioLanguage call, callers can retrieve a summary of any alt-token errors.
 type altErrReporter interface {
-	getAltErr() error
+	altErrSuffix() string
 }
 
-// multiPlexClient dispatches SetAudioLanguage to both primary and alt, routing
-// all other calls to primary only. Used when PLEX_ALT_TOKEN is set so that the
-// audio language preference is applied for both Plex users.
+// namedPlexClient pairs an additional Plex account's client with a short label
+// ("alt", "alt2") used when reporting which account failed.
+type namedPlexClient struct {
+	name   string
+	client PlexClient
+}
+
+// altPlexTokenEnv lists the optional additional Plex account tokens, in the
+// order their labels are reported.
+var altPlexTokenEnv = []struct{ name, env string }{
+	{"alt", "PLEX_ALT_TOKEN"},
+	{"alt2", "PLEX_ALT2_TOKEN"},
+}
+
+// altPlexClients builds a client for each additional Plex account token present
+// in the environment. Returns nil when none are set.
+func altPlexClients(plexURL string) []namedPlexClient {
+	var alts []namedPlexClient
+	for _, a := range altPlexTokenEnv {
+		if token := os.Getenv(a.env); token != "" {
+			alts = append(alts, namedPlexClient{name: a.name, client: newHTTPPlexClient(plexURL, token)})
+		}
+	}
+	return alts
+}
+
+// multiPlexClient dispatches SetAudioLanguage to the primary and every alt
+// account, routing all other calls to primary only. Used when PLEX_ALT_TOKEN
+// and/or PLEX_ALT2_TOKEN are set so the audio language preference is applied
+// for every Plex user.
 type multiPlexClient struct {
 	primary PlexClient
-	alt     PlexClient
-	altErr  error
+	alts    []namedPlexClient
+	altErrs []error // parallel to alts; nil entry means that account succeeded
 }
 
-func (m *multiPlexClient) getAltErr() error { return m.altErr }
+// altErrSuffix formats the errors from the most recent SetAudioLanguage call
+// for display, e.g. "; alt: not in library". Returns "" when every alt account
+// succeeded.
+func (m *multiPlexClient) altErrSuffix() string {
+	var parts []string
+	for i, err := range m.altErrs {
+		if err != nil {
+			parts = append(parts, m.alts[i].name+": "+plexAltErrSummary(err))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "; " + strings.Join(parts, "; ")
+}
 
 // plexAltErrSummary converts a Plex alt-token error to a short human-readable
 // string, collapsing noisy HTTP 404 responses to "not in library".
@@ -615,13 +657,13 @@ func plexAltErrSummary(err error) string {
 	return err.Error()
 }
 
-// newMultiPlexClient returns a PlexClient that calls SetAudioLanguage on both
-// primary and alt. If alt is nil, primary is returned directly.
-func newMultiPlexClient(primary, alt PlexClient) PlexClient {
-	if alt == nil {
+// newMultiPlexClient returns a PlexClient that calls SetAudioLanguage on the
+// primary and every alt. If there are no alts, primary is returned directly.
+func newMultiPlexClient(primary PlexClient, alts ...namedPlexClient) PlexClient {
+	if len(alts) == 0 {
 		return primary
 	}
-	return &multiPlexClient{primary: primary, alt: alt}
+	return &multiPlexClient{primary: primary, alts: alts}
 }
 
 func (m *multiPlexClient) FindShowByTMDBID(tmdbID string) (string, error) {
@@ -646,11 +688,13 @@ func (m *multiPlexClient) SetContentRating(ratingKey string, itemType PlexItemTy
 	return m.primary.SetContentRating(ratingKey, itemType, rating)
 }
 func (m *multiPlexClient) SetAudioLanguage(ratingKey, langCode string) error {
-	m.altErr = nil
+	m.altErrs = make([]error, len(m.alts))
 	if err := m.primary.SetAudioLanguage(ratingKey, langCode); err != nil {
 		return err
 	}
-	m.altErr = m.alt.SetAudioLanguage(ratingKey, langCode)
+	for i, a := range m.alts {
+		m.altErrs[i] = a.client.SetAudioLanguage(ratingKey, langCode)
+	}
 	return nil
 }
 func (m *multiPlexClient) RefreshLibraries() error { return m.primary.RefreshLibraries() }
