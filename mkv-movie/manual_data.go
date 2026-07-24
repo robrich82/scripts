@@ -7,7 +7,27 @@ import (
 
 // MovieManualEntry holds per-movie manual configuration overrides.
 type MovieManualEntry struct {
-	Deband *bool `json:"deband,omitempty"`
+	Deband       *bool  `json:"deband,omitempty"`
+	Language     string `json:"language,omitempty"`      // ISO 639-1 code overriding TMDB original_language for Plex stream selection
+	AltLanguage  string `json:"alt-language,omitempty"`  // overrides Language for the PLEX_ALT_TOKEN account
+	Alt2Language string `json:"alt2-language,omitempty"` // overrides Language for the PLEX_ALT2_TOKEN account
+}
+
+// audioLangs returns the Plex audio language for each account. tmdbLang
+// (TMDB's original_language) is the fallback when no "language" is configured,
+// and each alt account uses that result unless it has its own override.
+func (e MovieManualEntry) audioLangs(tmdbLang string) AudioLangs {
+	def := e.Language
+	if def == "" {
+		def = tmdbLang
+	}
+	return AudioLangs{
+		Default: def,
+		Alts: map[string]string{
+			altAccount:  e.AltLanguage,
+			alt2Account: e.Alt2Language,
+		},
+	}
 }
 
 // LoadMovieManualData reads per-movie configuration from a JSON file keyed by

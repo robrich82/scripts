@@ -40,9 +40,28 @@ type ManualEntry struct {
 	TitleOverrides map[string]string         `json:"title_overrides"`           // keyed by "S01E03" -> correct FS-safe title
 	Dates          map[string]string         `json:"dates,omitempty"`           // keyed by "S01E03" -> YYYY-MM-DD; overrides TMDB air date
 	Language       string                    `json:"language,omitempty"`        // ISO 639-1 code overriding TMDB original_language for Plex audio preference
+	AltLanguage    string                    `json:"alt-language,omitempty"`    // overrides Language for the PLEX_ALT_TOKEN account
+	Alt2Language   string                    `json:"alt2-language,omitempty"`   // overrides Language for the PLEX_ALT2_TOKEN account
 	Deband         *bool                     `json:"deband,omitempty"`          // show-level deband flag
 	DebandSeasons  map[string]bool           `json:"deband_seasons,omitempty"`  // e.g. "S01": true
 	DebandEpisodes map[string]bool           `json:"deband_episodes,omitempty"` // e.g. "S01E05": true
+}
+
+// audioLangs returns the Plex audio language for each account. tmdbLang
+// (TMDB's original_language) is the fallback when no "language" is configured,
+// and each alt account uses that result unless it has its own override.
+func (e ManualEntry) audioLangs(tmdbLang string) AudioLangs {
+	def := e.Language
+	if def == "" {
+		def = tmdbLang
+	}
+	return AudioLangs{
+		Default: def,
+		Alts: map[string]string{
+			altAccount:  e.AltLanguage,
+			alt2Account: e.Alt2Language,
+		},
+	}
 }
 
 // hasDebandConfig reports whether any deband configuration exists for the

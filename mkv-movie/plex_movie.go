@@ -51,10 +51,12 @@ type PlexMovieClient interface {
 	// SetContentRating updates the contentRating field on a Plex movie item and
 	// locks it to prevent automatic overwriting.
 	SetContentRating(ratingKey string, rating NZRating) error
-	// SetMovieStreams selects the audio stream matching audioLangTag (ISO 639-1,
-	// e.g. "ja") and the first non-forced English subtitle stream on the movie's
-	// first media Part. Returns whether audio and/or subtitle were changed.
-	SetMovieStreams(ratingKey, audioLangTag string) (audioSet, subtitleSet bool, err error)
+	// SetMovieStreams selects the audio stream matching the account's language
+	// (ISO 639-1, e.g. "ja") and the first non-forced English subtitle stream on
+	// the movie's first media Part. A single-account client uses langs.Default;
+	// multiPlexMovieClient gives each account its own language. Returns whether
+	// audio and/or subtitle were changed.
+	SetMovieStreams(ratingKey string, langs AudioLangs) (audioSet, subtitleSet bool, err error)
 	// RefreshLibraries triggers a metadata scan of all Plex movie library
 	// sections so that newly processed files are picked up without manual
 	// intervention.
@@ -358,10 +360,12 @@ func (c *httpPlexMovieClient) RefreshLibraries() error {
 }
 
 // SetMovieStreams implements PlexMovieClient. It fetches the movie's first
-// media Part, selects the audio stream matching audioLangTag (e.g. "ja"),
-// and selects the first non-forced English subtitle stream. Only calls the
-// Plex API when the desired stream is not already selected.
-func (c *httpPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (audioSet, subtitleSet bool, err error) {
+// media Part, selects the audio stream matching the language (e.g. "ja"), and
+// selects the first non-forced English subtitle stream. Only calls the Plex API
+// when the desired stream is not already selected. This client speaks for a
+// single account, so it uses langs.Default and ignores per-alt overrides.
+func (c *httpPlexMovieClient) SetMovieStreams(ratingKey string, langs AudioLangs) (audioSet, subtitleSet bool, err error) {
+	audioLangTag := langs.Default
 	resp, err := c.plexGet("/library/metadata/" + ratingKey)
 	if err != nil {
 		return false, false, fmt.Errorf("plex: get streams %s: %w", ratingKey, err)
@@ -493,8 +497,47 @@ type altMovieErrReporter interface {
 	altErrSuffix() string
 }
 
-// namedPlexMovieClient pairs an additional Plex account's client with a short
-// label ("alt", "alt2") used when reporting which account failed.
+// Labels for the additional Plex accounts. Each is both the manual_data.json
+// key prefix ("alt-language") and the name used when reporting errors.
+const (
+	altAccount  = "alt"
+	alt2Account = "alt2"
+)
+
+// AudioLangs holds the preferred audio language for each Plex account. Default
+// applies to the primary account and to any alt account with no override of its
+// own; Alts is keyed by account label (altAccount, alt2Account).
+type AudioLangs struct {
+	Default string
+	Alts    map[string]string
+}
+
+// forAccount returns the language to apply for the named alt account, falling
+// back to Default when that account has no override.
+func (a AudioLangs) forAccount(name string) string {
+	if lang := a.Alts[name]; lang != "" {
+		return lang
+	}
+	return a.Default
+}
+
+// String renders the per-account languages as one stable value, e.g. "ja" or
+// "ja|alt=en". It doubles as the "already applied" cache value: any change to
+// any account's language changes the string and so triggers a re-apply. An alt
+// override equal to Default is omitted, so with no differing overrides the
+// value is just the language code and caches written before per-account
+// languages existed still match.
+func (a AudioLangs) String() string {
+	s := a.Default
+	for _, name := range []string{altAccount, alt2Account} {
+		if lang := a.Alts[name]; lang != "" && lang != a.Default {
+			s += "|" + name + "=" + lang
+		}
+	}
+	return s
+}
+
+// namedPlexMovieClient pairs an additional Plex account's client with its label.
 type namedPlexMovieClient struct {
 	name   string
 	client PlexMovieClient
@@ -503,8 +546,8 @@ type namedPlexMovieClient struct {
 // altPlexTokenEnv lists the optional additional Plex account tokens, in the
 // order their labels are reported.
 var altPlexTokenEnv = []struct{ name, env string }{
-	{"alt", "PLEX_ALT_TOKEN"},
-	{"alt2", "PLEX_ALT2_TOKEN"},
+	{altAccount, "PLEX_ALT_TOKEN"},
+	{alt2Account, "PLEX_ALT2_TOKEN"},
 }
 
 // altPlexMovieClients builds a client for each additional Plex account token
@@ -576,14 +619,14 @@ func (m *multiPlexMovieClient) GetContentRating(ratingKey string) (NZRating, err
 func (m *multiPlexMovieClient) SetContentRating(ratingKey string, rating NZRating) error {
 	return m.primary.SetContentRating(ratingKey, rating)
 }
-func (m *multiPlexMovieClient) SetMovieStreams(ratingKey, audioLangTag string) (audioSet, subtitleSet bool, err error) {
+func (m *multiPlexMovieClient) SetMovieStreams(ratingKey string, langs AudioLangs) (audioSet, subtitleSet bool, err error) {
 	m.altErrs = make([]error, len(m.alts))
-	audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, audioLangTag)
+	audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, langs)
 	if err != nil {
 		return
 	}
 	for i, a := range m.alts {
-		_, _, m.altErrs[i] = a.client.SetMovieStreams(ratingKey, audioLangTag)
+		_, _, m.altErrs[i] = a.client.SetMovieStreams(ratingKey, AudioLangs{Default: langs.forAccount(a.name)})
 	}
 	return
 }

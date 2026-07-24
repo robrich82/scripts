@@ -69,9 +69,11 @@ type PlexClient interface {
 	// locks it to prevent automatic overwriting.
 	SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error
 	// SetAudioLanguage sets the preferred audio language on the show identified
-	// by ratingKey. langCode is a BCP-47/ISO 639-1 tag (e.g. "ja", "en", "ko").
-	// Applied at the show level only; no locking so the user can override in Plex.
-	SetAudioLanguage(ratingKey string, langCode string) error
+	// by ratingKey. Languages are BCP-47/ISO 639-1 tags (e.g. "ja", "en", "ko").
+	// A single-account client applies langs.Default; multiPlexClient gives each
+	// account its own language. Applied at the show level only; no locking so the
+	// user can override in Plex.
+	SetAudioLanguage(ratingKey string, langs AudioLangs) error
 	// RefreshLibraries triggers a metadata scan of all Plex TV show library
 	// sections so that newly processed files are picked up without manual
 	// intervention.
@@ -563,10 +565,11 @@ func (c *httpPlexClient) SetEpisodeMetadata(ratingKey, title, originallyAvailabl
 }
 
 // SetAudioLanguage implements PlexClient. It uses the per-item prefs endpoint
-// so the preference is stored per-user for this show only.
-func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langCode string) error {
+// so the preference is stored per-user for this show only. This client speaks
+// for a single account, so it applies langs.Default and ignores per-alt overrides.
+func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) error {
 	path := fmt.Sprintf("/library/metadata/%s/prefs?audioLanguage=%s&X-Plex-Token=%s",
-		ratingKey, url.QueryEscape(langCode), url.QueryEscape(c.token))
+		ratingKey, url.QueryEscape(langs.Default), url.QueryEscape(c.token))
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {
@@ -596,8 +599,47 @@ type altErrReporter interface {
 	altErrSuffix() string
 }
 
-// namedPlexClient pairs an additional Plex account's client with a short label
-// ("alt", "alt2") used when reporting which account failed.
+// Labels for the additional Plex accounts. Each is both the manual_data.json
+// key prefix ("alt-language") and the name used when reporting errors.
+const (
+	altAccount  = "alt"
+	alt2Account = "alt2"
+)
+
+// AudioLangs holds the preferred audio language for each Plex account. Default
+// applies to the primary account and to any alt account with no override of its
+// own; Alts is keyed by account label (altAccount, alt2Account).
+type AudioLangs struct {
+	Default string
+	Alts    map[string]string
+}
+
+// forAccount returns the language to apply for the named alt account, falling
+// back to Default when that account has no override.
+func (a AudioLangs) forAccount(name string) string {
+	if lang := a.Alts[name]; lang != "" {
+		return lang
+	}
+	return a.Default
+}
+
+// String renders the per-account languages as one stable value, e.g. "ja" or
+// "ja|alt=en". It doubles as the "already applied" cache value: any change to
+// any account's language changes the string and so triggers a re-apply. An alt
+// override equal to Default is omitted, so with no differing overrides the
+// value is just the language code and caches written before per-account
+// languages existed still match.
+func (a AudioLangs) String() string {
+	s := a.Default
+	for _, name := range []string{altAccount, alt2Account} {
+		if lang := a.Alts[name]; lang != "" && lang != a.Default {
+			s += "|" + name + "=" + lang
+		}
+	}
+	return s
+}
+
+// namedPlexClient pairs an additional Plex account's client with its label.
 type namedPlexClient struct {
 	name   string
 	client PlexClient
@@ -606,8 +648,8 @@ type namedPlexClient struct {
 // altPlexTokenEnv lists the optional additional Plex account tokens, in the
 // order their labels are reported.
 var altPlexTokenEnv = []struct{ name, env string }{
-	{"alt", "PLEX_ALT_TOKEN"},
-	{"alt2", "PLEX_ALT2_TOKEN"},
+	{altAccount, "PLEX_ALT_TOKEN"},
+	{alt2Account, "PLEX_ALT2_TOKEN"},
 }
 
 // altPlexClients builds a client for each additional Plex account token present
@@ -687,13 +729,13 @@ func (m *multiPlexClient) GetContentRating(ratingKey string) (NZRating, error) {
 func (m *multiPlexClient) SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error {
 	return m.primary.SetContentRating(ratingKey, itemType, rating)
 }
-func (m *multiPlexClient) SetAudioLanguage(ratingKey, langCode string) error {
+func (m *multiPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) error {
 	m.altErrs = make([]error, len(m.alts))
-	if err := m.primary.SetAudioLanguage(ratingKey, langCode); err != nil {
+	if err := m.primary.SetAudioLanguage(ratingKey, langs); err != nil {
 		return err
 	}
 	for i, a := range m.alts {
-		m.altErrs[i] = a.client.SetAudioLanguage(ratingKey, langCode)
+		m.altErrs[i] = a.client.SetAudioLanguage(ratingKey, AudioLangs{Default: langs.forAccount(a.name)})
 	}
 	return nil
 }

@@ -175,7 +175,7 @@ func TestHTTPPlexMovieClient_SetMovieStreams_SelectsAudioAndSubtitle(t *testing.
 	defer srv.Close()
 
 	c := newHTTPPlexMovieClient(srv.URL, "tok")
-	audioSet, subtitleSet, err := c.SetMovieStreams("42", "ja")
+	audioSet, subtitleSet, err := c.SetMovieStreams("42", AudioLangs{Default: "ja"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestHTTPPlexMovieClient_SetMovieStreams_SkipsAlreadySelected(t *testing.T) 
 	defer srv.Close()
 
 	c := newHTTPPlexMovieClient(srv.URL, "tok")
-	audioSet, subtitleSet, err := c.SetMovieStreams("42", "ja")
+	audioSet, subtitleSet, err := c.SetMovieStreams("42", AudioLangs{Default: "ja"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -296,10 +296,14 @@ func (f *fakeMultiPlexMovieClient) GetContentRating(_ string) (NZRating, error) 
 }
 func (f *fakeMultiPlexMovieClient) SetContentRating(_ string, _ NZRating) error { return nil }
 func (f *fakeMultiPlexMovieClient) RefreshLibraries() error                     { return nil }
-func (f *fakeMultiPlexMovieClient) SetMovieStreams(rk, lang string) (bool, bool, error) {
+
+// SetMovieStreams records the language this account would actually apply, i.e.
+// langs.Default — multiPlexMovieClient resolves each alt's override before
+// calling its client, so Default is that account's own language.
+func (f *fakeMultiPlexMovieClient) SetMovieStreams(rk string, langs AudioLangs) (bool, bool, error) {
 	f.setStreamsCalls++
 	f.setStreamsRatingKey = rk
-	f.setStreamsLangTag = lang
+	f.setStreamsLangTag = langs.Default
 	return true, true, f.setStreamsErr
 }
 
@@ -308,9 +312,9 @@ func TestMultiPlexMovieClient_SetMovieStreams_CallsAll(t *testing.T) {
 	alt := &fakeMultiPlexMovieClient{}
 	alt2 := &fakeMultiPlexMovieClient{}
 	mc := newMultiPlexMovieClient(primary,
-		namedPlexMovieClient{name: "alt", client: alt},
-		namedPlexMovieClient{name: "alt2", client: alt2})
-	audioSet, subtitleSet, err := mc.SetMovieStreams("rk1", "ja")
+		namedPlexMovieClient{name: altAccount, client: alt},
+		namedPlexMovieClient{name: alt2Account, client: alt2})
+	audioSet, subtitleSet, err := mc.SetMovieStreams("rk1", AudioLangs{Default: "ja"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -327,8 +331,8 @@ func TestMultiPlexMovieClient_SetMovieStreams_CallsAll(t *testing.T) {
 func TestMultiPlexMovieClient_SetMovieStreams_PrimaryErrorPropagates(t *testing.T) {
 	primary := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("primary failed")}
 	alt := &fakeMultiPlexMovieClient{}
-	mc := newMultiPlexMovieClient(primary, namedPlexMovieClient{name: "alt", client: alt})
-	if _, _, err := mc.SetMovieStreams("rk1", "ja"); err == nil {
+	mc := newMultiPlexMovieClient(primary, namedPlexMovieClient{name: altAccount, client: alt})
+	if _, _, err := mc.SetMovieStreams("rk1", AudioLangs{Default: "ja"}); err == nil {
 		t.Fatal("expected error from primary")
 	}
 	if alt.setStreamsCalls != 0 {
@@ -341,9 +345,9 @@ func TestMultiPlexMovieClient_SetMovieStreams_AltErrorStoredNotPropagated(t *tes
 	alt := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("alt failed")}
 	alt2 := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("plex: set audio stream: status 404: nope")}
 	mc := newMultiPlexMovieClient(primary,
-		namedPlexMovieClient{name: "alt", client: alt},
-		namedPlexMovieClient{name: "alt2", client: alt2})
-	if _, _, err := mc.SetMovieStreams("rk1", "ja"); err != nil {
+		namedPlexMovieClient{name: altAccount, client: alt},
+		namedPlexMovieClient{name: alt2Account, client: alt2})
+	if _, _, err := mc.SetMovieStreams("rk1", AudioLangs{Default: "ja"}); err != nil {
 		t.Fatalf("alt error should not propagate: %v", err)
 	}
 	r, ok := mc.(altMovieErrReporter)
@@ -359,11 +363,11 @@ func TestMultiPlexMovieClient_SetMovieStreams_AltErrorStoredNotPropagated(t *tes
 func TestMultiPlexMovieClient_SetMovieStreams_AltErrClearedOnSuccess(t *testing.T) {
 	primary := &fakeMultiPlexMovieClient{}
 	alt := &fakeMultiPlexMovieClient{}
-	mc := newMultiPlexMovieClient(primary, namedPlexMovieClient{name: "alt", client: alt})
+	mc := newMultiPlexMovieClient(primary, namedPlexMovieClient{name: altAccount, client: alt})
 	alt.setStreamsErr = errors.New("alt failed")
-	mc.SetMovieStreams("rk1", "ja") //nolint
+	mc.SetMovieStreams("rk1", AudioLangs{Default: "ja"}) //nolint
 	alt.setStreamsErr = nil
-	mc.SetMovieStreams("rk1", "ja") //nolint
+	mc.SetMovieStreams("rk1", AudioLangs{Default: "ja"}) //nolint
 	r := mc.(altMovieErrReporter)
 	if got := r.altErrSuffix(); got != "" {
 		t.Errorf("altErrSuffix() should be empty after successful alt call, got %q", got)
@@ -375,6 +379,86 @@ func TestNewMultiPlexMovieClient_NoAltsReturnsPrimary(t *testing.T) {
 	mc := newMultiPlexMovieClient(primary)
 	if mc != PlexMovieClient(primary) {
 		t.Error("expected primary to be returned when there are no alts")
+	}
+}
+
+func TestMultiPlexMovieClient_SetMovieStreams_PerAccountOverrides(t *testing.T) {
+	primary := &fakeMultiPlexMovieClient{}
+	alt := &fakeMultiPlexMovieClient{}
+	alt2 := &fakeMultiPlexMovieClient{}
+	mc := newMultiPlexMovieClient(primary,
+		namedPlexMovieClient{name: altAccount, client: alt},
+		namedPlexMovieClient{name: alt2Account, client: alt2})
+	// alt overrides the language; alt2 has none and falls back to the default.
+	langs := AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}}
+	if _, _, err := mc.SetMovieStreams("rk1", langs); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]string{"primary": "ja", "alt": "en", "alt2": "ja"}
+	for name, c := range map[string]*fakeMultiPlexMovieClient{"primary": primary, "alt": alt, "alt2": alt2} {
+		if c.setStreamsLangTag != want[name] {
+			t.Errorf("%s: lang = %q; want %q", name, c.setStreamsLangTag, want[name])
+		}
+	}
+}
+
+func TestAudioLangs_String(t *testing.T) {
+	cases := []struct {
+		name  string
+		langs AudioLangs
+		want  string
+	}{
+		{"no overrides", AudioLangs{Default: "ja"}, "ja"},
+		{
+			"override equal to default is omitted",
+			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "ja"}},
+			"ja",
+		},
+		{
+			"one override",
+			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}},
+			"ja|alt=en",
+		},
+		{
+			"both overrides, always in account order",
+			AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "fr", altAccount: "en"}},
+			"ja|alt=en|alt2=fr",
+		},
+		{
+			"only alt2 overrides",
+			AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "fr"}},
+			"ja|alt2=fr",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.langs.String(); got != tc.want {
+				t.Errorf("String() = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAudioLangs_ForAccount_FallsBackToDefault(t *testing.T) {
+	langs := AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}}
+	if got := langs.forAccount(altAccount); got != "en" {
+		t.Errorf("forAccount(alt) = %q; want en", got)
+	}
+	if got := langs.forAccount(alt2Account); got != "ja" {
+		t.Errorf("forAccount(alt2) = %q; want ja (default)", got)
+	}
+}
+
+func TestMovieManualEntry_AudioLangs(t *testing.T) {
+	// No "language": TMDB's original_language is the default.
+	got := MovieManualEntry{AltLanguage: "en"}.audioLangs("ja")
+	if got.Default != "ja" || got.forAccount(altAccount) != "en" || got.forAccount(alt2Account) != "ja" {
+		t.Errorf("tmdb fallback: %+v", got)
+	}
+	// "language" overrides TMDB, and alts fall back to it rather than to TMDB.
+	got = MovieManualEntry{Language: "ko", Alt2Language: "fr"}.audioLangs("ja")
+	if got.Default != "ko" || got.forAccount(altAccount) != "ko" || got.forAccount(alt2Account) != "fr" {
+		t.Errorf("language override: %+v", got)
 	}
 }
 

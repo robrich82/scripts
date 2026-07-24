@@ -331,7 +331,7 @@ func (f *fakePlexMovieClient) GetContentRating(_ string) (NZRating, error) {
 }
 
 func (f *fakePlexMovieClient) SetContentRating(_ string, _ NZRating) error { return nil }
-func (f *fakePlexMovieClient) SetMovieStreams(_ string, _ string) (bool, bool, error) {
+func (f *fakePlexMovieClient) SetMovieStreams(_ string, _ AudioLangs) (bool, bool, error) {
 	return false, false, nil
 }
 func (f *fakePlexMovieClient) RefreshLibraries() error { return nil }

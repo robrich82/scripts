@@ -1583,7 +1583,7 @@ func TestRatingsOnly_DoesNotSetPlexAudioLanguage(t *testing.T) {
 
 	p := NewProcessor(Config{RatingsOnly: true}, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
 	// applyPlexRatings is called internally; simulate by calling it directly.
-	p.applyPlexRatings("111", nil, "Show A", "", false, "")
+	p.applyPlexRatings("111", nil, "Show A", "", false, ManualEntry{})
 
 	if len(plexClient.setLangCalls) != 0 {
 		t.Errorf("--ratings-only must not set Plex audio language, got %d calls", len(plexClient.setLangCalls))
@@ -1637,7 +1637,7 @@ func TestApplyPlexRatings_SetsDateFromDatesOverride(t *testing.T) {
 		sessionPlexKey: map[string]string{"111": "show-1"},
 		cfg:            Config{},
 	}
-	p.applyPlexRatings("111", nil, "My Show", "My Show", false, "")
+	p.applyPlexRatings("111", nil, "My Show", "My Show", false, ManualEntry{})
 
 	if len(plexClient.setEpMetaCalls) != 1 {
 		t.Fatalf("expected 1 SetEpisodeMetadata call, got %d", len(plexClient.setEpMetaCalls))
@@ -1678,7 +1678,7 @@ func TestApplyPlexRatings_UsesOverrideIDForRemappedSeason(t *testing.T) {
 		cfg:            Config{},
 	}
 	// Season 2 is remapped to TMDB show 999.
-	p.applyPlexRatings("111", map[int]string{1: "111", 2: "999"}, "My Show", "My Show", false, "")
+	p.applyPlexRatings("111", map[int]string{1: "111", 2: "999"}, "My Show", "My Show", false, ManualEntry{})
 
 	got := map[string]NZRating{}
 	for _, c := range plexClient.setRatingCalls {
@@ -1720,7 +1720,7 @@ func TestApplyPlexRatings_SetsTitleFromTitleOverrides_WhenDateAlsoSet(t *testing
 		sessionPlexKey: map[string]string{"111": "show-1"},
 		cfg:            Config{},
 	}
-	p.applyPlexRatings("111", nil, "My Show", "My Show", false, "")
+	p.applyPlexRatings("111", nil, "My Show", "My Show", false, ManualEntry{})
 
 	if len(plexClient.setEpMetaCalls) != 1 {
 		t.Fatalf("expected 1 SetEpisodeMetadata call, got %d", len(plexClient.setEpMetaCalls))
@@ -1756,7 +1756,7 @@ func TestApplyPlexRatings_TitleOverrideSkipped_WhenNoDate(t *testing.T) {
 		sessionPlexKey: map[string]string{"111": "show-1"},
 		cfg:            Config{},
 	}
-	p.applyPlexRatings("111", nil, "My Show", "My Show", false, "")
+	p.applyPlexRatings("111", nil, "My Show", "My Show", false, ManualEntry{})
 
 	if len(plexClient.setEpMetaCalls) != 0 {
 		t.Errorf("expected no SetEpisodeMetadata calls when dates is absent, got %d", len(plexClient.setEpMetaCalls))
@@ -1790,7 +1790,7 @@ func TestApplyPlexRatings_InverseMappingApplied(t *testing.T) {
 		sessionPlexKey: map[string]string{"111": "show-1"},
 		cfg:            Config{},
 	}
-	p.applyPlexRatings("111", nil, "My Show", "My Show", false, "")
+	p.applyPlexRatings("111", nil, "My Show", "My Show", false, ManualEntry{})
 
 	if len(plexClient.setEpMetaCalls) != 1 {
 		t.Fatalf("expected 1 SetEpisodeMetadata call, got %d: %+v", len(plexClient.setEpMetaCalls), plexClient.setEpMetaCalls)
@@ -1819,7 +1819,7 @@ func TestApplyPlexRatings_NoManualData_NoMetadataCalls(t *testing.T) {
 		sessionPlexKey: map[string]string{"111": "show-1"},
 		cfg:            Config{},
 	}
-	p.applyPlexRatings("111", nil, "My Show", "My Show", false, "")
+	p.applyPlexRatings("111", nil, "My Show", "My Show", false, ManualEntry{})
 
 	if len(plexClient.setEpMetaCalls) != 0 {
 		t.Errorf("expected no SetEpisodeMetadata calls with no manual data, got %d", len(plexClient.setEpMetaCalls))

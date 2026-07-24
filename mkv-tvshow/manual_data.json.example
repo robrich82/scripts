@@ -34,6 +34,11 @@
   "Show With Banding Issues": {
     "deband": true
   },
+  "Show Watched Dubbed By Some Users": {
+    "language": "ja",
+    "alt-language": "en",
+    "alt2-language": "en"
+  },
   "Show With Partial Banding": {
     "deband_seasons": {
       "S01": true

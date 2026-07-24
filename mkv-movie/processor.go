@@ -317,12 +317,19 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		return force || !ok || last != rating
 	}
 
-	plexStreamsNeedSet := func(originalLang string) bool {
-		if rr == nil || rr.plex == nil || originalLang == "" {
+	// Plex audio/subtitle preferences per account: manual_data's "language" if
+	// set, otherwise TMDB's original_language, with "alt-language" and
+	// "alt2-language" overriding it for the corresponding alt accounts.
+	stem := strings.TrimSuffix(basename, filepath.Ext(basename))
+	entry := manualData[stem]
+	langs := entry.audioLangs(details.OriginalLanguage)
+
+	plexStreamsNeedSet := func() bool {
+		if rr == nil || rr.plex == nil || langs.Default == "" {
 			return false
 		}
 		applied, ok := cache.GetStreamsApplied(tmdbID)
-		return force || !ok || applied != originalLang || rr.overwriteStreams
+		return force || !ok || applied != langs.String() || rr.overwriteStreams
 	}
 
 	// 5. Resolve NZ rating early so we can include it in the needs-update check.
@@ -331,15 +338,14 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		rating = rr.ResolveMovieRating(tmdbID, details.Title)
 	}
 
-	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) && !plexStreamsNeedSet(details.OriginalLanguage) {
+	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) && !plexStreamsNeedSet() {
 		fmt.Printf("[OK]      %s (no changes needed)\n", basename)
 		return ResultOK
 	}
 
 	// 6. Build tags XML and download poster (only when applying metadata).
-	stem := strings.TrimSuffix(basename, filepath.Ext(basename))
 	var deband bool
-	if entry, ok := manualData[stem]; ok && entry.Deband != nil {
+	if entry.Deband != nil {
 		deband = *entry.Deband
 	}
 	var tagsPath, posterPath string
@@ -371,7 +377,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	// Both are independent of needsApply so corrected cache entries are always propagated.
 	var langSet string
 	var langAltSuffix string
-	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet(details.OriginalLanguage) {
+	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet() {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
 		if plexErr != nil {
 			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
@@ -383,8 +389,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			if rating != RatingNone {
 				cache.SetPlexRating(tmdbID, rating)
 			}
-			if details.OriginalLanguage != "" {
-				cache.SetStreamsApplied(tmdbID, details.OriginalLanguage)
+			if langs.Default != "" {
+				cache.SetStreamsApplied(tmdbID, langs.String())
 			}
 		} else if plexErr == nil {
 			if plexRatingNeedsUpdate(rating) {
@@ -394,14 +400,14 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					cache.SetPlexRating(tmdbID, rating)
 				}
 			}
-			if plexStreamsNeedSet(details.OriginalLanguage) {
-				audioSet, subtitleSet, err := rr.plex.SetMovieStreams(rk, details.OriginalLanguage)
+			if plexStreamsNeedSet() {
+				audioSet, subtitleSet, err := rr.plex.SetMovieStreams(rk, langs)
 				if err != nil {
-					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, details.OriginalLanguage, err)
+					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, langs.String(), err)
 				} else {
-					cache.SetStreamsApplied(tmdbID, details.OriginalLanguage)
+					cache.SetStreamsApplied(tmdbID, langs.String())
 					if audioSet || subtitleSet {
-						langSet = details.OriginalLanguage
+						langSet = langs.String()
 					}
 					if r, ok := rr.plex.(altMovieErrReporter); ok {
 						langAltSuffix = r.altErrSuffix()

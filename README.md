@@ -341,7 +341,7 @@ Updated: 8  OK: 42  Skipped: 3  Errors: 0
 
 When Plex is configured, after processing each movie the tool pushes the resolved NZ content rating and selects the appropriate audio and subtitle streams: the audio track matching the TMDB original language (e.g. Japanese for anime) and the first non-forced English subtitle. Stream selection is cached in `movie_rating_cache.json` and only applied once per movie; use `--overwrite-streams` to force a re-apply.
 
-Stream selection is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same selection is applied for those accounts. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a movie it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
+Stream selection is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same selection is applied for those accounts — or a different audio language per account via `alt-language` / `alt2-language` in `manual_data.json`. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a movie it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` is available.
@@ -361,13 +361,24 @@ Keys are filename stems (filename without `.mkv`):
 ```json
 {
   "Coco (2017)": { "deband": true },
-  "Spirited Away (2001)": { "deband": true }
+  "Spirited Away (2001)": { "deband": true, "language": "ja", "alt-language": "en" }
 }
 ```
 
 **`deband`** — when `true`, embeds a `DEBAND=true` tag in the MKV alongside the
 other metadata. Use `--deband-only` to update only this tag without touching any
 other metadata or timestamps.
+
+**`language`** — ISO 639-1 code (e.g. `"ja"`, `"ko"`) that overrides the TMDB
+`original_language` when selecting the Plex audio stream. Use this when TMDB
+reports the wrong original language for a movie.
+
+**`alt-language`** / **`alt2-language`** — ISO 639-1 code applied instead of
+`language` for the `PLEX_ALT_TOKEN` and `PLEX_ALT2_TOKEN` accounts, for when
+those users prefer a different audio language (e.g. `"language": "ja"` with
+`"alt-language": "en"` for a dubbed viewer). An account with no override gets
+`language`. Changing any of the three re-applies stream selection on the next
+run.
 
 ---
 
@@ -506,7 +517,7 @@ When Plex is configured, after processing each show the tool:
 1. Pushes the resolved NZ content rating to every episode, season, and the show itself.
 2. Sets the show's preferred audio language in Plex to the TMDB original language (e.g. `ja` for anime). This is applied once per show and cached in `rating_cache.json` so you can override it inside Plex without it being reset on the next run. Use `--overwrite-language` to force a re-apply.
 
-The audio language preference is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same language is applied for those accounts. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a show it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
+The audio language preference is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same language is applied for those accounts — or a different one per account via `alt-language` / `alt2-language` in `manual_data.json`. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a show it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
 
 ### Configuration
 
@@ -583,6 +594,12 @@ your files:
 - `language` — ISO 639-1 code (e.g. `"ko"`, `"zh"`) that overrides the TMDB
   `original_language` when setting the show's preferred audio language in Plex.
   Use this when TMDB reports the wrong original language for a show.
+- `alt-language` / `alt2-language` — ISO 639-1 code applied instead of
+  `language` for the `PLEX_ALT_TOKEN` and `PLEX_ALT2_TOKEN` accounts, for when
+  those users prefer a different audio language (e.g. `"language": "ja"` with
+  `"alt-language": "en"` for a dubbed viewer). An account with no override gets
+  `language`. Changing any of the three re-applies the preference on the next
+  run.
 - `deband` — show-level boolean. When `true`, writes a `DEBAND=true` MKV tag
   to every episode in the show so that mpv (or another player) can apply
   debanding automatically. Omitting or setting to `false` removes the tag.

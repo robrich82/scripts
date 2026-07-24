@@ -408,8 +408,7 @@ func (p *Processor) Run() Stats {
 				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
 			}
 		}
-		langOverride := p.manualData[showFolder].Language
-		p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, langOverride)
+		p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, p.manualData[showFolder])
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -997,9 +996,9 @@ func (p *Processor) RunDebandOnly() Stats {
 // rating across their child items. Does nothing when Plex is not configured.
 // showName is used as a title-match fallback when TMDB GUID lookup fails.
 // showFolder is the show's directory name, used to look up manual_data overrides.
-// langOverride, if non-empty, is used instead of TMDB original_language when
-// setting the show's preferred audio language.
-func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]string, showName, showFolder string, touched bool, langOverride string) {
+// entry is the show's manual_data entry, supplying any per-account audio
+// language overrides.
+func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]string, showName, showFolder string, touched bool, entry ManualEntry) {
 	if p.plex == nil || p.ratingCache == nil {
 		return
 	}
@@ -1109,7 +1108,7 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 	}
 
 	if !p.cfg.RatingsOnly {
-		p.applyPlexAudioLanguage(showKey, tmdbID, showName, langOverride)
+		p.applyPlexAudioLanguage(showKey, tmdbID, showName, entry)
 	}
 
 	if touched {
@@ -1180,8 +1179,7 @@ func (p *Processor) RunLanguageOnly() {
 			continue
 		}
 
-		langOverride := p.manualData[showName].Language
-		p.applyPlexAudioLanguage(showKey, tmdbID, showName, langOverride)
+		p.applyPlexAudioLanguage(showKey, tmdbID, showName, p.manualData[showName])
 	}
 
 	if err := p.ratingCache.Save(); err != nil {
@@ -1189,26 +1187,30 @@ func (p *Processor) RunLanguageOnly() {
 	}
 }
 
-// applyPlexAudioLanguage sets the show's preferred audio language in Plex to
-// the TMDB original language, but only once per show unless OverwriteLanguage
-// is set. This lets the user override the preference inside Plex on a
-// show-by-show basis without it being overwritten on subsequent runs.
-// langOverride, if non-empty, takes precedence over the TMDB original_language.
-func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName, langOverride string) {
+// applyPlexAudioLanguage sets the show's preferred audio language in Plex, but
+// only once per show unless OverwriteLanguage is set. This lets the user
+// override the preference inside Plex on a show-by-show basis without it being
+// overwritten on subsequent runs. The language is manual_data.json's "language"
+// if set, otherwise TMDB's original_language; "alt-language" and
+// "alt2-language" override it for the corresponding alt accounts. Nothing is
+// applied when no language is known for the primary account.
+func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, entry ManualEntry) {
 	if p.ratingCache == nil {
 		return
 	}
-	lang := langOverride
-	if lang == "" {
-		lang = p.resolveOriginalLang(tmdbID)
+	// Only consult TMDB when the show has no configured language of its own.
+	tmdbLang := ""
+	if entry.Language == "" {
+		tmdbLang = p.resolveOriginalLang(tmdbID)
 	}
-	if lang == "" {
+	langs := entry.audioLangs(tmdbLang)
+	if langs.Default == "" {
 		return
 	}
-	if applied, ok := p.ratingCache.GetLanguageApplied(tmdbID); ok && applied == lang && !p.cfg.OverwriteLanguage {
+	if applied, ok := p.ratingCache.GetLanguageApplied(tmdbID); ok && applied == langs.String() && !p.cfg.OverwriteLanguage {
 		return
 	}
-	if err := p.plex.SetAudioLanguage(showKey, lang); err != nil {
+	if err := p.plex.SetAudioLanguage(showKey, langs); err != nil {
 		if errors.Is(err, ErrPlexNotFound) {
 			p.ratingCache.ClearPlexKey(tmdbID)
 			return
@@ -1216,10 +1218,10 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName, langOverri
 		fmt.Printf("  [!] Plex: set audio language for %q: %v\n", showName, err)
 		return
 	}
-	p.ratingCache.SetLanguageApplied(tmdbID, lang)
+	p.ratingCache.SetLanguageApplied(tmdbID, langs.String())
 	altSuffix := ""
 	if r, ok := p.plex.(altErrReporter); ok {
 		altSuffix = r.altErrSuffix()
 	}
-	fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, lang, altSuffix)
+	fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, langs.String(), altSuffix)
 }

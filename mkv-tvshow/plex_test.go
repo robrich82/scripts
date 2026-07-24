@@ -83,8 +83,11 @@ func (f *fakePlexClient) SetContentRating(ratingKey string, t PlexItemType, rati
 	return f.setRatingErr
 }
 
-func (f *fakePlexClient) SetAudioLanguage(ratingKey, lang string) error {
-	f.setLangCalls = append(f.setLangCalls, setLangCall{ratingKey, lang})
+// SetAudioLanguage records the language this account would actually apply,
+// i.e. langs.Default — multiPlexClient resolves each alt's override before
+// calling its client, so Default is that account's own language.
+func (f *fakePlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) error {
+	f.setLangCalls = append(f.setLangCalls, setLangCall{ratingKey, langs.Default})
 	return f.setLangErr
 }
 
@@ -313,7 +316,7 @@ func TestHTTPPlexClient_SetAudioLanguage_SendsCorrectParams(t *testing.T) {
 	defer srv.Close()
 
 	c := newHTTPPlexClient(srv.URL, "mytoken")
-	err := c.SetAudioLanguage("99", "ja")
+	err := c.SetAudioLanguage("99", AudioLangs{Default: "ja"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -335,7 +338,7 @@ func TestHTTPPlexClient_SetAudioLanguage_ErrorOnNon2xx(t *testing.T) {
 	defer srv.Close()
 
 	c := newHTTPPlexClient(srv.URL, "bad-token")
-	err := c.SetAudioLanguage("1", "en")
+	err := c.SetAudioLanguage("1", AudioLangs{Default: "en"})
 	if err == nil {
 		t.Error("expected error for non-2xx response")
 	}
@@ -665,9 +668,9 @@ func TestMultiPlexClient_SetAudioLanguage_CallsAll(t *testing.T) {
 	alt := &fakePlexClient{}
 	alt2 := &fakePlexClient{}
 	mc := newMultiPlexClient(primary,
-		namedPlexClient{name: "alt", client: alt},
-		namedPlexClient{name: "alt2", client: alt2})
-	if err := mc.SetAudioLanguage("rk1", "ja"); err != nil {
+		namedPlexClient{name: altAccount, client: alt},
+		namedPlexClient{name: alt2Account, client: alt2})
+	if err := mc.SetAudioLanguage("rk1", AudioLangs{Default: "ja"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for name, c := range map[string]*fakePlexClient{"primary": primary, "alt": alt, "alt2": alt2} {
@@ -677,11 +680,31 @@ func TestMultiPlexClient_SetAudioLanguage_CallsAll(t *testing.T) {
 	}
 }
 
+func TestMultiPlexClient_SetAudioLanguage_PerAccountOverrides(t *testing.T) {
+	primary := &fakePlexClient{}
+	alt := &fakePlexClient{}
+	alt2 := &fakePlexClient{}
+	mc := newMultiPlexClient(primary,
+		namedPlexClient{name: altAccount, client: alt},
+		namedPlexClient{name: alt2Account, client: alt2})
+	// alt overrides the language; alt2 has none and falls back to the default.
+	langs := AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}}
+	if err := mc.SetAudioLanguage("rk1", langs); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]string{"primary": "ja", "alt": "en", "alt2": "ja"}
+	for name, c := range map[string]*fakePlexClient{"primary": primary, "alt": alt, "alt2": alt2} {
+		if len(c.setLangCalls) != 1 || c.setLangCalls[0].lang != want[name] {
+			t.Errorf("%s: got %+v; want lang %q", name, c.setLangCalls, want[name])
+		}
+	}
+}
+
 func TestMultiPlexClient_SetAudioLanguage_PrimaryErrorPropagates(t *testing.T) {
 	primary := &fakePlexClient{setLangErr: errors.New("primary failed")}
 	alt := &fakePlexClient{}
-	mc := newMultiPlexClient(primary, namedPlexClient{name: "alt", client: alt})
-	if err := mc.SetAudioLanguage("rk1", "ja"); err == nil {
+	mc := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
+	if err := mc.SetAudioLanguage("rk1", AudioLangs{Default: "ja"}); err == nil {
 		t.Fatal("expected error from primary")
 	}
 	if len(alt.setLangCalls) != 0 {
@@ -694,9 +717,9 @@ func TestMultiPlexClient_SetAudioLanguage_AltErrorStoredNotPropagated(t *testing
 	alt := &fakePlexClient{setLangErr: errors.New("alt failed")}
 	alt2 := &fakePlexClient{setLangErr: errors.New("plex: set audio language got status 404: nope")}
 	mc := newMultiPlexClient(primary,
-		namedPlexClient{name: "alt", client: alt},
-		namedPlexClient{name: "alt2", client: alt2})
-	if err := mc.SetAudioLanguage("rk1", "ja"); err != nil {
+		namedPlexClient{name: altAccount, client: alt},
+		namedPlexClient{name: alt2Account, client: alt2})
+	if err := mc.SetAudioLanguage("rk1", AudioLangs{Default: "ja"}); err != nil {
 		t.Fatalf("alt error should not propagate: %v", err)
 	}
 	r, ok := mc.(altErrReporter)
@@ -712,13 +735,13 @@ func TestMultiPlexClient_SetAudioLanguage_AltErrorStoredNotPropagated(t *testing
 func TestMultiPlexClient_SetAudioLanguage_AltErrClearedOnSuccess(t *testing.T) {
 	primary := &fakePlexClient{}
 	alt := &fakePlexClient{}
-	mc := newMultiPlexClient(primary, namedPlexClient{name: "alt", client: alt})
+	mc := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
 	// First call with alt error.
 	alt.setLangErr = errors.New("alt failed")
-	mc.SetAudioLanguage("rk1", "ja") //nolint
+	mc.SetAudioLanguage("rk1", AudioLangs{Default: "ja"}) //nolint
 	// Second call with alt success — the stored error should be cleared.
 	alt.setLangErr = nil
-	mc.SetAudioLanguage("rk1", "ja") //nolint
+	mc.SetAudioLanguage("rk1", AudioLangs{Default: "ja"}) //nolint
 	r := mc.(altErrReporter)
 	if got := r.altErrSuffix(); got != "" {
 		t.Errorf("altErrSuffix() should be empty after successful alt call, got %q", got)
@@ -730,6 +753,66 @@ func TestNewMultiPlexClient_NoAltsReturnsPrimary(t *testing.T) {
 	mc := newMultiPlexClient(primary)
 	if mc != PlexClient(primary) {
 		t.Error("expected primary to be returned when there are no alts")
+	}
+}
+
+func TestAudioLangs_String(t *testing.T) {
+	cases := []struct {
+		name  string
+		langs AudioLangs
+		want  string
+	}{
+		{"no overrides", AudioLangs{Default: "ja"}, "ja"},
+		{
+			"override equal to default is omitted",
+			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "ja"}},
+			"ja",
+		},
+		{
+			"one override",
+			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}},
+			"ja|alt=en",
+		},
+		{
+			"both overrides, always in account order",
+			AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "fr", altAccount: "en"}},
+			"ja|alt=en|alt2=fr",
+		},
+		{
+			"only alt2 overrides",
+			AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "fr"}},
+			"ja|alt2=fr",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.langs.String(); got != tc.want {
+				t.Errorf("String() = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAudioLangs_ForAccount_FallsBackToDefault(t *testing.T) {
+	langs := AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}}
+	if got := langs.forAccount(altAccount); got != "en" {
+		t.Errorf("forAccount(alt) = %q; want en", got)
+	}
+	if got := langs.forAccount(alt2Account); got != "ja" {
+		t.Errorf("forAccount(alt2) = %q; want ja (default)", got)
+	}
+}
+
+func TestManualEntry_AudioLangs(t *testing.T) {
+	// No "language": TMDB's original_language is the default.
+	got := ManualEntry{AltLanguage: "en"}.audioLangs("ja")
+	if got.Default != "ja" || got.forAccount(altAccount) != "en" || got.forAccount(alt2Account) != "ja" {
+		t.Errorf("tmdb fallback: %+v", got)
+	}
+	// "language" overrides TMDB, and alts fall back to it rather than to TMDB.
+	got = ManualEntry{Language: "ko", Alt2Language: "fr"}.audioLangs("ja")
+	if got.Default != "ko" || got.forAccount(altAccount) != "ko" || got.forAccount(alt2Account) != "fr" {
+		t.Errorf("language override: %+v", got)
 	}
 }
 
