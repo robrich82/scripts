@@ -564,12 +564,45 @@ func (c *httpPlexClient) SetEpisodeMetadata(ratingKey, title, originallyAvailabl
 	return nil
 }
 
+// plexAudioBCP47 maps ISO 639-1 language codes to the region-qualified BCP-47
+// tags Plex's per-item audioLanguage preference expects (e.g. "ja" -> "ja-JP").
+// Plex Web sends these region-qualified tags; a bare code (e.g. "ja") is stored
+// but not shown as a selected option in the Settings dialog, so it renders as
+// "Account default" even though it applies. Values from Plex Web's enum.
+var plexAudioBCP47 = map[string]string{
+	"ar": "ar-SA", "bg": "bg-BG", "ca": "ca-ES", "zh": "zh-CN",
+	"hr": "hr-HR", "cs": "cs-CZ", "da": "da-DK", "nl": "nl-NL",
+	"en": "en-US", "et": "et-EE", "fi": "fi-FI", "fr": "fr-FR",
+	"de": "de-DE", "el": "el-GR", "he": "he-IL", "hi": "hi-IN",
+	"hu": "hu-HU", "id": "id-ID", "it": "it-IT", "ja": "ja-JP",
+	"ko": "ko-KR", "lv": "lv-LV", "lt": "lt-LT", "nb": "nb-NO",
+	"fa": "fa-IR", "pl": "pl-PL", "pt": "pt-BR", "ro": "ro-RO",
+	"ru": "ru-RU", "sk": "sk-SK", "es": "es-ES", "sv": "sv-SE",
+	"th": "th-TH", "tr": "tr-TR", "uk": "uk-UA", "vi": "vi-VN",
+}
+
+// plexAudioLangTag returns the region-qualified BCP-47 tag Plex expects for an
+// audio language code. Values already carrying a region (containing "-") pass
+// through unchanged, and unmapped codes fall back to the input.
+func plexAudioLangTag(code string) string {
+	if code == "" || strings.Contains(code, "-") {
+		return code
+	}
+	if tag, ok := plexAudioBCP47[strings.ToLower(code)]; ok {
+		return tag
+	}
+	return code
+}
+
 // SetAudioLanguage implements PlexClient. It uses the per-item prefs endpoint
 // so the preference is stored per-user for this show only. This client speaks
-// for a single account, so it applies langs.Default and ignores per-alt overrides.
+// for a single account, so it applies langs.Default and ignores per-alt
+// overrides. The code is sent as a region-qualified BCP-47 tag (see
+// plexAudioLangTag) to match Plex Web, so the value shows correctly in the
+// per-item Settings dialog rather than as "Account default".
 func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) error {
 	path := fmt.Sprintf("/library/metadata/%s/prefs?audioLanguage=%s&X-Plex-Token=%s",
-		ratingKey, url.QueryEscape(langs.Default), url.QueryEscape(c.token))
+		ratingKey, url.QueryEscape(plexAudioLangTag(langs.Default)), url.QueryEscape(c.token))
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {
@@ -602,16 +635,18 @@ type multiAccountReporter interface {
 }
 
 // appliedLangSignature returns the value to cache as "already applied" for a
-// title: the language given to the primary account, plus one entry per
-// configured alt account, e.g. "ja|alt=ja|alt2=en". Alt accounts are listed
-// even when they simply inherit the default, so adding PLEX_ALT2_TOKEN
-// invalidates the cache and the new account is actually written on the next
-// run instead of being skipped because the language itself did not change.
+// title: the region-qualified tag actually sent to the primary account, plus one
+// entry per configured alt account, e.g. "ja-JP|alt=ja-JP|alt2=en-US". Alt
+// accounts are listed even when they inherit the default, so adding
+// PLEX_ALT2_TOKEN invalidates the cache and the new account is written on the
+// next run. Recording the region-qualified tag (not the bare code) also
+// invalidates caches written before that change, so the corrected value is
+// re-applied once.
 func appliedLangSignature(client PlexClient, langs AudioLangs) string {
 	if r, ok := client.(multiAccountReporter); ok {
 		return r.appliedSignature(langs)
 	}
-	return langs.Default
+	return plexAudioLangTag(langs.Default)
 }
 
 // Labels for the additional Plex accounts. Each is both the manual_data.json
@@ -639,16 +674,17 @@ func (a AudioLangs) forAccount(name string) string {
 }
 
 // appliedSignature implements multiAccountReporter. Every configured alt
-// account is listed with the language it receives — which is Default unless it
-// has an "alt-language" / "alt2-language" override of its own.
+// account is listed with the region-qualified tag it actually receives — the
+// mapped form of Default, unless it has an "alt-language" / "alt2-language"
+// override of its own.
 func (m *multiPlexClient) appliedSignature(langs AudioLangs) string {
 	var b strings.Builder
-	b.WriteString(langs.Default)
+	b.WriteString(plexAudioLangTag(langs.Default))
 	for _, a := range m.alts {
 		b.WriteString("|")
 		b.WriteString(a.name)
 		b.WriteString("=")
-		b.WriteString(langs.forAccount(a.name))
+		b.WriteString(plexAudioLangTag(langs.forAccount(a.name)))
 	}
 	return b.String()
 }

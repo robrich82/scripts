@@ -537,7 +537,7 @@ runs. You can ignore a single episode, a whole season, or the entire show.
 
 When Plex is configured, after processing each show the tool:
 1. Pushes the resolved NZ content rating to every episode, season, and the show itself.
-2. Sets the show's preferred audio language in Plex to the TMDB original language (e.g. `ja` for anime). This is applied once per show and cached in `rating_cache.json` so you can override it inside Plex without it being reset on the next run. Use `--overwrite-language` to force a re-apply.
+2. Sets the show's preferred audio language in Plex to the TMDB original language (e.g. `ja` for anime), sent as the region-qualified BCP-47 tag Plex Web uses (`ja` → `ja-JP`) so it displays correctly in the per-item Settings dialog. This is applied once per show and cached in `rating_cache.json` so you can override it inside Plex without it being reset on the next run. Use `--overwrite-language` to force a re-apply.
 
 The audio language preference is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same language is applied for those accounts — or a different one per account via `alt-language` / `alt2-language` in `manual_data.json`. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a show it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
 

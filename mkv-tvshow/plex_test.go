@@ -326,8 +326,27 @@ func TestHTTPPlexClient_SetAudioLanguage_SendsCorrectParams(t *testing.T) {
 	if gotPath != "/library/metadata/99/prefs" {
 		t.Errorf("path = %q; want /library/metadata/99/prefs", gotPath)
 	}
-	if gotQuery.Get("audioLanguage") != "ja" {
-		t.Errorf("audioLanguage = %q; want ja", gotQuery.Get("audioLanguage"))
+	// Sent as the region-qualified BCP-47 tag Plex Web uses, not bare "ja".
+	if gotQuery.Get("audioLanguage") != "ja-JP" {
+		t.Errorf("audioLanguage = %q; want ja-JP", gotQuery.Get("audioLanguage"))
+	}
+}
+
+func TestPlexAudioLangTag(t *testing.T) {
+	cases := map[string]string{
+		"ja":    "ja-JP", // ISO 639-1 mapped to region-qualified
+		"en":    "en-US",
+		"ko":    "ko-KR",
+		"JA":    "ja-JP", // case-insensitive
+		"ja-JP": "ja-JP", // already region-qualified: passthrough
+		"en-GB": "en-GB", // explicit region preserved
+		"":      "",      // empty passthrough
+		"xx":    "xx",    // unmapped falls back to input
+	}
+	for in, want := range cases {
+		if got := plexAudioLangTag(in); got != want {
+			t.Errorf("plexAudioLangTag(%q) = %q; want %q", in, got, want)
+		}
 	}
 }
 
@@ -768,30 +787,29 @@ func TestAppliedLangSignature(t *testing.T) {
 		want  string
 	}{
 		{
-			// No alt tokens: the bare language, so caches written before
-			// per-account languages existed still match and do not re-apply.
-			"no alt accounts", nil, AudioLangs{Default: "ja"}, "ja",
+			// Region-qualified tag, matching what is actually sent to Plex.
+			"no alt accounts", nil, AudioLangs{Default: "ja"}, "ja-JP",
 		},
 		{
-			// Listed even though they inherit "ja" — otherwise adding a token
+			// Listed even though they inherit "ja-JP" — otherwise adding a token
 			// would leave already-applied titles skipped forever.
 			"alt accounts inheriting the default", alts, AudioLangs{Default: "ja"},
-			"ja|alt=ja|alt2=ja",
+			"ja-JP|alt=ja-JP|alt2=ja-JP",
 		},
 		{
 			"one account overriding", alts,
 			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}},
-			"ja|alt=en|alt2=ja",
+			"ja-JP|alt=en-US|alt2=ja-JP",
 		},
 		{
 			"both accounts overriding", alts,
 			AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en", alt2Account: "fr"}},
-			"ja|alt=en|alt2=fr",
+			"ja-JP|alt=en-US|alt2=fr-FR",
 		},
 		{
 			"only alt2 configured", alts[1:],
 			AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "fr"}},
-			"ja|alt2=fr",
+			"ja-JP|alt2=fr-FR",
 		},
 	}
 	for _, tc := range cases {

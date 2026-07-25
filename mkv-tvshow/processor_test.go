@@ -1487,7 +1487,8 @@ func TestRunLanguageOnly_SetsLanguageForCachedShows(t *testing.T) {
 func TestRunLanguageOnly_SkipsAlreadyApplied(t *testing.T) {
 	rc := emptyRatingCache(t)
 	rc.SetShowRating("111", RatingM)
-	rc.SetLanguageApplied("111", "ja")
+	// Cache holds the region-qualified signature actually applied (ja -> ja-JP).
+	rc.SetLanguageApplied("111", "ja-JP")
 
 	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
 	plexClient := &fakePlexClient{showRatingKey: "plex-99"}
