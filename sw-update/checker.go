@@ -342,6 +342,13 @@ func (h *htmlChecker) check(app App) (*CheckResult, error) {
 	}
 	defer resp.Body.Close()
 
+	// Without this, an error page (e.g. a Cloudflare 5xx while the site is
+	// down) is read as if it were the real page and surfaces as a misleading
+	// "version_regex did not match page content".
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("html checker: %s returned HTTP %d", app.Checker.URL, resp.StatusCode)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err

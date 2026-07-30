@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -421,6 +422,23 @@ func TestHTMLChecker(t *testing.T) {
 		_, err := checker.check(bad)
 		if err == nil {
 			t.Error("expected error when regex doesn't match")
+		}
+	})
+
+	t.Run("non-200 reports the status, not a regex miss", func(t *testing.T) {
+		errSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "origin unreachable", 525)
+		}))
+		defer errSrv.Close()
+
+		down := app
+		down.Checker.URL = errSrv.URL + "/"
+		_, err := (&htmlChecker{client: errSrv.Client()}).check(down)
+		if err == nil {
+			t.Fatal("expected error for HTTP 525")
+		}
+		if !strings.Contains(err.Error(), "525") {
+			t.Errorf("error = %v, want it to mention the 525 status", err)
 		}
 	})
 }
