@@ -44,6 +44,14 @@ Run all tests:
 make test
 ```
 
+Scan all modules for known vulnerabilities in their dependencies (requires
+[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) —
+`go install golang.org/x/vuln/cmd/govulncheck@latest` — and network access):
+
+```sh
+make vuln
+```
+
 ---
 
 ## cbz-fix
