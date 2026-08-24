@@ -741,7 +741,6 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 	// Prompt the user once per show per run.
 	// When a source found a rating, show it as the default so the user can
 	// confirm with Enter or type a new value to override.
-	const validRatings = "G/PG/M/13/RP13/R13/15/RP15/R15/16/RP16/R16/R/18/RP18/R18"
 	var promptMsg string
 	switch {
 	case suggested != RatingNone:

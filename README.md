@@ -351,6 +351,7 @@ Flags:
 | `--force` | Re-apply all metadata even if already cached |
 | `--clean` | Remove cache entries for movie files that no longer exist on disk, then exit |
 | `--reset-rating <query>` | Clear the cached NZ rating for a movie and reset its applied state so the next run re-fetches and re-applies it. `query` is a title substring or TMDB ID |
+| `--set-rating <RATING>` | Set `RATING` as the NZ rating for **every** movie in the current directory, overriding any cached value, then exit (see below) |
 | `--deband-only` | Update only the `DEBAND` MKV tag for movies configured in `manual_data.json`; preserves all other tags and timestamps |
 
 Output:
@@ -358,6 +359,24 @@ Output:
 ```
 Updated: 8  OK: 42  Skipped: 3  Errors: 0
 ```
+
+### Bulk rating override (`--set-rating`)
+
+Applies one NZ rating to every movie in the current directory instead of
+answering the rating prompt title by title:
+
+```sh
+mkv-movie --set-rating R16
+```
+
+Each `.mkv` under the directory is resolved to its cached TMDB ID, the affected
+movies are listed with their current rating, and nothing is written until you
+confirm. Files with no cached TMDB ID (never processed) are listed as skipped —
+run `mkv-movie` normally on them first.
+
+Confirming replaces the cached rating, clears the applied state for those files,
+and clears the recorded Plex rating. No TMDB, Plex, or network calls are made:
+the next `mkv-movie --all` writes the new `LAW_RATING` tag and pushes it to Plex.
 
 ### Dependencies
 
@@ -502,12 +521,33 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
 | `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit |
 | `--reset-rating <query>` | — | Clear the cached NZ rating for a show and reset the applied state on all its files so the next run re-fetches and re-applies it. `query` is a folder name substring or TMDB ID |
+| `--set-rating <RATING>` | — | Set `RATING` as the NZ rating for **every** show in the current directory, overriding any cached value, then exit (see below) |
 
 #### Output
 
 ```
 Success: 12  Failed: 0  SkippedOld: 5
 ```
+
+### Bulk rating override (`--set-rating`)
+
+Applies one NZ rating to every show in the current directory instead of
+answering the rating prompt show by show:
+
+```sh
+mkv-tvshow --set-rating R16
+```
+
+Each top-level show folder containing `.mkv` files is resolved to its cached
+TMDB ID, the affected shows are listed with their current rating, and nothing is
+written until you confirm. Folders with no cached TMDB ID (never processed) are
+listed as skipped — run `mkv-tvshow` normally on them first.
+
+Confirming replaces the cached show rating, clears any episode-level rating
+overrides for those shows (they would otherwise take priority), and clears the
+applied state on their files. No TMDB, Plex, or network calls are made: the next
+`mkv-tvshow --ratings-only --all` writes the new `LAW_RATING` tags and pushes the
+rating to Plex.
 
 ### Missing episode check (`--missing`)
 

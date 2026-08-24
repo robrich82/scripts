@@ -17,6 +17,7 @@ func main() {
 	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, then exit.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a movie and reset its applied state (title substring or TMDB ID), then exit.")
+	setRating := flag.String("set-rating", "", "Set this NZ rating for every movie in the current directory, overriding any cached value, then exit.")
 	flag.Parse()
 
 	if *cleanFlag {
@@ -26,6 +27,16 @@ func main() {
 
 	if *resetRatingQuery != "" {
 		runResetRating(*resetRatingQuery)
+		return
+	}
+
+	if *setRating != "" {
+		dir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+			os.Exit(1)
+		}
+		runSetRating(*setRating, dir, stdinPrompter)
 		return
 	}
 

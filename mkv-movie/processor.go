@@ -206,7 +206,6 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 		}
 	}
 
-	const validRatings = "G/PG/M/13/RP13/R13/15/RP15/R15/16/RP16/R16/R/18/RP18/R18"
 	var promptMsg string
 	if plexDefault != RatingNone {
 		promptMsg = fmt.Sprintf(

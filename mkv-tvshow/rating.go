@@ -64,6 +64,9 @@ func MaxRating(a, b NZRating) NZRating {
 	return b
 }
 
+// validRatings lists every accepted NZ rating, used in prompts and flag errors.
+const validRatings = "G/PG/M/13/RP13/R13/15/RP15/R15/16/RP16/R16/R/18/RP18/R18"
+
 // ParseNZRating normalises a raw string to a canonical NZRating.
 // Accepts case-insensitive input and strips internal spaces (e.g. "r 16" → "R16").
 // Returns (rating, true) if recognised, (RatingNone, false) if not.
