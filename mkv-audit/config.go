@@ -37,6 +37,7 @@ var codecPriorityAudio = map[string]int{
 	"A_AC3":          3,
 	"A_AAC":          2,
 	"A_VORBIS":       1,
+	"A_MPEG/L3":      1,
 	"A_MPEG/L2":      1,
 }
 
