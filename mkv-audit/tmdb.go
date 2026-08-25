@@ -144,7 +144,7 @@ func (c *httpTMDBOriginClient) GetMovieOriginByID(id string) (OriginInfo, bool, 
 
 // SearchTV returns TMDB TV show candidates for the given title and optional year.
 func (c *httpTMDBOriginClient) SearchTV(title, year string) ([]TVSearchCandidate, error) {
-	params := url.Values{"api_key": {c.apiKey}, "query": {title}}
+	params := url.Values{"api_key": {c.apiKey}, "query": {title}, "include_adult": {"true"}}
 	if year != "" {
 		params.Set("first_air_date_year", year)
 	}
@@ -176,7 +176,7 @@ func (c *httpTMDBOriginClient) SearchTV(title, year string) ([]TVSearchCandidate
 
 // SearchMovie returns TMDB movie candidates for the given title and optional year.
 func (c *httpTMDBOriginClient) SearchMovie(title, year string) ([]MovieSearchCandidate, error) {
-	params := url.Values{"api_key": {c.apiKey}, "query": {title}}
+	params := url.Values{"api_key": {c.apiKey}, "query": {title}, "include_adult": {"true"}}
 	if year != "" {
 		params.Set("year", year)
 	}

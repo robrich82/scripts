@@ -91,7 +91,7 @@ func (t *tmdbMovieSource) SearchMovieID(title, year string) (string, error) {
 }
 
 func (t *tmdbMovieSource) searchMovie(title, year string) (string, error) {
-	u := fmt.Sprintf("%s/search/movie?api_key=%s&query=%s&language=en-US",
+	u := fmt.Sprintf("%s/search/movie?api_key=%s&query=%s&language=en-US&include_adult=true",
 		tmdbAPIBase, url.QueryEscape(t.apiKey), url.QueryEscape(title))
 	if year != "" {
 		u += "&year=" + url.QueryEscape(year)

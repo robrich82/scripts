@@ -114,7 +114,7 @@ func (c *httpTMDBClient) getTMDB(u string) (*http.Response, error) {
 }
 
 func (c *httpTMDBClient) SearchTV(query string) ([]ShowResult, error) {
-	params := url.Values{"api_key": {c.apiKey}, "query": {query}}
+	params := url.Values{"api_key": {c.apiKey}, "query": {query}, "include_adult": {"true"}}
 	resp, err := c.getTMDB(c.baseURL + "/search/tv?" + params.Encode())
 	if err != nil {
 		return nil, err
