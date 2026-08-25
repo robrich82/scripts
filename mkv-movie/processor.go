@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -266,8 +267,13 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			return ResultError
 		}
 		if tmdbID == "" {
-			fmt.Printf("[SKIP]    %s (not found on TMDB)\n", basename)
-			return ResultSkipped
+			// Automatic search failed - let the user supply the ID directly.
+			var ok bool
+			tmdbID, details, ok = rr.promptTMDBID(title, year, tmdb)
+			if !ok {
+				fmt.Printf("[SKIP]    %s (not found on TMDB)\n", basename)
+				return ResultSkipped
+			}
 		}
 		cache.SetTMDBID(cacheKey, tmdbID)
 		// Migrate any existing title:YEAR rating to the numeric TMDB ID key.
@@ -689,4 +695,55 @@ func stdinPrompter(prompt string) (string, error) {
 		return scanner.Text(), nil
 	}
 	return "", scanner.Err()
+}
+
+// tmdbIDPattern matches a bare numeric TMDB ID or one embedded in a
+// themoviedb.org URL (e.g. https://www.themoviedb.org/movie/12345-some-title).
+var tmdbIDPattern = regexp.MustCompile(`^(?:(?:https?://)?(?:www\.)?themoviedb\.org/movie/)?(\d+)(?:[-/?#].*)?$`)
+
+// parseTMDBID extracts a numeric TMDB movie ID from user input, accepting
+// either a bare ID or a themoviedb.org movie URL. Returns "" if none is found.
+func parseTMDBID(s string) string {
+	m := tmdbIDPattern.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// promptTMDBID asks the user for a TMDB ID after an automatic search failed,
+// re-prompting until the entered ID resolves to real details. Returns ok=false
+// if the user leaves the prompt blank (or stdin is closed), meaning "skip".
+func (r *MovieRatingResolver) promptTMDBID(title, year string, tmdb TMDBMovieClient) (string, MovieDetails, bool) {
+	if r == nil || r.prompter == nil {
+		return "", MovieDetails{}, false
+	}
+	label := title
+	if year != "" {
+		label = fmt.Sprintf("%s (%s)", title, year)
+	}
+	promptMsg := fmt.Sprintf(
+		"No TMDB match for %q.\nEnter TMDB ID or themoviedb.org URL, or blank to skip: ", label)
+	for {
+		ans, err := r.prompter(promptMsg)
+		if err != nil {
+			return "", MovieDetails{}, false
+		}
+		ans = strings.TrimSpace(ans)
+		if ans == "" {
+			return "", MovieDetails{}, false
+		}
+		id := parseTMDBID(ans)
+		if id == "" {
+			promptMsg = fmt.Sprintf("  %q is not a TMDB ID or movie URL. Enter one, or blank to skip: ", ans)
+			continue
+		}
+		details, err := tmdb.GetMovieDetails(id)
+		if err != nil {
+			promptMsg = fmt.Sprintf("  TMDB ID %s: %v\n  Enter another ID, or blank to skip: ", id, err)
+			continue
+		}
+		fmt.Printf("  Using TMDB %s: %s (%s)\n", id, details.Title, details.ReleaseDate)
+		return id, details, true
+	}
 }

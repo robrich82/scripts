@@ -330,7 +330,17 @@ file: title, release date, plot summary, TMDB ID, poster attachment, and NZ
 content rating. Sets filesystem timestamps to the TMDB release date.
 
 Movie identity is derived from the filename (title + year) and resolved via
-TMDB search on first run, then cached.
+TMDB search on first run, then cached. When the search finds no match, the tool
+prompts for the movie's TMDB ID rather than skipping the file:
+
+```
+No TMDB match for "Obscure Film (2019)".
+Enter TMDB ID or themoviedb.org URL, or blank to skip:
+```
+
+Either a bare ID (`12345`) or a full themoviedb.org movie URL is accepted; the
+ID is verified against TMDB before use and then cached, so it is asked for once.
+Leaving the prompt blank skips the file as before.
 
 ### Usage
 
