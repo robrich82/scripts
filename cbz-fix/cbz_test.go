@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -107,12 +108,7 @@ func readCBZEntry(t *testing.T, path, name string) []byte {
 }
 
 func containsEntry(names []string, name string) bool {
-	for _, n := range names {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(names, name)
 }
 
 // ── naturalLess tests ──────────────────────────────────────────────────────

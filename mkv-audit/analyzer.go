@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -514,13 +515,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 			// Clear default on all other non-forced subs.
 			for _, i := range subTracks {
 				if i != winnerIdx {
-					inForced := false
-					for _, fi := range forcedCands {
-						if fi == i {
-							inForced = true
-							break
-						}
-					}
+					inForced := slices.Contains(forcedCands, i)
 					if !inForced && tracks[i].Properties.DefaultTrack {
 						res.Edits = append(res.Edits, trackEdit(tracks[i].ID, "flag-default", "0")...)
 						res.LocalFixes.Flags++

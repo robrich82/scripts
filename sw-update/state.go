@@ -12,7 +12,7 @@ type AppState struct {
 	LatestVersion    string    `json:"latest_version,omitempty"`
 	InstalledVersion string    `json:"installed_version,omitempty"`
 	LastSeenVersion  string    `json:"last_seen_version,omitempty"`
-	LastChecked      time.Time `json:"last_checked,omitempty"`
+	LastChecked      time.Time `json:"last_checked"`
 }
 
 // KnownVersion returns the best locally known version:

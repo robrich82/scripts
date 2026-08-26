@@ -49,7 +49,7 @@ func cmdAdd(_ []string) error {
 		patStr := prompt("Asset pattern(s), comma-separated (blank = auto): ")
 		var patterns []string
 		if strings.TrimSpace(patStr) != "" {
-			for _, p := range strings.Split(patStr, ",") {
+			for p := range strings.SplitSeq(patStr, ",") {
 				if t := strings.TrimSpace(p); t != "" {
 					patterns = append(patterns, t)
 				}

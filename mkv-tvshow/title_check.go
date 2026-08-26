@@ -408,11 +408,10 @@ func extractFileTitles(stem string) []string {
 		return nil
 	}
 	after := stem[m[1]:]
-	idx := strings.Index(after, " - ")
-	if idx < 0 {
+	_, raw, ok := strings.Cut(after, " - ")
+	if !ok {
 		return nil
 	}
-	raw := after[idx+3:]
 	if raw == "" {
 		return nil
 	}

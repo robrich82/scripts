@@ -205,8 +205,8 @@ func cleanVideoBase(base string) (clean, suffix, postSuffix string) {
 
 // trackNumber returns the text before the first " - " separator, or "".
 func trackNumber(name string) string {
-	if idx := strings.Index(name, " - "); idx >= 0 {
-		return name[:idx]
+	if before, _, ok := strings.Cut(name, " - "); ok {
+		return before
 	}
 	return ""
 }
@@ -254,12 +254,7 @@ func mapKeys(m map[string]string) []string {
 }
 
 func containsStr(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, s)
 }
 
 // findIgnoredPatterns returns the trimmed, space-joined set of ignore patterns

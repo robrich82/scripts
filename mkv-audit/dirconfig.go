@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,9 +136,7 @@ func overrideMatches(relLower, ovLower string) bool {
 // unknown languages are never affected. Manual overrides win over TMDB.
 func resolveIETFMap(filePath, root string, lib *Library, origin OriginInfo) map[string]string {
 	result := make(map[string]string, len(ietfMap))
-	for k, v := range ietfMap {
-		result[k] = v
-	}
+	maps.Copy(result, ietfMap)
 
 	// TMDB-derived layer: override the original language's IETF tag with the
 	// country-specific variant (e.g. "eng" → "en-CA" for a Canadian show).
@@ -169,9 +168,7 @@ func resolveIETFMap(filePath, root string, lib *Library, origin OriginInfo) map[
 		relLower := strings.ToLower(norm.NFC.String(rel))
 		ovLower := strings.ToLower(norm.NFC.String(overridePath))
 		if overrideMatches(relLower, ovLower) {
-			for k, v := range override.IETF {
-				result[k] = v
-			}
+			maps.Copy(result, override.IETF)
 		}
 	}
 	return result
@@ -200,9 +197,7 @@ func matchedOverrideIETF(filePath, root string, lib *Library) map[string]string 
 			if merged == nil {
 				merged = make(map[string]string)
 			}
-			for k, v := range override.IETF {
-				merged[k] = v
-			}
+			maps.Copy(merged, override.IETF)
 		}
 	}
 	return merged

@@ -20,10 +20,7 @@ func CompareVersions(a, b string) int {
 	aSegs := strings.Split(aParts[0], ".")
 	bSegs := strings.Split(bParts[0], ".")
 
-	maxLen := len(aSegs)
-	if len(bSegs) > maxLen {
-		maxLen = len(bSegs)
-	}
+	maxLen := max(len(bSegs), len(aSegs))
 
 	for i := 0; i < maxLen; i++ {
 		var av, bv int

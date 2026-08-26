@@ -241,11 +241,10 @@ func plexItemHasTMDBID(guidRaw json.RawMessage, guidLower, wantGUID, tmdbID stri
 // by a non-digit (or end of string), preventing partial-ID false positives.
 func guidStringMatchesTMDBID(s, tmdbID string) bool {
 	target := "://" + tmdbID
-	idx := strings.Index(s, target)
-	if idx == -1 {
+	_, rest, ok := strings.Cut(s, target)
+	if !ok {
 		return false
 	}
-	rest := s[idx+len(target):]
 	return rest == "" || rest[0] < '0' || rest[0] > '9'
 }
 

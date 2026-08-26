@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func LoadCache(path string) (*ShowCache, error) {
 
 	// Decode into interface{} first so we can handle both string and numeric IDs
 	// (the Python version of this tool writes IDs as JSON numbers).
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.NewDecoder(f).Decode(&raw); err != nil {
 		return nil, err
 	}
@@ -61,9 +62,7 @@ func (c *ShowCache) Set(folder, id string) {
 // AllEntries returns a copy of all folder→tmdbID mappings in the cache.
 func (c *ShowCache) AllEntries() map[string]string {
 	out := make(map[string]string, len(c.data))
-	for k, v := range c.data {
-		out[k] = v
-	}
+	maps.Copy(out, c.data)
 	return out
 }
 

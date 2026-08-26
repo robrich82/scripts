@@ -4,16 +4,18 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func sfRSSBody(items []struct{ title, link string }) string {
-	out := `<?xml version="1.0"?><rss><channel>`
+	var out strings.Builder
+	out.WriteString(`<?xml version="1.0"?><rss><channel>`)
 	for _, it := range items {
-		out += fmt.Sprintf("<item><title>%s</title><link>%s</link></item>", it.title, it.link)
+		fmt.Fprintf(&out, "<item><title>%s</title><link>%s</link></item>", it.title, it.link)
 	}
-	out += `</channel></rss>`
-	return out
+	out.WriteString(`</channel></rss>`)
+	return out.String()
 }
 
 func TestSFChecker(t *testing.T) {

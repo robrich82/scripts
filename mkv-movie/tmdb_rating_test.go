@@ -9,8 +9,8 @@ import (
 )
 
 func tmdbSearchJSON(id int, releaseDate string) string {
-	b, _ := json.Marshal(map[string]interface{}{
-		"results": []map[string]interface{}{
+	b, _ := json.Marshal(map[string]any{
+		"results": []map[string]any{
 			{"id": id, "release_date": releaseDate},
 		},
 	})
@@ -18,11 +18,11 @@ func tmdbSearchJSON(id int, releaseDate string) string {
 }
 
 func tmdbReleaseDatesJSON(iso, cert string, certType int) string {
-	b, _ := json.Marshal(map[string]interface{}{
-		"results": []map[string]interface{}{
+	b, _ := json.Marshal(map[string]any{
+		"results": []map[string]any{
 			{
 				"iso_3166_1": iso,
-				"release_dates": []map[string]interface{}{
+				"release_dates": []map[string]any{
 					{"certification": cert, "type": certType},
 				},
 			},
@@ -146,7 +146,7 @@ func TestTitleFromFilename(t *testing.T) {
 }
 
 func tmdbMovieDetailJSON(title, overview, releaseDate, posterPath string) string {
-	b, _ := json.Marshal(map[string]interface{}{
+	b, _ := json.Marshal(map[string]any{
 		"title":        title,
 		"overview":     overview,
 		"release_date": releaseDate,
