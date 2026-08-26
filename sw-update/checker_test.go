@@ -398,6 +398,40 @@ func TestHTMLChecker(t *testing.T) {
 		}
 	})
 
+	t.Run("asset_page scrapes a separate download page", func(t *testing.T) {
+		verSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/release-version":
+				fmt.Fprint(w, "9.0.1")
+			default:
+				fmt.Fprint(w, `<a href="tool-release-full.7z">full</a>`)
+			}
+		}))
+		defer verSrv.Close()
+
+		split := App{
+			Name: "testapp",
+			Checker: CheckerConfig{
+				Type:          "html",
+				URL:           verSrv.URL + "/release-version",
+				AssetPage:     verSrv.URL + "/builds/",
+				VersionRegex:  `(\d+\.\d+\.\d+)`,
+				AssetPatterns: []string{"tool-release-full.7z"},
+			},
+		}
+		r, err := (&htmlChecker{client: verSrv.Client()}).check(split)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Version != "9.0.1" {
+			t.Errorf("version = %q, want %q", r.Version, "9.0.1")
+		}
+		want := verSrv.URL + "/builds/tool-release-full.7z"
+		if len(r.Assets) != 1 || r.Assets[0].URL != want {
+			t.Errorf("assets = %v, want one asset at %s", r.Assets, want)
+		}
+	})
+
 	t.Run("requires url", func(t *testing.T) {
 		bad := app
 		bad.Checker.URL = ""

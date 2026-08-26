@@ -843,6 +843,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `url` | Page URL to fetch |
 | `version_regex` | Go regex; capture group 1 is used as version if present |
 | `asset_patterns` | Glob/regex patterns matched against `href` filenames on the page |
+| `asset_page` | Separate page to scrape for assets, when `url` is a bare version endpoint with no download links (e.g. gyan.dev's `release-version`) |
 | `asset_sort` | Sort matched assets `name`/`name_desc`, then take the first (e.g. pick the newest version when a page lists several) |
 
 **`http-header` checker fields:**

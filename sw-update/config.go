@@ -14,6 +14,7 @@ type CheckerConfig struct {
 	AssetPatterns     []string `json:"asset_patterns,omitempty"`      // glob/regex patterns for assets (github, html, sourceforge)
 	AssetSort         string   `json:"asset_sort,omitempty"`          // sort matched assets: "name" (asc) or "name_desc" (desc), then take first
 	URL               string   `json:"url,omitempty"`                 // page URL (html) or resource URL (http-header)
+	AssetPage         string   `json:"asset_page,omitempty"`          // page to scrape for assets when url has no download links (html)
 	VersionRegex      string   `json:"version_regex,omitempty"`       // regex to extract version (html, sourceforge)
 	Project           string   `json:"project,omitempty"`             // project slug (sourceforge)
 	SFPath            string   `json:"sf_path,omitempty"`             // path filter for RSS, e.g. "/munt" (sourceforge)

@@ -330,26 +330,7 @@ func (h *htmlChecker) check(app App) (*CheckResult, error) {
 		return nil, fmt.Errorf("html checker requires version_regex (not configured yet)")
 	}
 
-	req, err := http.NewRequest("GET", app.Checker.URL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "sw-update/1.0 (+https://github.com/)")
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// Without this, an error page (e.g. a Cloudflare 5xx while the site is
-	// down) is read as if it were the real page and surfaces as a misleading
-	// "version_regex did not match page content".
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("html checker: %s returned HTTP %d", app.Checker.URL, resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
+	body, err := h.fetch(app.Checker.URL)
 	if err != nil {
 		return nil, err
 	}
@@ -378,9 +359,47 @@ func (h *htmlChecker) check(app App) (*CheckResult, error) {
 		return nil, err
 	}
 
-	assets := extractHTMLAssets(body, app.Checker.URL, app.Checker.AssetPatterns)
+	// Some projects publish the version on a bare text endpoint that carries no
+	// download links (e.g. gyan.dev's release-version file); asset_page points
+	// at the real download page so assets can still be discovered.
+	assetPage := app.Checker.AssetPage
+	assetBody := body
+	if assetPage == "" {
+		assetPage = app.Checker.URL
+	} else if len(app.Checker.AssetPatterns) > 0 {
+		assetBody, err = h.fetch(assetPage)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	assets := extractHTMLAssets(assetBody, assetPage, app.Checker.AssetPatterns)
 	assets = sortAndLimitAssets(assets, app.Checker.AssetSort)
 	return &CheckResult{Version: version, Assets: assets}, nil
+}
+
+// fetch GETs pageURL and returns its body.
+func (h *htmlChecker) fetch(pageURL string) ([]byte, error) {
+	req, err := http.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "sw-update/1.0 (+https://github.com/)")
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Without this, an error page (e.g. a Cloudflare 5xx while the site is
+	// down) is read as if it were the real page and surfaces as a misleading
+	// "version_regex did not match page content".
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("html checker: %s returned HTTP %d", pageURL, resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
 }
 
 var reHref = regexp.MustCompile(`(?i)href="([^"]+)"`)
