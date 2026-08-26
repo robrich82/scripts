@@ -22,7 +22,7 @@ func CompareVersions(a, b string) int {
 
 	maxLen := max(len(bSegs), len(aSegs))
 
-	for i := 0; i < maxLen; i++ {
+	for i := range maxLen {
 		var av, bv int
 		if i < len(aSegs) {
 			av, _ = strconv.Atoi(aSegs[i])
