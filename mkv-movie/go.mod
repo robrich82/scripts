@@ -1,6 +1,6 @@
 module mkv-movie
 
-go 1.26.5
+go 1.26.7
 
 require (
 	golang.org/x/net v0.57.0

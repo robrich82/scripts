@@ -1,5 +1,5 @@
 module mkv-audit
 
-go 1.26.5
+go 1.26.7
 
 require golang.org/x/text v0.40.0
