@@ -52,8 +52,9 @@ type pageInfo struct {
 // success (real or dry-run), and (false, err) on failure.
 //
 // When force is true, files that already look processed are reprocessed anyway
-// (e.g. to convert leftover non-PNG pages); blank insertion is suppressed for
-// those files since the blank page is already present.
+// (e.g. to convert leftover non-PNG pages). A blank page is still inserted for
+// those files unless one is already there, so a file first processed with
+// --no-blank can be fixed up later.
 func processCBZ(path string, dryRun, verbose, noBlank, noBackup, force bool) (skipped bool, err error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
@@ -95,7 +96,7 @@ func processCBZ(path string, dryRun, verbose, noBlank, noBackup, force bool) (sk
 	// ── Idempotency guard ──────────────────────────────────────────────────
 	// If the first image is already "cover.*" and the second is "p001.*" the
 	// file has been processed before. Skip it unless --force was given, in
-	// which case reprocess but don't insert a second blank page.
+	// which case reprocess it.
 	coverBase := strings.ToLower(filepath.Base(imgs[0].Name))
 	alreadyProcessed := strings.HasPrefix(coverBase, "cover.") &&
 		len(imgs) > 1 && strings.HasPrefix(strings.ToLower(filepath.Base(imgs[1].Name)), "p001.")
@@ -107,8 +108,6 @@ func processCBZ(path string, dryRun, verbose, noBlank, noBackup, force bool) (sk
 			}
 			return true, nil
 		}
-		// The blank page is already in place; re-adding one would duplicate it.
-		noBlank = true
 		if verbose {
 			fmt.Println("  already processed, reprocessing (--force)")
 		}
@@ -193,6 +192,14 @@ func processCBZ(path string, dryRun, verbose, noBlank, noBackup, force bool) (sk
 				break
 			}
 		}
+	}
+	// On a --force reprocess the page at the insertion point is usually the
+	// blank a previous run added; inserting another would duplicate it. Only
+	// skip insertion when that page really is blank, so an archive first
+	// processed with --no-blank still gets one.
+	if alreadyProcessed && insertBefore >= 0 &&
+		isBlankPage(imgs[insertBefore], converted[insertBefore]) {
+		insertBefore = -1
 	}
 
 	// ── Create blank page ──────────────────────────────────────────────────
@@ -329,6 +336,45 @@ func isDoublePage(f *zip.File, conv []byte, oldInfo map[int]pageInfo, imgIdx int
 		return false
 	}
 	return cfg.Width > cfg.Height
+}
+
+// isBlankPage reports whether every pixel of the image is (near) white — the
+// signature of a blank page inserted by an earlier run. Scanned content is
+// practically never uniform, so a false positive would take a page that is
+// already blank in its own right, in which case skipping insertion is right.
+// conv holds the converted PNG bytes when the page was converted, nil otherwise.
+func isBlankPage(f *zip.File, conv []byte) bool {
+	var (
+		img image.Image
+		err error
+	)
+	if conv != nil {
+		img, _, err = image.Decode(bytes.NewReader(conv))
+	} else {
+		rc, oerr := f.Open()
+		if oerr != nil {
+			return false
+		}
+		defer rc.Close()
+		img, _, err = image.Decode(rc)
+	}
+	if err != nil {
+		return false
+	}
+
+	// Tolerance absorbs the rounding a JPEG round-trip applies to a flat white
+	// image; 250/255 is still visually blank.
+	const nearWhite = 250 * 0x101
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA()
+			if r < nearWhite || g < nearWhite || bl < nearWhite || a < 0xffff {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // createBlankLike creates a white image matching the dimensions of f.

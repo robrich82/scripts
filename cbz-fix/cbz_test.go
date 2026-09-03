@@ -143,6 +143,9 @@ func TestNaturalLess(t *testing.T) {
 var (
 	portrait  = makePNG(100, 200)
 	landscape = makePNG(200, 100)
+	// blankPortrait matches what a previous run's blank page looks like: same
+	// shape as a content page, but white.
+	blankPortrait = makePNGShade(100, 200, 255)
 )
 
 // TestProcessCBZ_BasicRename verifies the simplest case: three portrait pages,
@@ -344,7 +347,7 @@ func TestProcessCBZ_DryRun(t *testing.T) {
 func TestProcessCBZ_Idempotent(t *testing.T) {
 	path := makeCBZ(t, []zipEntry{
 		{"cover.png", portrait},
-		{"p001.png", portrait}, // blank already present
+		{"p001.png", blankPortrait}, // blank already present
 		{"p002.png", portrait},
 	})
 
@@ -370,7 +373,7 @@ func TestProcessCBZ_Idempotent(t *testing.T) {
 func TestProcessCBZ_ForceReprocesses(t *testing.T) {
 	path := makeCBZ(t, []zipEntry{
 		{"cover.png", portrait},
-		{"p001.png", portrait}, // blank already present
+		{"p001.png", blankPortrait}, // blank already present
 		{"p002.png", portrait},
 	})
 
@@ -391,6 +394,49 @@ func TestProcessCBZ_ForceReprocesses(t *testing.T) {
 	// A second blank would have introduced p003.png and shifted pages.
 	if containsEntry(names, "p003.png") {
 		t.Errorf("force must not insert a second blank page; got %v", names)
+	}
+}
+
+// TestProcessCBZ_ForceAddsMissingBlank covers an archive that was first
+// processed with --no-blank: the layout looks processed but p001 is real
+// content, so --force must insert the blank page it is missing.
+func TestProcessCBZ_ForceAddsMissingBlank(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", portrait},
+		{"p001.png", portrait}, // real content, not a blank
+		{"p002.png", portrait},
+	})
+
+	skipped, err := processCBZ(path, false, false, false, true, true) // force
+	if err != nil {
+		t.Fatalf("processCBZ: %v", err)
+	}
+	if skipped {
+		t.Error("expected skipped=false when --force reprocesses")
+	}
+
+	names := readCBZNames(t, path)
+	for _, want := range []string{"cover.png", "p001.png", "p002.png", "p003.png"} {
+		if !containsEntry(names, want) {
+			t.Errorf("missing %q in output; got %v", want, names)
+		}
+	}
+}
+
+// TestProcessCBZ_ForceRespectsNoBlank verifies --force plus --no-blank still
+// leaves the page count alone.
+func TestProcessCBZ_ForceRespectsNoBlank(t *testing.T) {
+	path := makeCBZ(t, []zipEntry{
+		{"cover.png", portrait},
+		{"p001.png", portrait},
+		{"p002.png", portrait},
+	})
+
+	if _, err := processCBZ(path, false, false, true, true, true); err != nil {
+		t.Fatalf("processCBZ: %v", err)
+	}
+	if names := readCBZNames(t, path); containsEntry(names, "p003.png") {
+		t.Errorf("--no-blank must suppress insertion even with --force; got %v", names)
 	}
 }
 
