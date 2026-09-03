@@ -132,7 +132,7 @@ func TestProcessCBZ_ForceConvertsLeftoverNonPNG(t *testing.T) {
 
 	path := makeCBZ(t, []zipEntry{
 		{"cover.png", portrait},
-		{"p001.png", portrait},        // existing blank
+		{"p001.png", blankPortrait},   // existing blank
 		{"p002.webp", fakeNonImage()}, // leftover non-PNG page
 	})
 
