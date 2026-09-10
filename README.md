@@ -877,6 +877,15 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `file-version` | Reads the Windows file-version resource from an exe/dll |
 | `filename` | Globs a path pattern and extracts version from the matched filename |
 
+#### Asset downloads
+
+Downloads send a browser `User-Agent` and a `Referer` (the app's `url` when it
+shares the asset's host, otherwise the asset's own origin) — bot-protection
+front ends such as Cloudflare reject Go's default user agent with HTTP 403.
+Each asset is tried up to three times with a short backoff on transient
+failures (403, 408, 429, 5xx, and connection errors); a 404 or 401 fails
+immediately.
+
 #### Custom update commands
 
 By default `install`/`update` downloads a release asset and runs it. Apps that
