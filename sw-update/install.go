@@ -76,9 +76,14 @@ func cmdInstall(args []string) error {
 		return nil
 	}
 
+	referer := app.URL
+	if referer == "" {
+		referer = app.Checker.URL
+	}
+
 	var downloaded []string
 	for _, asset := range result.Assets {
-		path, err := downloadAsset(asset, destDir)
+		path, err := downloadAsset(asset, destDir, referer)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  Error downloading %s: %v\n", asset.Name, err)
 			continue

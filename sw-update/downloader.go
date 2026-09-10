@@ -2,9 +2,11 @@ package main
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +14,18 @@ import (
 	"time"
 )
 
+// browserUserAgent is sent on asset downloads. Bot-protection front ends
+// (Cloudflare among them) answer Go's default "Go-http-client/1.1" with a 403
+// on a cache miss, so a download has to look like an ordinary browser.
+const browserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+
+// downloadAttempts is how many times a download is tried before giving up.
+const downloadAttempts = 3
+
 // downloadAsset downloads a single asset to destDir and returns the local path.
-func downloadAsset(asset Asset, destDir string) (string, error) {
+// referer is the page the asset was found on; sites that only serve downloads
+// to visitors of their own pages need it.
+func downloadAsset(asset Asset, destDir, referer string) (string, error) {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return "", err
 	}
@@ -22,27 +34,101 @@ func downloadAsset(asset Asset, destDir string) (string, error) {
 	fmt.Printf("  Downloading %s...\n", asset.Name)
 
 	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Get(asset.URL)
+
+	var lastErr error
+	for attempt := 1; attempt <= downloadAttempts; attempt++ {
+		if attempt > 1 {
+			delay := time.Duration(attempt-1) * 3 * time.Second
+			fmt.Printf("  Attempt %d failed (%v); retrying in %s...\n", attempt-1, lastErr, delay)
+			time.Sleep(delay)
+		}
+
+		err := fetchToFile(client, asset.URL, referer, destPath)
+		if err == nil {
+			fmt.Printf("  Saved to %s\n", destPath)
+			return destPath, nil
+		}
+		lastErr = err
+		if !isRetryable(err) {
+			break
+		}
+	}
+	return "", lastErr
+}
+
+// fetchToFile GETs rawURL and writes the response body to destPath.
+func fetchToFile(client *http.Client, rawURL, referer, destPath string) error {
+	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
-		return "", err
+		return err
+	}
+	req.Header.Set("User-Agent", browserUserAgent)
+	req.Header.Set("Accept", "*/*")
+	if ref := downloadReferer(rawURL, referer); ref != "" {
+		req.Header.Set("Referer", ref)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, asset.URL)
+		return &httpStatusError{StatusCode: resp.StatusCode, URL: rawURL}
 	}
 
 	f, err := os.Create(destPath)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer f.Close()
 
 	if _, err := io.Copy(f, resp.Body); err != nil {
-		return "", err
+		return err
 	}
-	fmt.Printf("  Saved to %s\n", destPath)
-	return destPath, nil
+	return f.Close()
+}
+
+// downloadReferer returns referer when it shares a host with the asset URL, and
+// the asset's own origin otherwise — a cross-site Referer is worse than none.
+func downloadReferer(rawURL, referer string) string {
+	asset, err := url.Parse(rawURL)
+	if err != nil || asset.Host == "" {
+		return ""
+	}
+	if referer != "" {
+		if ref, err := url.Parse(referer); err == nil && strings.EqualFold(ref.Host, asset.Host) {
+			return referer
+		}
+	}
+	return asset.Scheme + "://" + asset.Host + "/"
+}
+
+// httpStatusError is a non-200 response to a download request.
+type httpStatusError struct {
+	StatusCode int
+	URL        string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("HTTP %d downloading %s", e.StatusCode, e.URL)
+}
+
+// isRetryable reports whether err is worth another attempt: transport trouble,
+// or a status that tends to be transient (rate limiting, bot-protection blips,
+// server errors). A 404 or a 401 will not fix itself.
+func isRetryable(err error) bool {
+	var status *httpStatusError
+	if !errors.As(err, &status) {
+		// Transport-level failure — connection reset, timeout, DNS.
+		return true
+	}
+	switch status.StatusCode {
+	case http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return true
+	}
+	return status.StatusCode >= 500
 }
 
 // runOrOpen executes an installer, extracts an archive, or opens the folder in Explorer.
