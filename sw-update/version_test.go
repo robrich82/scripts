@@ -37,3 +37,24 @@ func TestCompareVersions(t *testing.T) {
 		}
 	}
 }
+
+func TestHashPrefixMatch(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"e76a35ec9", "e76a35ec95", true},  // local shorter than remote
+		{"e76a35ec95", "e76a35ec9", true},  // remote shorter than local
+		{"E76A35EC9", "e76a35ec95", true},  // case-insensitive
+		{"e76a35ec9", "e76a35ec9", true},   // identical
+		{"e76a35ec9", "f00d35ec95", false}, // different commit
+		{"", "e76a35ec95", false},          // empty never matches
+		{"e76a35ec95", "", false},
+	}
+	for _, tt := range tests {
+		got := HashPrefixMatch(tt.a, tt.b)
+		if got != tt.want {
+			t.Errorf("HashPrefixMatch(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
