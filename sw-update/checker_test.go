@@ -194,6 +194,20 @@ func TestExtractHTMLAssets(t *testing.T) {
 			t.Errorf("expected dedup to 1, got %d", len(got))
 		}
 	})
+
+	t.Run("matches single-quoted href attributes", func(t *testing.T) {
+		singleQuoted := []byte(`<a href='/downloads/app-1.2.exe'>exe</a>`)
+		got := extractHTMLAssets(singleQuoted, pageURL, []string{"*.exe"})
+		if len(got) != 1 {
+			t.Fatalf("expected 1 asset, got %d: %v", len(got), got)
+		}
+		if got[0].Name != "app-1.2.exe" {
+			t.Errorf("unexpected name: %q", got[0].Name)
+		}
+		if got[0].URL != "https://example.com/downloads/app-1.2.exe" {
+			t.Errorf("unexpected URL: %q", got[0].URL)
+		}
+	})
 }
 
 // ---- githubChecker ----

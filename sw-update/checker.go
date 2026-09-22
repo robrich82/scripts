@@ -402,7 +402,7 @@ func (h *htmlChecker) fetch(pageURL string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-var reHref = regexp.MustCompile(`(?i)href="([^"]+)"`)
+var reHref = regexp.MustCompile(`(?i)href=(?:"([^"]+)"|'([^']+)')`)
 
 // extractHTMLAssets finds all href links in body whose filename matches any of
 // the given patterns, resolving relative URLs against pageURL.
@@ -418,6 +418,9 @@ func extractHTMLAssets(body []byte, pageURL string, patterns []string) []Asset {
 	seen := map[string]bool{}
 	for _, m := range reHref.FindAllSubmatch(body, -1) {
 		href := string(m[1])
+		if href == "" {
+			href = string(m[2])
+		}
 		name := filepath.Base(href)
 		matched := false
 		for _, pat := range patterns {
