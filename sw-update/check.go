@@ -114,8 +114,13 @@ func cmdCheck(args []string) error {
 				e.state.LatestVersion = result.Version
 				e.state.LastChecked = time.Now()
 				known := e.state.KnownVersion()
-				if known == "" || CompareVersions(result.Version, known) > 0 {
+				switch {
+				case known == "":
 					e.hasUpdate = true
+				case e.app.Checker.VersionCompare == "hash":
+					e.hasUpdate = !HashPrefixMatch(result.Version, known)
+				default:
+					e.hasUpdate = CompareVersions(result.Version, known) > 0
 				}
 			}
 		}(i)

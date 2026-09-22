@@ -837,6 +837,7 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `version_regex` | Go regex; when set, the version is taken from the first matched asset's filename (capture group 1) instead of the tag — for projects that tag by date but version the asset |
 | `version_date_layout` | `[parse-layout, format-layout]` Go time layouts; parses the version as a date and reformats it (e.g. normalise a build date to a sortable `20060102`) |
 | `version_rewrite` | `[regex, replacement]` applied to the tag name (e.g. rewrite `gs10071` to `10.07.1`) |
+| `version_compare` | `"hash"` to compare against the local detector's version as a git short-hash prefix instead of ordinal segments — for projects whose release/asset date drifts from the build date embedded in the binary (e.g. mpv, see below) |
 
 **`html` checker fields:**
 
@@ -908,10 +909,35 @@ elevated ones run in a separate administrator window.
 The `exe`, `file-version`, and `filename` detectors accept `version_regex`
 (capture group 1 is the version), then optionally `version_date_layout`
 (`[parse-layout, format-layout]`) and `version_rewrite` (`[regex, replacement]`)
-to normalise the result so it matches the upstream version string. For example,
-mpv's `mpv.exe --version` reports `built on Jun 10 2026`, which
-`version_date_layout: ["Jan _2 2006", "20060102"]` turns into `20260610` to match
-the date-based release tag.
+to normalise the result so it matches the upstream version string.
+
+mpv is a case where the release date can't be used at all: shinchiro's
+winbuild releases are dated by when they're packaged, not when mpv itself was
+compiled, so the "built on" date `mpv.exe --version` reports routinely trails
+the release tag by a day or two even when the local build is current. mpv's
+`--version` output also includes its git short-hash (`v0.41.0-1050-ge76a35ec9`),
+which is stable per-commit, so mpv's config compares on that instead:
+
+```json
+"checker": {
+    "type": "github",
+    "repo": "shinchiro/mpv-winbuild-cmake",
+    "asset_patterns": ["mpv-x86_64-v3-.*\\.7z"],
+    "version_regex": "git-([0-9a-f]+)\\.7z",
+    "version_compare": "hash"
+},
+"local": {
+    "type": "exe",
+    "path": "C:\\Program Files\\mpv\\mpv.exe",
+    "args": ["--version"],
+    "version_regex": "\\bg([0-9a-f]{7,})\\b"
+}
+```
+
+Since the asset filename's hash and the binary's `git describe` hash aren't
+always abbreviated to the same length, `version_compare: "hash"` matches them
+as equal when one is a prefix of the other, rather than requiring an exact
+string match.
 
 ---
 

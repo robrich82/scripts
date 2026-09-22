@@ -22,6 +22,7 @@ type CheckerConfig struct {
 	VersionRewrite    []string `json:"version_rewrite,omitempty"`     // [regex, replacement] applied after version extraction
 	VersionDateLayout []string `json:"version_date_layout,omitempty"` // [parse-layout, format-layout] Go time layouts to normalise a date version
 	RequireAsset      bool     `json:"require_asset,omitempty"`       // skip releases with no matching asset_patterns (github)
+	VersionCompare    string   `json:"version_compare,omitempty"`     // "" (default: ordinal) or "hash" (git short-hash prefix match)
 }
 
 // LocalConfig describes how to detect the locally installed version.

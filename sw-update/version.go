@@ -58,3 +58,20 @@ func CompareVersions(a, b string) int {
 
 	return 0
 }
+
+// HashPrefixMatch reports whether a and b are the same git short hash,
+// tolerating different abbreviation lengths (case-insensitive). Some
+// upstreams embed a longer or shorter hash in a release filename than the
+// one their own binary reports via --version, so a straight string compare
+// would treat a matching build as a perpetual update.
+func HashPrefixMatch(a, b string) bool {
+	a = strings.ToLower(strings.TrimSpace(a))
+	b = strings.ToLower(strings.TrimSpace(b))
+	if a == "" || b == "" {
+		return false
+	}
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	return strings.HasPrefix(b, a)
+}
