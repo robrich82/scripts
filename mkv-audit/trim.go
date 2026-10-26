@@ -118,7 +118,7 @@ func PlanTrim(info MKVInfo, originLang string, accountLangs []string) *TrimPlan 
 	var keptSubs []Track
 	for _, t := range subTracks {
 		lang := normalizeLanguage(t.Properties.Language)
-		forced := containsAny(t.Properties.TrackName, forcedKeywords)
+		forced := isForcedSubName(t.Properties.TrackName)
 		switch {
 		case lang == "und",
 			lang == "eng" && (!forced || keepLang["eng"]):
@@ -212,7 +212,7 @@ func subGroupWinnerFirst(lang string, group []Track) []Track {
 	}
 	var mainCands, forced []Track
 	for _, t := range group {
-		if containsAny(t.Properties.TrackName, forcedKeywords) {
+		if isForcedSubName(t.Properties.TrackName) {
 			forced = append(forced, t)
 		} else if !containsAny(t.Properties.TrackName, forbiddenKeywords) &&
 			!t.Properties.HearingImpaired && !t.Properties.Commentary {
@@ -222,7 +222,7 @@ func subGroupWinnerFirst(lang string, group []Track) []Track {
 	// Fallback: if no clean main candidates, use all non-forced tracks.
 	if len(mainCands) == 0 {
 		for _, t := range group {
-			if !containsAny(t.Properties.TrackName, forcedKeywords) {
+			if !isForcedSubName(t.Properties.TrackName) {
 				mainCands = append(mainCands, t)
 			}
 		}

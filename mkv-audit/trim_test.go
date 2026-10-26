@@ -350,6 +350,19 @@ func TestPlanTrim_NoAccountLangs_DropsEnglishAudioAndForcedSubs(t *testing.T) {
 	}
 }
 
+func TestPlanTrim_DialogueAndSignsSub_NotTreatedAsForced(t *testing.T) {
+	info := MKVInfo{Tracks: []Track{
+		videoTrack(0, "jpn"),
+		audioTrack(1, "jpn", "A_FLAC", 6, true),
+		audioTrack(2, "eng", "A_AC3", 6, false),
+		subTrack(3, "eng", "S_TEXT/ASS", "Dialogue & Signs [TSPlease]", true, false),
+	}}
+	plan := PlanTrim(info, "jpn", nil)
+	if !intsEqual(trackIDs(plan.KeepSubs), []int{3}) {
+		t.Errorf("KeepSubs = %v; want the full Dialogue & Signs sub [3]", trackIDs(plan.KeepSubs))
+	}
+}
+
 func TestPlanTrim_EnglishAccountLang_KeepsEnglishAudioAndForcedSubs(t *testing.T) {
 	plan := PlanTrim(subbedShow(), "jpn", []string{"eng"})
 	if !intsEqual(trackIDs(plan.KeepAudio), []int{1, 2}) {

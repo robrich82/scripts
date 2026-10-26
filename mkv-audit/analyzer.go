@@ -136,6 +136,17 @@ func containsAny(name string, keywords []string) bool {
 	return false
 }
 
+// isForcedSubName reports whether a subtitle track name marks a Signs/Songs/
+// Forced track. A "dialogue" qualifier (e.g. "Dialogue & Signs") marks a full
+// track that merely includes signs, unless "forced" is explicit.
+func isForcedSubName(name string) bool {
+	lower := strings.ToLower(name)
+	if strings.Contains(lower, "forced") {
+		return true
+	}
+	return containsAny(lower, forcedKeywords) && !strings.Contains(lower, "dialog")
+}
+
 // engSubtitleRegionScore returns a preference score for English subtitle
 // track selection when multiple regional variants are available. It detects
 // the effective IETF region via trackRegionKeywords and looks up the score in
@@ -451,7 +462,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		var mainCands, forcedCands []int
 		for _, i := range subTracks {
 			p := tracks[i].Properties
-			if containsAny(p.TrackName, forcedKeywords) {
+			if isForcedSubName(p.TrackName) {
 				forcedCands = append(forcedCands, i)
 			} else if !containsAny(p.TrackName, forbiddenKeywords) && !p.HearingImpaired && !p.Commentary {
 				mainCands = append(mainCands, i)
@@ -462,7 +473,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 		// non-forced tracks as candidates — same as the audio fallback above.
 		if len(mainCands) == 0 {
 			for _, i := range subTracks {
-				if !containsAny(tracks[i].Properties.TrackName, forcedKeywords) {
+				if !isForcedSubName(tracks[i].Properties.TrackName) {
 					mainCands = append(mainCands, i)
 				}
 			}
