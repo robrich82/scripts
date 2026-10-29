@@ -885,7 +885,9 @@ when it shares the asset's host, otherwise the asset's own origin) — Cloudflar
 front ends 403 both Go's default user agent and a spoofed browser one.
 Each asset is tried up to three times with a short backoff on transient
 failures (403, 408, 429, 5xx, and connection errors); a 404 or 401 fails
-immediately.
+immediately. A web page served in place of the file (SourceForge `/download`
+links) is followed through its `<meta http-equiv="refresh">`, up to three
+times; a page without one fails immediately rather than being saved as the asset.
 
 #### Custom update commands
 
