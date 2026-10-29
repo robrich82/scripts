@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - /cbz-fix
+      - /mkv-audit
+      - /mkv-movie
+      - /mkv-music
+      - /mkv-tvshow
+      - /sw-update
+    schedule:
+      interval: weekly
+    groups:
+      go-deps:
+        patterns:
+          - "*"
