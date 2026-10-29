@@ -14,10 +14,10 @@ import (
 	"time"
 )
 
-// browserUserAgent is sent on asset downloads. Bot-protection front ends
-// (Cloudflare among them) answer Go's default "Go-http-client/1.1" with a 403
-// on a cache miss, so a download has to look like an ordinary browser.
-const browserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+// userAgent identifies sw-update on every request. Bot-protection front ends
+// 403 both Go's default "Go-http-client/1.1" (falcosoft.hu) and a spoofed
+// browser UA on a non-browser connection (SourceForge), but accept this.
+const userAgent = "sw-update/1.0 (+https://github.com/)"
 
 // downloadAttempts is how many times a download is tried before giving up.
 const downloadAttempts = 3
@@ -62,7 +62,7 @@ func fetchToFile(client *http.Client, rawURL, referer, destPath string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", browserUserAgent)
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
 	if ref := downloadReferer(rawURL, referer); ref != "" {
 		req.Header.Set("Referer", ref)

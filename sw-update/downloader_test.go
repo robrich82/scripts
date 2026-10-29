@@ -23,8 +23,8 @@ func TestDownloadAssetSendsBrowserHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("downloadAsset: %v", err)
 	}
-	if gotUA != browserUserAgent {
-		t.Errorf("User-Agent = %q, want %q", gotUA, browserUserAgent)
+	if gotUA != userAgent {
+		t.Errorf("User-Agent = %q, want %q", gotUA, userAgent)
 	}
 	if want := srv.URL + "/page.html"; gotReferer != want {
 		t.Errorf("Referer = %q, want %q", gotReferer, want)

@@ -291,7 +291,7 @@ func (h *headerChecker) check(app App) (*CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sw-update/1.0 (+https://github.com/)")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -386,7 +386,7 @@ func (h *htmlChecker) fetch(pageURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sw-update/1.0 (+https://github.com/)")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := h.client.Do(req)
 	if err != nil {

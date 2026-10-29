@@ -880,9 +880,9 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 
 #### Asset downloads
 
-Downloads send a browser `User-Agent` and a `Referer` (the app's `url` when it
-shares the asset's host, otherwise the asset's own origin) — bot-protection
-front ends such as Cloudflare reject Go's default user agent with HTTP 403.
+Downloads send a `sw-update/1.0` `User-Agent` and a `Referer` (the app's `url`
+when it shares the asset's host, otherwise the asset's own origin) — Cloudflare
+front ends 403 both Go's default user agent and a spoofed browser one.
 Each asset is tried up to three times with a short backoff on transient
 failures (403, 408, 429, 5xx, and connection errors); a 404 or 401 fails
 immediately.
