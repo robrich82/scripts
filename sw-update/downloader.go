@@ -4,12 +4,15 @@ import (
 	"archive/zip"
 	"errors"
 	"fmt"
+	"html"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -56,11 +59,42 @@ func downloadAsset(asset Asset, destDir, referer string) (string, error) {
 	return "", lastErr
 }
 
-// fetchToFile GETs rawURL and writes the response body to destPath.
+// maxInterstitialHops bounds how many "your download will start shortly"
+// pages fetchToFile follows before giving up.
+const maxInterstitialHops = 3
+
+// fetchToFile GETs rawURL and writes the response body to destPath. An HTML
+// page served in place of a non-HTML asset (SourceForge's /download links) is
+// followed through its meta refresh rather than saved as the asset.
 func fetchToFile(client *http.Client, rawURL, referer, destPath string) error {
+	for hop := 0; ; hop++ {
+		resp, err := get(client, rawURL, referer)
+		if err != nil {
+			return err
+		}
+		if !isHTMLResponse(resp) || isHTMLName(destPath) {
+			defer resp.Body.Close()
+			return writeBody(resp.Body, destPath)
+		}
+
+		page, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+		next := metaRefreshURL(page, resp.Request.URL)
+		if next == "" || hop >= maxInterstitialHops {
+			return &htmlPageError{URL: rawURL}
+		}
+		referer, rawURL = resp.Request.URL.String(), next
+	}
+}
+
+// get issues a download GET and returns the response if it is a 200.
+func get(client *http.Client, rawURL, referer string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
@@ -70,24 +104,78 @@ func fetchToFile(client *http.Client, rawURL, referer, destPath string) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer resp.Body.Close()
-
 	if resp.StatusCode != 200 {
-		return &httpStatusError{StatusCode: resp.StatusCode, URL: rawURL}
+		resp.Body.Close()
+		return nil, &httpStatusError{StatusCode: resp.StatusCode, URL: rawURL}
 	}
+	return resp, nil
+}
 
+func writeBody(body io.Reader, destPath string) error {
 	f, err := os.Create(destPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	if _, err := io.Copy(f, body); err != nil {
 		return err
 	}
 	return f.Close()
+}
+
+func isHTMLResponse(resp *http.Response) bool {
+	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	return mediaType == "text/html" || mediaType == "application/xhtml+xml"
+}
+
+func isHTMLName(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".html" || ext == ".htm"
+}
+
+var (
+	metaTagRe     = regexp.MustCompile(`(?is)<meta\b[^>]*>`)
+	httpEquivRe   = regexp.MustCompile(`(?i)http-equiv\s*=\s*["']?refresh\b`)
+	metaContentRe = regexp.MustCompile(`(?is)content\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+	refreshURLRe  = regexp.MustCompile(`(?i)url\s*=\s*['"]?([^'"]+)`)
+)
+
+// metaRefreshURL returns the absolute target of page's <meta http-equiv="refresh">,
+// or "" when it has none.
+func metaRefreshURL(page []byte, base *url.URL) string {
+	for _, tag := range metaTagRe.FindAll(page, -1) {
+		if !httpEquivRe.Match(tag) {
+			continue
+		}
+		c := metaContentRe.FindSubmatch(tag)
+		if c == nil {
+			continue
+		}
+		content := html.UnescapeString(string(c[1]) + string(c[2]))
+		m := refreshURLRe.FindStringSubmatch(content)
+		if m == nil {
+			continue
+		}
+		target, err := base.Parse(strings.TrimSpace(m[1]))
+		if err != nil {
+			continue
+		}
+		return target.String()
+	}
+	return ""
+}
+
+// htmlPageError is a web page served where a download was expected — typically
+// an interstitial or login page with no machine-followable link to the file.
+type htmlPageError struct {
+	URL string
+}
+
+func (e *htmlPageError) Error() string {
+	return fmt.Sprintf("%s returned a web page instead of the file", e.URL)
 }
 
 // downloadReferer returns referer when it shares a host with the asset URL, and
@@ -119,6 +207,10 @@ func (e *httpStatusError) Error() string {
 // or a status that tends to be transient (rate limiting, bot-protection blips,
 // server errors). A 404 or a 401 will not fix itself.
 func isRetryable(err error) bool {
+	var page *htmlPageError
+	if errors.As(err, &page) {
+		return false
+	}
 	var status *httpStatusError
 	if !errors.As(err, &status) {
 		// Transport-level failure — connection reset, timeout, DNS.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,80 @@ func TestDownloadAssetGivesUpOnPermanentStatus(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("server calls = %d, want 1 (no retry on 404)", calls)
+	}
+}
+
+func TestDownloadAssetFollowsMetaRefreshInterstitial(t *testing.T) {
+	var fileReferer string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/files/a.zip/download", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(`<html><head><meta http-equiv="refresh" content="5; url=/mirror/a.zip?ts=1&amp;r=x"></head></html>`))
+	})
+	mux.HandleFunc("/mirror/a.zip", func(w http.ResponseWriter, r *http.Request) {
+		fileReferer = r.Header.Get("Referer")
+		if r.URL.RawQuery != "ts=1&r=x" {
+			t.Errorf("query = %q, want entity-decoded ts=1&r=x", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write([]byte("PK"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	path, err := downloadAsset(Asset{Name: "a.zip", URL: srv.URL + "/files/a.zip/download"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("downloadAsset: %v", err)
+	}
+	if body, _ := os.ReadFile(path); string(body) != "PK" {
+		t.Errorf("body = %q, want the file behind the interstitial", body)
+	}
+	if want := srv.URL + "/files/a.zip/download"; fileReferer != want {
+		t.Errorf("Referer = %q, want the interstitial %q", fileReferer, want)
+	}
+}
+
+func TestDownloadAssetRejectsHTMLPageWithoutRefresh(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html>please log in</html>"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	_, err := downloadAsset(Asset{Name: "a.zip", URL: srv.URL}, dir, "")
+	var page *htmlPageError
+	if !errors.As(err, &page) {
+		t.Fatalf("err = %v, want an htmlPageError", err)
+	}
+	if calls != 1 {
+		t.Errorf("server calls = %d, want 1 (no retry)", calls)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.zip")); !os.IsNotExist(err) {
+		t.Errorf("a.zip was written (stat err %v); the HTML page must not be saved as the asset", err)
+	}
+}
+
+func TestMetaRefreshURL(t *testing.T) {
+	base, _ := url.Parse("https://example.com/files/x/download")
+	tests := []struct {
+		name, page, want string
+	}{
+		{"absolute", `<meta http-equiv="refresh" content="5; url=https://dl.example.com/x.zip?a=1&amp;b=2">`, "https://dl.example.com/x.zip?a=1&b=2"},
+		{"relative", `<meta http-equiv='Refresh' content='0;URL=/m/x.zip'>`, "https://example.com/m/x.zip"},
+		{"content first", `<META content="0; url='x.zip'" HTTP-EQUIV="refresh">`, "https://example.com/files/x/x.zip"},
+		{"no url", `<meta http-equiv="refresh" content="30">`, ""},
+		{"other meta", `<meta name="description" content="url=/nope">`, ""},
+		{"none", `<html></html>`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := metaRefreshURL([]byte(tt.page), base); got != tt.want {
+				t.Errorf("metaRefreshURL = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
