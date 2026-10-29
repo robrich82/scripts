@@ -1,0 +1,44 @@
+name: Bug report
+description: A tool doesn't do what it should
+labels: [bug]
+body:
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Tool
+      options:
+        - cbz-fix
+        - mkv-audit
+        - mkv-movie
+        - mkv-music
+        - mkv-tvshow
+        - sw-update
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The command you ran, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit
+      description: Output of `git rev-parse --short HEAD` in the checkout you built from.
+      placeholder: 9b47ddc
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The tool's output, plus `mkvmerge --version` for the mkv-* tools.
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: The relevant config file, if the bug might depend on it. Remove API keys and tokens first.
+      render: json
