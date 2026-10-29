@@ -198,6 +198,18 @@ func TestExtractHTMLAssets(t *testing.T) {
 		}
 	})
 
+	t.Run("deduplicates the same filename linked from different paths", func(t *testing.T) {
+		mirrored := []byte(`<a href="/downloads/video/app-1.2.exe">a</a>
+<a href="/downloads/app-1.2.exe">b</a>`)
+		got := extractHTMLAssets(mirrored, pageURL, []string{"*.exe"})
+		if len(got) != 1 {
+			t.Fatalf("expected 1 asset, got %d: %v", len(got), got)
+		}
+		if got[0].URL != "https://example.com/downloads/video/app-1.2.exe" {
+			t.Errorf("expected first link kept, got %q", got[0].URL)
+		}
+	})
+
 	t.Run("matches single-quoted href attributes", func(t *testing.T) {
 		singleQuoted := []byte(`<a href='/downloads/app-1.2.exe'>exe</a>`)
 		got := extractHTMLAssets(singleQuoted, pageURL, []string{"*.exe"})

@@ -440,10 +440,13 @@ func extractHTMLAssets(body []byte, pageURL string, patterns []string) []Asset {
 				assetURL = base.ResolveReference(ref).String()
 			}
 		}
-		if seen[assetURL] {
+		// Keyed by name, not URL: pages often link the same file from several
+		// paths, and assets are saved by name so a second copy would only
+		// overwrite the first.
+		if seen[name] {
 			continue
 		}
-		seen[assetURL] = true
+		seen[name] = true
 		out = append(out, Asset{Name: name, URL: assetURL})
 	}
 	return out
