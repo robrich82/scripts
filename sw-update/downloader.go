@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"bufio"
 	"errors"
 	"fmt"
 	"html"
@@ -65,33 +66,40 @@ const maxInterstitialHops = 3
 
 // fetchToFile GETs rawURL and writes the response body to destPath. An HTML
 // page served in place of a non-HTML asset (SourceForge's /download links) is
-// followed through its meta refresh rather than saved as the asset.
+// followed through its meta refresh; one without a refresh is an htmlPageError.
 func fetchToFile(client *http.Client, rawURL, referer, destPath string) error {
+	pageURL := rawURL
 	for hop := 0; ; hop++ {
-		resp, err := get(client, rawURL, referer)
+		resp, err := getDownload(client, pageURL, referer)
 		if err != nil {
 			return err
 		}
-		if !isHTMLResponse(resp) || isHTMLName(destPath) {
-			defer resp.Body.Close()
-			return writeBody(resp.Body, destPath)
+		body := bufio.NewReader(resp.Body)
+		if isHTMLName(destPath) || !isHTMLPage(resp, body) {
+			err := writeBody(body, destPath)
+			resp.Body.Close()
+			return err
 		}
 
-		page, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		page, err := io.ReadAll(io.LimitReader(body, 4<<20))
 		resp.Body.Close()
 		if err != nil {
 			return err
 		}
 		next := metaRefreshURL(page, resp.Request.URL)
-		if next == "" || hop >= maxInterstitialHops {
+		if next == "" {
 			return &htmlPageError{URL: rawURL}
 		}
-		referer, rawURL = resp.Request.URL.String(), next
+		if hop == maxInterstitialHops {
+			return &htmlPageError{URL: rawURL, Hops: hop}
+		}
+		referer, pageURL = resp.Request.URL.String(), next
 	}
 }
 
-// get issues a download GET and returns the response if it is a 200.
-func get(client *http.Client, rawURL, referer string) (*http.Response, error) {
+// getDownload issues a GET with the download headers; on a 200 the caller
+// closes the body, any other status is an httpStatusError.
+func getDownload(client *http.Client, rawURL, referer string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -126,9 +134,15 @@ func writeBody(body io.Reader, destPath string) error {
 	return f.Close()
 }
 
-func isHTMLResponse(resp *http.Response) bool {
+// isHTMLPage reports whether resp is a web page: labelled HTML and starting
+// like one, so a binary a server mislabels as text/html is still saved.
+func isHTMLPage(resp *http.Response, body *bufio.Reader) bool {
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	return mediaType == "text/html" || mediaType == "application/xhtml+xml"
+	if mediaType != "text/html" && mediaType != "application/xhtml+xml" {
+		return false
+	}
+	head, _ := body.Peek(512)
+	return strings.HasPrefix(http.DetectContentType(head), "text/html")
 }
 
 func isHTMLName(path string) bool {
@@ -137,30 +151,32 @@ func isHTMLName(path string) bool {
 }
 
 var (
-	metaTagRe     = regexp.MustCompile(`(?is)<meta\b[^>]*>`)
-	httpEquivRe   = regexp.MustCompile(`(?i)http-equiv\s*=\s*["']?refresh\b`)
-	metaContentRe = regexp.MustCompile(`(?is)content\s*=\s*(?:"([^"]*)"|'([^']*)')`)
-	refreshURLRe  = regexp.MustCompile(`(?i)url\s*=\s*['"]?([^'"]+)`)
+	reMetaTag          = regexp.MustCompile(`(?is)<meta\b[^>]*>`)
+	reHTTPEquivRefresh = regexp.MustCompile(`(?i)\shttp-equiv\s*=\s*["']?refresh\b`)
+	reMetaContent      = regexp.MustCompile(`(?is)\scontent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
+	reRefreshURL       = regexp.MustCompile(`(?i)url\s*=\s*['"]?([^'"]+)`)
+	// Only ;-terminated entities: html.UnescapeString alone turns "&region=" into "®ion=".
+	reEntity = regexp.MustCompile(`&#?[0-9A-Za-z]+;`)
 )
 
-// metaRefreshURL returns the absolute target of page's <meta http-equiv="refresh">,
-// or "" when it has none.
+// metaRefreshURL returns the absolute http(s) target of page's
+// <meta http-equiv="refresh">, or "" when it has none.
 func metaRefreshURL(page []byte, base *url.URL) string {
-	for _, tag := range metaTagRe.FindAll(page, -1) {
-		if !httpEquivRe.Match(tag) {
+	for _, tag := range reMetaTag.FindAll(page, -1) {
+		if !reHTTPEquivRefresh.Match(tag) {
 			continue
 		}
-		c := metaContentRe.FindSubmatch(tag)
+		c := reMetaContent.FindSubmatch(tag)
 		if c == nil {
 			continue
 		}
-		content := html.UnescapeString(string(c[1]) + string(c[2]))
-		m := refreshURLRe.FindStringSubmatch(content)
+		content := reEntity.ReplaceAllStringFunc(string(c[1])+string(c[2])+string(c[3]), html.UnescapeString)
+		m := reRefreshURL.FindStringSubmatch(content)
 		if m == nil {
 			continue
 		}
 		target, err := base.Parse(strings.TrimSpace(m[1]))
-		if err != nil {
+		if err != nil || (target.Scheme != "http" && target.Scheme != "https") {
 			continue
 		}
 		return target.String()
@@ -168,13 +184,17 @@ func metaRefreshURL(page []byte, base *url.URL) string {
 	return ""
 }
 
-// htmlPageError is a web page served where a download was expected — typically
-// an interstitial or login page with no machine-followable link to the file.
+// htmlPageError is a web page served where a file was expected. Hops is set
+// when it was still a page after following maxInterstitialHops refreshes.
 type htmlPageError struct {
-	URL string
+	URL  string
+	Hops int
 }
 
 func (e *htmlPageError) Error() string {
+	if e.Hops > 0 {
+		return fmt.Sprintf("%s still returned a web page after following %d refreshes", e.URL, e.Hops)
+	}
 	return fmt.Sprintf("%s returned a web page instead of the file", e.URL)
 }
 

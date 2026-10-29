@@ -137,6 +137,89 @@ func TestDownloadAssetRejectsHTMLPageWithoutRefresh(t *testing.T) {
 	}
 }
 
+func TestDownloadAssetSavesBinaryMislabelledAsHTML(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("PK\x03\x04binary"))
+	}))
+	defer srv.Close()
+
+	path, err := downloadAsset(Asset{Name: "a.zip", URL: srv.URL}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("downloadAsset: %v", err)
+	}
+	if body, _ := os.ReadFile(path); string(body) != "PK\x03\x04binary" {
+		t.Errorf("body = %q, want the binary saved as-is", body)
+	}
+}
+
+func TestDownloadAssetGivesUpOnRefreshLoop(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><meta http-equiv="refresh" content="0; url=/again"></html>`))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	_, err := downloadAsset(Asset{Name: "a.zip", URL: srv.URL + "/start"}, dir, "")
+	var page *htmlPageError
+	if !errors.As(err, &page) || page.Hops != 3 {
+		t.Fatalf("err = %v, want an htmlPageError after 3 hops", err)
+	}
+	if page.URL != srv.URL+"/start" {
+		t.Errorf("error URL = %q, want the asset URL", page.URL)
+	}
+	if calls != 4 {
+		t.Errorf("server calls = %d, want 4 (the page plus 3 refreshes, no retry)", calls)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.zip")); !os.IsNotExist(err) {
+		t.Errorf("a.zip was written (stat err %v)", err)
+	}
+}
+
+func TestDownloadAssetSavesHTMLAssetVerbatim(t *testing.T) {
+	const page = `<html><meta http-equiv="refresh" content="0; url=/elsewhere"></html>`
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(page))
+	}))
+	defer srv.Close()
+
+	path, err := downloadAsset(Asset{Name: "notes.HTM", URL: srv.URL}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("downloadAsset: %v", err)
+	}
+	if body, _ := os.ReadFile(path); string(body) != page || calls != 1 {
+		t.Errorf("body = %q after %d calls, want the page saved without following it", body, calls)
+	}
+}
+
+func TestDownloadAssetInterstitialRefererAcrossHosts(t *testing.T) {
+	var fileReferer string
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fileReferer = r.Header.Get("Referer")
+		w.Header().Set("Content-Type", "application/zip")
+		w.Write([]byte("PK"))
+	}))
+	defer mirror.Close()
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><meta http-equiv="refresh" content="0; url=` + mirror.URL + `/a.zip"></html>`))
+	}))
+	defer page.Close()
+
+	if _, err := downloadAsset(Asset{Name: "a.zip", URL: page.URL + "/download"}, t.TempDir(), ""); err != nil {
+		t.Fatalf("downloadAsset: %v", err)
+	}
+	if want := mirror.URL + "/"; fileReferer != want {
+		t.Errorf("Referer = %q, want the mirror's own origin %q", fileReferer, want)
+	}
+}
+
 func TestMetaRefreshURL(t *testing.T) {
 	base, _ := url.Parse("https://example.com/files/x/download")
 	tests := []struct {
@@ -145,6 +228,10 @@ func TestMetaRefreshURL(t *testing.T) {
 		{"absolute", `<meta http-equiv="refresh" content="5; url=https://dl.example.com/x.zip?a=1&amp;b=2">`, "https://dl.example.com/x.zip?a=1&b=2"},
 		{"relative", `<meta http-equiv='Refresh' content='0;URL=/m/x.zip'>`, "https://example.com/m/x.zip"},
 		{"content first", `<META content="0; url='x.zip'" HTTP-EQUIV="refresh">`, "https://example.com/files/x/x.zip"},
+		{"bare ampersand", `<meta http-equiv="refresh" content="0; url=/x.zip?a=1&region=us&amp;b=2">`, "https://example.com/x.zip?a=1&region=us&b=2"},
+		{"unquoted content", `<meta http-equiv=refresh content=0;url=/m/x.zip>`, "https://example.com/m/x.zip"},
+		{"data-content before content", `<meta data-content="x" http-equiv="refresh" content="0; url=/m/x.zip">`, "https://example.com/m/x.zip"},
+		{"non-http target", `<meta http-equiv="refresh" content="0; url=javascript:alert(1)">`, ""},
 		{"no url", `<meta http-equiv="refresh" content="30">`, ""},
 		{"other meta", `<meta name="description" content="url=/nope">`, ""},
 		{"none", `<html></html>`, ""},
