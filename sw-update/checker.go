@@ -82,6 +82,7 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if token := os.Getenv("GITHUB_PERSONAL_ACCESS_TOKEN"); token != "" {
@@ -291,7 +292,7 @@ func (h *headerChecker) check(app App) (*CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sw-update/1.0 (+https://github.com/)")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -386,7 +387,7 @@ func (h *htmlChecker) fetch(pageURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sw-update/1.0 (+https://github.com/)")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
