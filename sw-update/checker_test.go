@@ -37,6 +37,9 @@ func TestMatchAssetPattern(t *testing.T) {
 		{"*.exe", "setup.msi", false},
 		{"*.zip", "app-1.2.zip", true},
 		{"*.zip", "other-1.2.zip", true},
+		// Glob that also compiles as a regex (where it wouldn't match)
+		{"exiftool-*_64.zip", "exiftool-13.60_64.zip", true},
+		{"exiftool-*_64.zip", "exiftool-13.60_32.zip", false},
 		// Regex (valid regexp, used directly)
 		{`app-\d+\.\d+\.exe`, "app-1.2.exe", true},
 		{`app-\d+\.\d+\.exe`, "app-abc.exe", false},
@@ -205,6 +208,21 @@ func TestExtractHTMLAssets(t *testing.T) {
 			t.Errorf("unexpected name: %q", got[0].Name)
 		}
 		if got[0].URL != "https://example.com/downloads/app-1.2.exe" {
+			t.Errorf("unexpected URL: %q", got[0].URL)
+		}
+	})
+
+	t.Run("names SourceForge /download links by the file segment", func(t *testing.T) {
+		const href = "https://sourceforge.net/projects/exiftool/files/exiftool-13.60_64.zip/download"
+		sf := []byte(`<a href="` + href + `">zip</a>`)
+		got := extractHTMLAssets(sf, pageURL, []string{"exiftool-*_64.zip"})
+		if len(got) != 1 {
+			t.Fatalf("expected 1 asset, got %d: %v", len(got), got)
+		}
+		if got[0].Name != "exiftool-13.60_64.zip" {
+			t.Errorf("unexpected name: %q", got[0].Name)
+		}
+		if got[0].URL != href {
 			t.Errorf("unexpected URL: %q", got[0].URL)
 		}
 	})

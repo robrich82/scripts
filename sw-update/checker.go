@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -171,11 +172,12 @@ func sortAndLimitAssets(assets []Asset, sort string) []Asset {
 }
 
 // matchAssetPattern matches an asset name against a pattern.
-// If the pattern is a valid regular expression, it is used as a full-string regex match.
-// Otherwise, it falls back to filepath.Match glob syntax.
+// It matches if either a full-string regex match or a filepath.Match glob
+// succeeds: a glob like "app-*_64.zip" is also a valid regex ("app" then zero
+// or more "-"), so trying regex alone would silently reject it.
 func matchAssetPattern(pat, name string) bool {
-	if re, err := regexp.Compile("^(?:" + pat + ")$"); err == nil {
-		return re.MatchString(name)
+	if re, err := regexp.Compile("^(?:" + pat + ")$"); err == nil && re.MatchString(name) {
+		return true
 	}
 	matched, _ := filepath.Match(pat, name)
 	return matched
@@ -421,7 +423,7 @@ func extractHTMLAssets(body []byte, pageURL string, patterns []string) []Asset {
 		if href == "" {
 			href = string(m[2])
 		}
-		name := filepath.Base(href)
+		name := hrefFileName(href)
 		matched := false
 		for _, pat := range patterns {
 			if matchAssetPattern(pat, name) {
@@ -445,4 +447,19 @@ func extractHTMLAssets(body []byte, pageURL string, patterns []string) []Asset {
 		out = append(out, Asset{Name: name, URL: assetURL})
 	}
 	return out
+}
+
+// hrefFileName returns the filename an href points at. SourceForge mirror links
+// end in "/download" (e.g. .../files/app-1.2.zip/download), so the real name is
+// the segment before it.
+func hrefFileName(href string) string {
+	p := href
+	if u, err := url.Parse(href); err == nil {
+		p = u.Path
+	}
+	p = strings.TrimSuffix(p, "/")
+	if path.Base(p) == "download" {
+		p = path.Dir(p)
+	}
+	return path.Base(p)
 }
