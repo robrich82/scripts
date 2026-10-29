@@ -40,6 +40,7 @@ func (s *sfChecker) check(app App) (*CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err

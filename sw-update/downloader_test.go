@@ -6,10 +6,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestDownloadAssetSendsBrowserHeaders(t *testing.T) {
+func TestDownloadAssetSendsUserAgentAndReferer(t *testing.T) {
 	var gotUA, gotReferer string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.Header.Get("User-Agent")
@@ -23,8 +24,8 @@ func TestDownloadAssetSendsBrowserHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("downloadAsset: %v", err)
 	}
-	if gotUA != userAgent {
-		t.Errorf("User-Agent = %q, want %q", gotUA, userAgent)
+	if !strings.HasPrefix(gotUA, "sw-update/") {
+		t.Errorf("User-Agent = %q, want sw-update/...", gotUA)
 	}
 	if want := srv.URL + "/page.html"; gotReferer != want {
 		t.Errorf("Referer = %q, want %q", gotReferer, want)

@@ -82,6 +82,7 @@ func (g *githubChecker) check(app App) (*CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if token := os.Getenv("GITHUB_PERSONAL_ACCESS_TOKEN"); token != "" {
