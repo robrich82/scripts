@@ -25,6 +25,7 @@ What running the tool looks like before and after. Call out:
 
 ```
 make vet     #
+make vet-linux  #
 make test    #
 make all     #
 ```

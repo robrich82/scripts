@@ -1,4 +1,4 @@
-def refs: [.. | objects | ."$ref"? | strings];
+def refs: [.. | objects | ."$ref" | strings];
 def resolve($spec): ltrimstr("#/") | split("/") as $keys | $spec | getpath($keys);
 
 # Walks references transitively; $seen stops cycles between schemas.
@@ -11,6 +11,6 @@ def closure($spec; $todo; $seen):
   end;
 
 . as $spec
-| (if ($route | startswith("/")) then $route else "/" + $route end) as $path
+| ("/" + ($route | ltrimstr("/"))) as $path
 | ($spec.paths[$path] // error("No such path: \($path)")) as $item
 | {($path): $item, refs: closure($spec; $item | refs; {})}

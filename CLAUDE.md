@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All code in this project should be written in Go where possible.
 
 ## Git Commits
-After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `make vet` or `gofmt` before committing.
+After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `make vet`, `make vet-linux` or `gofmt` before committing.
 
 ## README
 When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change.
@@ -21,9 +21,9 @@ Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invo
 - `make vuln` — `govulncheck` per module (needs network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-latest`, one job per module, and includes the `make vet-linux` check. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
+CI (`.github/workflows/ci.yml`) runs on `windows-latest`, one job per module, and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
 
-Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`.
+Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`. The block is best-effort: wrappers such as `sh -c "go build"` get through. Run `sh .claude/hooks/test.sh` after changing it. The hooks need `jq` on PATH, and without it every Bash and PowerShell call is refused until Claude Code restarts from a shell that has it.
 
 ## Architecture
 
