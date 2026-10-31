@@ -16,18 +16,21 @@ Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invo
 
 - `make all` / `make <tool>` — build to `dist/<tool>.exe`. The make target always equals the module directory name.
 - `make vet` — `go vet`, `gofmt -l`, `staticcheck`, `unparam` per module (fails on unformatted files).
+- `make vet-linux` — `GOOS=linux go vet ./...` per module, to type-check the non-Windows stubs.
 - `make test` — `go test ./...` per module.
 - `make vuln` — `govulncheck` per module (needs network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-latest`, one job per module, and additionally runs `GOOS=linux go vet ./...` to type-check the non-Windows stubs. `make vet` does not, so after touching a `*_windows.go` file or its `*_stub.go`/`*_other.go` counterpart, run that command in the module too.
+CI (`.github/workflows/ci.yml`) runs on `windows-latest`, one job per module, and includes the `make vet-linux` check. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
+
+Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`.
 
 ## Architecture
 
 Six independent tools, each its own Go module (`package main`) with its own `go.mod` — there is no shared library module. Consequences:
 
-- **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted slightly; a bug fix in one usually needs porting to the other.
-- Adding a new tool means updating every Makefile target (`all`, `test`, `vet`, `vuln`, `.PHONY`), the CI matrix, the README tools table, and possibly a `configs/` junction (see the `configs-symlink` skill).
+- **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other, so run the `twin-port-checker` agent after changing either.
+- Adding a new tool means updating every Makefile target (`all`, `test`, `vet`, `vet-linux`, `vuln`, `.PHONY`), the CI matrix, the README tools table, and possibly a `configs/` junction (see the `configs-symlink` skill).
 
 Common shape of each tool:
 
@@ -41,4 +44,4 @@ Cross-tool coupling: mkv-audit's track trimming reads `manual_data.json` from `%
 Environment: `TMDB_API_KEY` (mkv-movie, mkv-tvshow; optional for mkv-audit), `PLEX_URL`, `PLEX_TOKEN` (optional Plex integration in mkv-movie, mkv-tvshow, mkv-music), `PLEX_ALT_TOKEN`, `PLEX_ALT2_TOKEN` (mkv-movie/mkv-tvshow: only per-account stream/language prefs use these), `GITHUB_PERSONAL_ACCESS_TOKEN` (sw-update rate limit).
 
 ## Plex API
-The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it when working with Plex API endpoints, request/response shapes, or authentication.
+The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it through the `plex-api` skill when working with Plex API endpoints, request/response shapes, or authentication.
