@@ -4,9 +4,9 @@ description: Look up Plex endpoints in openapi.json by path, summary, tag or ope
 user-invocable: false
 ---
 
-`openapi.json` is about 32,000 lines, so query it with the bundled script rather than reading it.
+`openapi.json` is about 32,000 lines, so query it with the bundled `jq` filters rather than reading it.
 
 Run from the repo root:
 
-- Search: `node .claude/skills/plex-api/lookup.js <regex>` lists matching operations. The regex is case-insensitive.
-- Detail: `node .claude/skills/plex-api/lookup.js --detail <path>` prints one path's operations and every schema they reference. Omit the leading slash, because Git Bash rewrites it into a Windows path: `--detail library/sections/prefs`.
+- Search: `jq -r --arg re '<regex>' -f .claude/skills/plex-api/search.jq openapi.json` lists matching operations. The regex is case-insensitive.
+- Detail: `jq --arg route '<path>' -f .claude/skills/plex-api/detail.jq openapi.json` prints one path's operations and every schema they reference. Omit the leading slash, because Git Bash rewrites it into a Windows path: `--arg route 'library/sections/prefs'`.

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-go-build.js\""
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-go-build.sh\""
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt-on-edit.js\""
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt-on-edit.sh\""
           }
         ]
       }
