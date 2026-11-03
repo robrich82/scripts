@@ -889,10 +889,12 @@ immediately. A web page served in place of the file (SourceForge `/download`
 links) is followed through its `<meta http-equiv="refresh">`, up to three
 times; a page without one fails immediately rather than being saved as the asset.
 
-When run, `.exe`/`.msi` assets launch elevated; `.zip` and `.7z` assets are
-extracted next to the download and the folder opened. A password-protected
-archive needs an app-level `archive_password` (ZipCrypto zips and AES 7z are
-supported; AES-encrypted zips are not):
+At the "Run/open downloaded file(s)?" prompt, `.exe`/`.msi` assets launch
+elevated; `.zip` and `.7z` assets are extracted next to the download and the
+folder opened. A password-protected archive needs an app-level
+`archive_password` (ZipCrypto zips and AES 7z; AES-encrypted zips are not
+supported). If running or extracting fails, the "Mark version as
+installed/seen?" prompt defaults to No.
 
 ```json
 {

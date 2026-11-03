@@ -257,13 +257,8 @@ func runOrOpen(path, password string) error {
 		return runElevated("msiexec", fmt.Sprintf(`/i "%s"`, path))
 
 	case strings.HasSuffix(lower, ".zip"), strings.HasSuffix(lower, ".7z"):
-		ext := filepath.Ext(path)
-		destDir := strings.TrimSuffix(path, ext)
-		extract := extractZip
-		if strings.EqualFold(ext, ".7z") {
-			extract = extract7z
-		}
-		if err := extract(path, destDir, password); err != nil {
+		destDir := strings.TrimSuffix(path, filepath.Ext(path))
+		if err := extractArchive(path, destDir, password); err != nil {
 			return err
 		}
 		fmt.Printf("  Extracted to %s\n", destDir)
