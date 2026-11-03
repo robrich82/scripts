@@ -97,18 +97,30 @@ func cmdInstall(args []string) error {
 
 	fmt.Print("\nRun/open downloaded file(s)? [Y/n]: ")
 	line, _ = reader.ReadString('\n')
+	openFailed := false
 	if !strings.EqualFold(strings.TrimSpace(line), "n") {
 		for _, path := range downloaded {
-			if err := runOrOpen(path); err != nil {
+			if err := runOrOpen(path, app.ArchivePassword); err != nil {
 				fmt.Fprintf(os.Stderr, "  Error opening %s: %v\n", filepath.Base(path), err)
+				openFailed = true
 			}
 		}
 	}
 
 	if app.Local.Type == "" || app.Local.Type == "none" {
-		fmt.Print("\nMark version as installed/seen? [Y/n]: ")
+		// After a failed run/extract, default to not marking it installed.
+		prompt := "[Y/n]"
+		if openFailed {
+			prompt = "[y/N]"
+		}
+		fmt.Printf("\nMark version as installed/seen? %s: ", prompt)
 		line, _ = reader.ReadString('\n')
-		if !strings.EqualFold(strings.TrimSpace(line), "n") {
+		answer := strings.TrimSpace(line)
+		accept := !strings.EqualFold(answer, "n")
+		if openFailed {
+			accept = strings.EqualFold(answer, "y")
+		}
+		if accept {
 			state, err := LoadState()
 			if err == nil {
 				st := state.Get(name)

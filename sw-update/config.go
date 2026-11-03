@@ -53,6 +53,8 @@ type App struct {
 	Checker CheckerConfig `json:"checker"`
 	Local   LocalConfig   `json:"local"`
 	Update  *UpdateConfig `json:"update,omitempty"` // custom in-place update command (optional)
+
+	ArchivePassword string `json:"archive_password,omitempty"` // decrypts a password-protected .zip/.7z asset
 }
 
 // Config is the top-level configuration file.
