@@ -21,7 +21,7 @@ Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invo
 - `make vuln` — `govulncheck` per module (needs network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-latest`, one job per module, and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
+CI (`.github/workflows/ci.yml`) runs on `windows-latest`, one job per module that has a `go.mod` (only those with changed files, except on the weekly run or a `ci.yml` change), and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
 
 Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`, in sessions started at the repo root.
 - The block is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
@@ -33,7 +33,7 @@ Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and b
 Six independent tools, each its own Go module (`package main`) with its own `go.mod` — there is no shared library module. Consequences:
 
 - **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other, so run the `twin-port-checker` agent after changing either.
-- Adding a new tool means updating every Makefile target (`all`, `test`, `vet`, `vet-linux`, `vuln`, `.PHONY`), the CI matrix, the README tools table, and possibly a `configs/` junction (see the `configs-symlink` skill).
+- Adding a new tool means updating every Makefile target (`all`, `test`, `vet`, `vet-linux`, `vuln`, `.PHONY`), the README tools table, and possibly a `configs/` junction (see the `configs-symlink` skill).
 
 Common shape of each tool:
 
