@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/zip"
 	"bufio"
 	"errors"
 	"fmt"
@@ -243,8 +242,9 @@ func isRetryable(err error) bool {
 	return status.StatusCode >= 500
 }
 
-// runOrOpen executes an installer, extracts an archive, or opens the folder in Explorer.
-func runOrOpen(path string) error {
+// runOrOpen executes an installer, extracts an archive, or opens the folder in
+// Explorer. password decrypts encrypted .zip/.7z archives.
+func runOrOpen(path, password string) error {
 	lower := strings.ToLower(filepath.Base(path))
 
 	switch {
@@ -256,68 +256,24 @@ func runOrOpen(path string) error {
 		fmt.Printf("  Running msiexec for %s...\n", filepath.Base(path))
 		return runElevated("msiexec", fmt.Sprintf(`/i "%s"`, path))
 
-	case strings.HasSuffix(lower, ".zip"):
-		destDir := strings.TrimSuffix(path, ".zip")
-		if err := extractZip(path, destDir); err != nil {
+	case strings.HasSuffix(lower, ".zip"), strings.HasSuffix(lower, ".7z"):
+		ext := filepath.Ext(path)
+		destDir := strings.TrimSuffix(path, ext)
+		extract := extractZip
+		if strings.EqualFold(ext, ".7z") {
+			extract = extract7z
+		}
+		if err := extract(path, destDir, password); err != nil {
 			return err
 		}
 		fmt.Printf("  Extracted to %s\n", destDir)
 		return openExplorer(destDir)
 
 	default:
-		// .7z, .tar.gz, etc. — just open the containing folder.
+		// .tar.gz, etc. — just open the containing folder.
 		fmt.Printf("  Opening folder for %s\n", filepath.Base(path))
 		return openExplorer(filepath.Dir(path))
 	}
-}
-
-// extractZip extracts a zip archive to destDir.
-func extractZip(zipPath, destDir string) error {
-	r, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return fmt.Errorf("open zip %s: %w", zipPath, err)
-	}
-	defer r.Close()
-
-	fmt.Printf("  Extracting %s...\n", filepath.Base(zipPath))
-
-	for _, f := range r.File {
-		destPath := filepath.Join(destDir, f.Name)
-
-		// Prevent zip slip.
-		cleanDest := filepath.Clean(destDir) + string(os.PathSeparator)
-		if !strings.HasPrefix(filepath.Clean(destPath)+string(os.PathSeparator), cleanDest) {
-			return fmt.Errorf("zip slip detected: %s", f.Name)
-		}
-
-		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(destPath, 0755); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			return err
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-		out, err := os.Create(destPath)
-		if err != nil {
-			rc.Close()
-			return err
-		}
-		_, copyErr := io.Copy(out, rc)
-		rc.Close()
-		out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-	}
-	return nil
 }
 
 // openExplorer opens a folder in Windows Explorer.

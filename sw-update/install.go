@@ -99,7 +99,7 @@ func cmdInstall(args []string) error {
 	line, _ = reader.ReadString('\n')
 	if !strings.EqualFold(strings.TrimSpace(line), "n") {
 		for _, path := range downloaded {
-			if err := runOrOpen(path); err != nil {
+			if err := runOrOpen(path, app.ArchivePassword); err != nil {
 				fmt.Fprintf(os.Stderr, "  Error opening %s: %v\n", filepath.Base(path), err)
 			}
 		}
