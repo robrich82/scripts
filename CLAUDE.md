@@ -23,7 +23,10 @@ Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invo
 
 CI (`.github/workflows/ci.yml`) runs on `windows-latest`, one job per module, and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
 
-Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`. The block is best-effort: wrappers such as `sh -c "go build"` get through. Run `sh .claude/hooks/test.sh` after changing it. The hooks need `jq` on PATH, and without it every Bash and PowerShell call is refused until Claude Code restarts from a shell that has it.
+Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`, in sessions started at the repo root.
+- The block is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
+- They need `jq` on PATH. Without it every Bash and PowerShell call is refused until Claude Code restarts from a shell that has it.
+- After changing a hook, run `sh .claude/hooks/test.sh` from the repo root.
 
 ## Architecture
 

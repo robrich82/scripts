@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 ---
 mkv-movie and mkv-tvshow are separate modules that duplicate a lot of code, and the copies have drifted.
 
-The diff is `git diff origin/main...HEAD` plus `git diff HEAD`, so committed and uncommitted work both count. Use Bash only for read-only git commands.
+The diff is `git diff origin/main...HEAD`, `git diff HEAD`, and any untracked files from `git ls-files --others --exclude-standard`, so committed, uncommitted and new work all count. Use Bash only for read-only git commands.
 
 For each change in the diff, find the equivalent code in the sibling module. Match by function and behaviour, not by file name or line. Report one of:
 

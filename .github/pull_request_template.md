@@ -24,10 +24,10 @@ What running the tool looks like before and after. Call out:
 ### Verification
 
 ```
-make vet     #
+make vet        #
 make vet-linux  #
-make test    #
-make all     #
+make test       #
+make all        #
 ```
 
 <!-- Manual checks: which tool, which files or commands, what you did and what happened. -->
