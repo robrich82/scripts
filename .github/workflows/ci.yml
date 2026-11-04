@@ -16,14 +16,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.pick.outputs.modules }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Every module on a schedule, a ci.yml change, or an unknown base
+      # (new branch, force push); otherwise only modules with changed files.
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          all=$(dirname */go.mod)
+          if [ "$EVENT" = schedule ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            picked=$all
+          else
+            files=$(git diff --name-only "$BASE...$HEAD")
+            if grep -qx '.github/workflows/ci.yml' <<<"$files"; then
+              picked=$all
+            else
+              picked=$(for m in $all; do grep -q "^$m/" <<<"$files" && echo "$m"; done || true)
+            fi
+          fi
+          echo "modules=$(printf '%s\n' $picked | jq -Rnc '[inputs | select(length > 0)]')" >> "$GITHUB_OUTPUT"
+
   check:
+    needs: changes
+    if: needs.changes.outputs.modules != '[]'
     name: ${{ matrix.module }}
     # The tools target Windows (filetime, process detection), so test there.
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        module: [cbz-fix, mkv-audit, mkv-movie, mkv-music, mkv-tvshow, sw-update]
+        module: ${{ fromJSON(needs.changes.outputs.modules) }}
     defaults:
       run:
         shell: bash
