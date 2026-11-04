@@ -15,7 +15,7 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 
 ## Requirements
 
-- Go 1.27.3+ (pinned in `.tool-versions` for asdf users)
+- Go 1.27.3+ (pinned in `mise.toml`)
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
 
