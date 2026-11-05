@@ -380,8 +380,8 @@ func assertFiles(t *testing.T, dir string, names ...string) {
 
 // assertTagsStable runs dir twice and checks the second run writes each video
 // the title suffix the first run gave it: a renamed file's tag must not change
-// once more on the next run.
-func assertTagsStable(t *testing.T, dir string, global []string, answers ...string) {
+// once more on the next run. It returns the first run's suffixes by filename.
+func assertTagsStable(t *testing.T, dir string, global []string, answers ...string) map[string]string {
 	t.Helper()
 	suffixes := func(answers []string) map[string]string {
 		tagger := &fakeTagger{}
@@ -397,14 +397,15 @@ func assertTagsStable(t *testing.T, dir string, global []string, answers ...stri
 	}
 	first := suffixes(answers)
 	second := suffixes(nil)
-	if len(second) == 0 {
-		t.Fatal("second run tagged nothing")
+	if len(second) == 0 || len(second) != len(first) {
+		t.Fatalf("first run tagged %q, second run %q", first, second)
 	}
 	for name, want := range second {
 		if got, ok := first[name]; !ok || got != want {
 			t.Errorf("%s: first run tag %q (tagged %v), second run %q", name, got, ok, want)
 		}
 	}
+	return first
 }
 
 func TestRun_RenameTagsLikeNextRun(t *testing.T) {
@@ -420,13 +421,17 @@ func TestRun_RenameTagsLikeNextRun(t *testing.T) {
 	})
 	t.Run("ignored text dropped from kept extra", func(t *testing.T) {
 		dir := musicDir(t, "01 - New.flac", "01 - New - New-video.mkv", "01 - Old - Old (Live) (Official Video).mkv")
-		assertTagsStable(t, dir, []string{" (Official Video)"}, "r")
-		assertFiles(t, dir, "01 - New - New (Live)-video.mkv")
+		tags := assertTagsStable(t, dir, []string{" (Official Video)"}, "r")
+		if got, ok := tags["01 - New - New (Live)-video.mkv"]; !ok || got != "(Live)" {
+			t.Errorf("tags = %q, want the renamed video tagged %q", tags, "(Live)")
+		}
 	})
 	t.Run("taken name keeps extra text", func(t *testing.T) {
 		dir := musicDir(t, "01 - foo.flac", "01 - bob - bob-video.mkv", "01 - bob - bob (Special Music Video).mkv")
-		assertTagsStable(t, dir, nil, "r", "r")
-		assertFiles(t, dir, "01 - foo - foo-video.mkv", "01 - foo - foo (Special Music Video)-video.mkv")
+		tags := assertTagsStable(t, dir, nil, "r", "r")
+		if got := tags["01 - foo - foo (Special Music Video)-video.mkv"]; got != "(Special Music Video)" {
+			t.Errorf("tags = %q, want the special video tagged %q", tags, "(Special Music Video)")
+		}
 	})
 }
 
@@ -519,6 +524,21 @@ func TestRun_TakenNameIgnoredTextSettles(t *testing.T) {
 	p2.ignoreData = p.ignoreData
 	if stats, _, _ := p2.Run(); stats != (Stats{}) {
 		t.Errorf("second run stats = %+v, want none", stats)
+	}
+}
+
+func TestRun_RenameTagsFromRenameMatchWhenNewNameRematches(t *testing.T) {
+	// The new name "01 - Love - Love-video" fuzzy-matches "01 - Love Love"
+	// better, so it isn't judged correct: tag from the audio the rename used.
+	dir := musicDir(t, "01 - Love.flac", "01 - Love Love.flac", "01 - Love.mkv")
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
+	p.tagger = tagger
+	p.Run()
+	assertFiles(t, dir, "01 - Love - Love-video.mkv")
+	if len(tagger.calls) != 1 || filepath.Base(tagger.calls[0].mkvPath) != "01 - Love - Love-video.mkv" ||
+		filepath.Base(tagger.calls[0].audioPath) != "01 - Love.flac" {
+		t.Errorf("tag calls = %+v", tagger.calls)
 	}
 }
 
