@@ -15,7 +15,7 @@ When adding a new tool, changing a tool's commands/flags/config, or adding new f
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
 
 - `make all` / `make <tool>` — build to `dist/<tool>.exe`. The make target always equals the module directory name.
-- `make vet` — `go vet`, `gofmt -l`, `staticcheck`, `unparam` per module (fails on unformatted files). The linters are pinned in `mise.toml`; `mise install` provides them.
+- `make vet` — `go vet`, `gofmt -l`, `go mod tidy -diff`, `staticcheck`, `unparam` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters are pinned in `mise.toml`; `mise install` provides them.
 - `make vet-linux` — `GOOS=linux go vet ./...` per module, to type-check the non-Windows stubs.
 - `make test` — `go test ./...` per module.
 - `make vuln` — `govulncheck` per module (needs network).

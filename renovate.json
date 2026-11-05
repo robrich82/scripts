@@ -5,6 +5,7 @@
   ],
   "automerge": true,
   "platformAutomerge": false,
+  "postUpdateOptions": ["gomodTidy"],
   "minimumReleaseAge": "1 day",
   "vulnerabilityAlerts": {
     "description": "Renovate defaults this to null, so security-fix PRs would skip the wait.",

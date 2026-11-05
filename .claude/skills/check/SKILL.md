@@ -7,7 +7,7 @@ Run the full test and lint suite across all modules.
 
 ## Steps
 
-1. Run `make vet` — executes `go vet`, `gofmt`, `staticcheck`, and `unparam` across all modules.
+1. Run `make vet` — executes `go vet`, `gofmt`, `go mod tidy -diff`, `staticcheck`, and `unparam` across all modules.
    - If vet fails, report the errors clearly. Do not proceed to tests until vet passes.
    - Fix any `gofmt` or `go vet` issues before continuing.
 2. Run `make vet-linux` — type-checks the non-Windows stubs, as CI does.
