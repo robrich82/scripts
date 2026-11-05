@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -201,6 +202,14 @@ func cleanVideoBase(base string) (clean, suffix, postSuffix string) {
 		}
 	}
 	return base, "", ""
+}
+
+// videoSuffixRank is 0 for a filename with a known video suffix, else 1.
+func videoSuffixRank(f string) int {
+	if _, s, _ := cleanVideoBase(strings.TrimSuffix(f, filepath.Ext(f))); s != "" {
+		return 0
+	}
+	return 1
 }
 
 // trackNumber returns the text before the first " - " separator, or "".
@@ -467,6 +476,11 @@ func (p *Processor) Run() (Stats, []string, []string) {
 		files := dirFiles[dir]
 		audioData := buildAudioData(files)
 		audioPaths := buildAudioPaths(files)
+		// A video without a known suffix is given "-video" as a guess; prompt for
+		// the ones that really are "-video" (etc.) first so they claim the name.
+		slices.SortStableFunc(files, func(a, b string) int {
+			return cmp.Compare(videoSuffixRank(a), videoSuffixRank(b))
+		})
 		for _, f := range files {
 			ext := strings.ToLower(filepath.Ext(f))
 			if !containsStr(videoExts, ext) {

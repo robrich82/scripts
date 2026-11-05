@@ -296,6 +296,23 @@ func TestRun_CountsSkipped(t *testing.T) {
 	}
 }
 
+func TestRun_SuffixedVideoPromptedBeforeUnsuffixed(t *testing.T) {
+	// Both videos target "01 - foo - foo-video". The "-video" file sorts after
+	// the " (Special Music Video)" one but must get the first rename prompt.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "01 - bob - bob-video.mkv"), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644)
+
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "s"}})
+	p.Run()
+	for _, name := range []string{"01 - foo - foo-video.mkv", "01 - bob - bob (Special Music Video).mkv"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("want %q to exist: %v", name, err)
+		}
+	}
+}
+
 // --- LoadIgnorePatterns tests ---
 
 func writeIgnoreJSON(t *testing.T, path string, data IgnoreData) {
