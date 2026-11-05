@@ -6,6 +6,10 @@
   "automerge": true,
   "platformAutomerge": false,
   "minimumReleaseAge": "1 day",
+  "vulnerabilityAlerts": {
+    "description": "Renovate defaults this to null, so security-fix PRs would skip the wait.",
+    "minimumReleaseAge": "1 day"
+  },
   "customManagers": [
     {
       "customType": "regex",
