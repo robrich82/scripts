@@ -212,6 +212,41 @@ func videoSuffixRank(f string) int {
 	return 1
 }
 
+// videoNameTaken reports whether a video other than self is named base with
+// any video extension.
+func videoNameTaken(dir, base, self string) bool {
+	for _, ext := range videoExts {
+		path := filepath.Join(dir, base+ext)
+		if strings.EqualFold(path, self) {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// extraText returns what follows the repeated title in an "NN - Title - Title…"
+// name ("(Special Music Video)"), or "" when the title isn't repeated.
+func extraText(name string) string {
+	_, rest, ok := strings.Cut(name, " - ")
+	if !ok {
+		return ""
+	}
+	for i := 0; ; {
+		j := strings.Index(rest[i:], " - ")
+		if j < 0 {
+			return ""
+		}
+		title, after := rest[:i+j], rest[i+j+3:]
+		if strings.HasPrefix(after, title) {
+			return strings.TrimSpace(after[len(title):])
+		}
+		i += j + 3
+	}
+}
+
 // trackNumber returns the text before the first " - " separator, or "".
 func trackNumber(name string) string {
 	if before, _, ok := strings.Cut(name, " - "); ok {
@@ -310,7 +345,7 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 	}
 	audioFullPath := filepath.Join(videoDir, audioFilename)
 	titleSuffix := p.findIgnoredPatterns(cleanVideo, videoPath)
-	if t := strings.TrimSpace(postSuffix); t != "" {
+	if t := strings.TrimSpace(postSuffix); t != "" && !strings.Contains(titleSuffix, t) {
 		if titleSuffix == "" {
 			titleSuffix = t
 		} else {
@@ -384,6 +419,28 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		return ""
 	}
 
+	// Another video already has the standard name: keep this one's extra text
+	// ("(Special Music Video)") so it gets a distinct name of its own.
+	// tagPost is what follows the title in the MKV title tag.
+	tagPost := postSuffix
+	if videoNameTaken(videoDir, targetName, fullPath) {
+		extra := extraText(cleanVideo)
+		if extra != "" {
+			tagPost = " " + extra + postSuffix
+		}
+		if strings.TrimSpace(tagPost) != "" {
+			targetName = matchedBase
+			if extra != "" {
+				targetName += " " + extra
+			}
+			targetName += foundSuffix + postSuffix
+			if targetName == videoBase {
+				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
+				return ""
+			}
+		}
+	}
+
 	fmt.Printf("\n[?] UNMATCHED VIDEO: %s\n", videoFile)
 	fmt.Printf("    SUGGESTED MATCH: %s%s\n", targetName, ext)
 	fmt.Printf("    Current: %s\n", cleanVideo+postSuffix)
@@ -411,7 +468,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		} else {
 			fmt.Printf("    [OK] Renamed to: %s%s\n", targetName, ext)
 			p.markArtistTouched(videoDir)
-			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath, audioPaths)
+			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
 			return "renamed"
 		}
 	case "i":

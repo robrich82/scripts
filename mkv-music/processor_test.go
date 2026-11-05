@@ -313,6 +313,62 @@ func TestRun_SuffixedVideoPromptedBeforeUnsuffixed(t *testing.T) {
 	}
 }
 
+func TestRun_TakenNameKeepsExtraText(t *testing.T) {
+	// Once the "-video" file has the standard name, the special video is
+	// offered the new title with its "(Special Music Video)" kept.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "01 - bob - bob-video.mkv"), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644)
+
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "r"}})
+	p.tagger = tagger
+	if stats, _, _ := p.Run(); stats.Renamed != 2 {
+		t.Errorf("Renamed=%d, want 2", stats.Renamed)
+	}
+	special := filepath.Join(dir, "01 - foo - foo (Special Music Video).mkv")
+	for _, name := range []string{"01 - foo - foo-video.mkv", filepath.Base(special)} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("want %q to exist: %v", name, err)
+		}
+	}
+	if n := len(tagger.calls); n != 2 || tagger.calls[1].mkvPath != special || tagger.calls[1].titleSuffix != "(Special Music Video)" {
+		t.Errorf("tag calls = %+v", tagger.calls)
+	}
+
+	// A second run finds both names correct: no prompts.
+	if stats, _, _ := NewProcessor(dir, "", &fakePrompter{}).Run(); stats != (Stats{}) {
+		t.Errorf("second run stats = %+v, want none", stats)
+	}
+}
+
+func TestRun_FreeNameStillGetsStandardName(t *testing.T) {
+	// With no "-video" file, the special video is offered the standard name.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644)
+
+	NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	if _, err := os.Stat(filepath.Join(dir, "01 - foo - foo-video.mkv")); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestExtraText(t *testing.T) {
+	for in, want := range map[string]string{
+		"01 - bob - bob (Special Music Video)": "(Special Music Video)",
+		"01 - A - B - A - B (Live)":            "(Live)",
+		"01 - bob - bob":                       "",
+		"01 - bob - other":                     "",
+		"NoSeparator":                          "",
+	} {
+		if got := extraText(in); got != want {
+			t.Errorf("extraText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // --- LoadIgnorePatterns tests ---
 
 func writeIgnoreJSON(t *testing.T, path string, data IgnoreData) {
