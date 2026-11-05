@@ -28,7 +28,7 @@
       "schedule": ["before 6am on monday"]
     },
     {
-      "description": "mise names staticcheck by package path, which has no version tags; look up its module.",
+      "description": "Go tags versions per module, not per package path as mise names staticcheck.",
       "matchDepNames": ["go:honnef.co/go/tools/cmd/staticcheck"],
       "overridePackageName": "honnef.co/go/tools"
     }
