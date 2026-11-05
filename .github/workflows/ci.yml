@@ -109,5 +109,7 @@ jobs:
       - name: go test
         run: go test ./...
 
+      # A new advisory shouldn't block unrelated merges; the weekly run still goes red.
       - name: govulncheck
         run: govulncheck ./...
+        continue-on-error: ${{ github.event_name != 'schedule' }}
