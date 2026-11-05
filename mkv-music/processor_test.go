@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -293,6 +294,43 @@ func TestRun_CountsSkipped(t *testing.T) {
 	}
 	if len(skipped) != 1 {
 		t.Errorf("skipped paths len=%d, want 1", len(skipped))
+	}
+}
+
+func TestRun_CaseOnlyRename(t *testing.T) {
+	// On a case-insensitive filesystem the target "exists" (it is this file);
+	// that must not block the rename.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "artist - song - song-video.mkv"), []byte{}, 0644)
+
+	stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	if stats.Renamed != 1 {
+		t.Errorf("stats = %+v, want Renamed=1", stats)
+	}
+	entries, _ := os.ReadDir(dir)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if !slices.Contains(names, "Artist - Song - Song-video.mkv") {
+		t.Errorf("files = %q, want the exact-case name", names)
+	}
+}
+
+func TestRun_DifferentFileWithSameNameStillProtected(t *testing.T) {
+	// Two videos competing for one name: the second must not clobber the first.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "Artist - Song - Song-video.mkv"), []byte("keep"), 0644)
+	os.WriteFile(filepath.Join(dir, "Artist - Song - Song x-video.mkv"), []byte{}, 0644)
+
+	stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	if stats.Skipped != 1 {
+		t.Errorf("stats = %+v, want Skipped=1", stats)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "Artist - Song - Song-video.mkv")); string(b) != "keep" {
+		t.Error("existing file was overwritten")
 	}
 }
 

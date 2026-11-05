@@ -203,6 +203,13 @@ func cleanVideoBase(base string) (clean, suffix, postSuffix string) {
 	return base, "", ""
 }
 
+// sameFile reports whether info and path are the same file, as with a
+// case-only rename on a case-insensitive filesystem.
+func sameFile(info fs.FileInfo, path string) bool {
+	other, err := os.Stat(path)
+	return err == nil && os.SameFile(info, other)
+}
+
 // trackNumber returns the text before the first " - " separator, or "".
 func trackNumber(name string) string {
 	if before, _, ok := strings.Cut(name, " - "); ok {
@@ -376,7 +383,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 	case "r":
 		newPath := filepath.Join(videoDir, targetName+ext)
 		if newPath != fullPath {
-			if _, statErr := os.Stat(newPath); statErr == nil {
+			if newInfo, statErr := os.Stat(newPath); statErr == nil && !sameFile(newInfo, fullPath) {
 				// os.Rename would silently clobber an existing file (e.g. two
 				// videos matching the same track). Refuse rather than destroy it.
 				fmt.Printf("    [SKIP] Target already exists, not overwriting: %s%s\n", targetName, ext)
