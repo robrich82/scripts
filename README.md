@@ -463,6 +463,10 @@ mkv-music
 
 The tool prompts for manual confirmation when a match is ambiguous.
 
+When a video's name starts with a track number (`01 - …`) and an audio file in
+the same folder has that track number, that audio file is the match even if the
+titles differ.
+
 ### Flags
 
 | Flag | Description |

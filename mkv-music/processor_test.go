@@ -542,3 +542,40 @@ func TestProcessVideo_IgnorePatternInFilename_PassesTitleSuffix(t *testing.T) {
 		t.Errorf("titleSuffix = %q, want '(Alternate Version)'", ft.calls[0].titleSuffix)
 	}
 }
+
+// --- findMatch tests ---
+
+func TestFindMatch_SameTrackBeatsSameTitleOnOtherTrack(t *testing.T) {
+	// The audio for track 01 was retitled; the video still has the old title,
+	// which another track happens to carry. Track 01 must still win.
+	audio := buildAudioData([]string{"01 - Kill.flac", "02 - Bohemian Rhapsody.flac"})
+	m, ok := findMatch("01 - Bohemian Rhapsody - Bohemian Rhapsody", audio)
+	if !ok || m != "01 - Kill" {
+		t.Errorf("got %q, %v; want %q", m, ok, "01 - Kill")
+	}
+}
+
+func TestFindMatch_TrackNumberMustMatchExactly(t *testing.T) {
+	// Track "1" is "1 - Other", not "10 - Song".
+	audio := buildAudioData([]string{"1 - Other.flac", "10 - Song.flac"})
+	m, ok := findMatch("1 - Song - Song", audio)
+	if !ok || m != "1 - Other" {
+		t.Errorf("got %q, %v; want %q", m, ok, "1 - Other")
+	}
+}
+
+func TestFindMatch_NoSameTrackFallsBackToTitle(t *testing.T) {
+	audio := buildAudioData([]string{"02 - Song.flac", "03 - Other.flac"})
+	m, ok := findMatch("05 - Song - Song", audio)
+	if !ok || m != "02 - Song" {
+		t.Errorf("got %q, %v; want %q", m, ok, "02 - Song")
+	}
+}
+
+func TestFindMatch_ArtistPrefixKeepsCutoff(t *testing.T) {
+	// A non-numeric prefix is an artist, not a track: no forced match.
+	audio := buildAudioData([]string{"Artist - Zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.flac"})
+	if m, ok := findMatch("Artist - Qqqqqqqqqqqqqqqqqqqqqqqqqqqqqq - Qqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", audio); ok {
+		t.Errorf("got %q, want no match", m)
+	}
+}

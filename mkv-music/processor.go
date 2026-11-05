@@ -221,28 +221,42 @@ func computeDiff(cleanVideo, matchedBase string) string {
 }
 
 // findMatch fuzzy-matches cleanVideoIgnored against audio keys.
-// It first tries keys that share the same track-number prefix, then falls back.
+// An audio file with the same numeric track number wins regardless of title
+// similarity, so a video whose title is stale (the audio was retitled) isn't
+// pulled to another track that still carries the old title.
 func findMatch(cleanVideoIgnored string, audioData map[string]string) (string, bool) {
 	choices := mapKeys(audioData)
 	// Sort so that when several candidates tie on similarity ratio, the same
 	// one wins every run — map iteration order is otherwise randomised, making
 	// match selection non-deterministic between invocations.
 	slices.Sort(choices)
-	track := trackNumber(cleanVideoIgnored)
-	if track != "" {
+	if track := trackNumber(cleanVideoIgnored); isTrackNumber(track) {
 		var trackMatches []string
 		for _, k := range choices {
-			if strings.HasPrefix(k, track) {
+			if trackNumber(k) == track {
 				trackMatches = append(trackMatches, k)
 			}
 		}
-		if len(trackMatches) > 0 {
-			if m, ok := getCloseMatch(cleanVideoIgnored, trackMatches, 0.3); ok {
-				return m, true
-			}
+		if m, ok := getCloseMatch(cleanVideoIgnored, trackMatches, 0); ok {
+			return m, true
 		}
 	}
 	return getCloseMatch(cleanVideoIgnored, choices, 0.3)
+}
+
+// isTrackNumber reports whether s looks like a track number ("01", "1-01"),
+// as opposed to an artist name in an "Artist - Title" filename.
+func isTrackNumber(s string) bool {
+	hasDigit := false
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case r != '-' && r != '.':
+			return false
+		}
+	}
+	return hasDigit
 }
 
 func mapKeys(m map[string]string) []string {
