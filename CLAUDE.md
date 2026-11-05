@@ -21,7 +21,7 @@ Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invo
 - `make vuln` — `govulncheck` per module (needs network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-latest`, one job per module that has a `go.mod` (only those with changed files, except on the weekly run or a `ci.yml` or `mise.toml` change), and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
+CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per module that has a `go.mod` (only those with changed files, except on the weekly run or a `ci.yml` or `mise.toml` change), and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
 
 Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`, in sessions started at the repo root.
 - The block is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.

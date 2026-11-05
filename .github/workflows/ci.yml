@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       modules: ${{ steps.pick.outputs.modules }}
     steps:
@@ -51,7 +51,7 @@ jobs:
     if: needs.changes.outputs.modules != '[]'
     name: ${{ matrix.module }}
     # The tools target Windows (filetime, process detection), so test there.
-    runs-on: windows-latest
+    runs-on: windows-2025
     strategy:
       fail-fast: false
       matrix:
