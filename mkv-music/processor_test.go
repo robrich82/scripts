@@ -315,7 +315,7 @@ func TestRun_SuffixedVideoPromptedBeforeUnsuffixed(t *testing.T) {
 
 func TestRun_TakenNameKeepsExtraText(t *testing.T) {
 	// Once the "-video" file has the standard name, the special video is
-	// offered the new title with its "(Special Music Video)" kept.
+	// offered the new title with its "(Special Music Video)" kept, plus "-video".
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644)
 	os.WriteFile(filepath.Join(dir, "01 - bob - bob-video.mkv"), []byte{}, 0644)
@@ -327,19 +327,116 @@ func TestRun_TakenNameKeepsExtraText(t *testing.T) {
 	if stats, _, _ := p.Run(); stats.Renamed != 2 {
 		t.Errorf("Renamed=%d, want 2", stats.Renamed)
 	}
-	special := filepath.Join(dir, "01 - foo - foo (Special Music Video).mkv")
+	special := filepath.Join(dir, "01 - foo - foo (Special Music Video)-video.mkv")
 	for _, name := range []string{"01 - foo - foo-video.mkv", filepath.Base(special)} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("want %q to exist: %v", name, err)
 		}
 	}
-	if n := len(tagger.calls); n != 2 || tagger.calls[1].mkvPath != special || tagger.calls[1].titleSuffix != "(Special Music Video)" {
+	if len(tagger.calls) != 2 || tagger.calls[1].mkvPath != special || tagger.calls[1].titleSuffix != "(Special Music Video)" {
 		t.Errorf("tag calls = %+v", tagger.calls)
 	}
 
 	// A second run finds both names correct: no prompts.
 	if stats, _, _ := NewProcessor(dir, "", &fakePrompter{}).Run(); stats != (Stats{}) {
 		t.Errorf("second run stats = %+v, want none", stats)
+	}
+}
+
+func TestRun_PlainSuffixedVideoPromptedBeforeVersioned(t *testing.T) {
+	// "-video (Second Version)" sorts before "-video" but must not take its name.
+	dir := t.TempDir()
+	for _, n := range []string{"01 - New.flac", "01 - Old - Old-video.mkv", "01 - Old - Old-video (Second Version).mkv"} {
+		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+	}
+	NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "r"}}).Run()
+	for _, n := range []string{"01 - New - New-video.mkv", "01 - New - New-video (Second Version).mkv"} {
+		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
+			t.Errorf("want %q to exist: %v", n, err)
+		}
+	}
+}
+
+func TestRun_TakenNameOtherExtension(t *testing.T) {
+	// An .mp4 holding the standard name counts as taken for an .mkv.
+	dir := t.TempDir()
+	for _, n := range []string{"01 - foo.flac", "01 - foo - foo-video.mp4", "01 - bob - bob (Special Music Video).mkv"} {
+		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+	}
+	NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	if _, err := os.Stat(filepath.Join(dir, "01 - foo - foo (Special Music Video)-video.mkv")); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestRun_TakenNameExtraAlreadyInTitle(t *testing.T) {
+	// The new title already ends in "(Live)": don't offer "… (Live) (Live)".
+	dir := t.TempDir()
+	for _, n := range []string{"01 - foo (Live).flac", "01 - foo (Live) - foo (Live)-video.mkv", "01 - foo - foo (Live).mkv"} {
+		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+	}
+	if stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run(); stats.Skipped != 1 {
+		t.Errorf("stats = %+v, want Skipped=1 (standard name taken)", stats)
+	}
+}
+
+func TestRun_TakenNameIgnoredTextSettles(t *testing.T) {
+	// Ignoring " [HD]" lets the alternative name match, and it stays matched.
+	dir := t.TempDir()
+	for _, n := range []string{"01 - New.flac", "01 - New - New-video.mkv", "01 - New [HD] - New [HD] (Live)-video.mkv"} {
+		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+	}
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", " [HD]"}})
+	p.tagger = tagger
+	p.patternAppender = func(_, _, _ string) error { return nil }
+	p.Run()
+	if last := tagger.calls[len(tagger.calls)-1]; filepath.Base(last.mkvPath) != "01 - New [HD] - New [HD] (Live)-video.mkv" || last.titleSuffix != "[HD] (Live)" {
+		t.Errorf("tag calls = %+v", tagger.calls)
+	}
+	p2 := NewProcessor(dir, "", &fakePrompter{})
+	p2.ignoreData = p.ignoreData
+	if stats, _, _ := p2.Run(); stats != (Stats{}) {
+		t.Errorf("second run stats = %+v, want none", stats)
+	}
+}
+
+func TestRun_TitleSuffixNotDoubled(t *testing.T) {
+	// Ignored text inside the kept extra must reach the title tag once.
+	dir := t.TempDir()
+	for _, n := range []string{"01 - New.flac", "01 - New - New-video.mkv", "01 - Old - Old (Live) (Official Video).mkv"} {
+		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+	}
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
+	p.ignoreData.Global = []string{" (Official Video)"}
+	p.tagger = tagger
+	p.Run()
+	last := tagger.calls[len(tagger.calls)-1]
+	if filepath.Base(last.mkvPath) != "01 - New - New (Live)-video.mkv" || last.titleSuffix != "(Official Video) (Live)" {
+		t.Errorf("tag calls = %+v", tagger.calls)
+	}
+}
+
+func TestCopyTags_ShortPostSuffixInsidePatternKept(t *testing.T) {
+	// "-video2" next to an ignored "(Take 2)": the "2" must survive.
+	dir := t.TempDir()
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{})
+	p.ignoreData.Global = []string{"(Take 2)"}
+	p.tagger = tagger
+	mkv := filepath.Join(dir, "v.mkv")
+	p.copyTagsIfConfigured(mkv, "k", "01 - New (Take 2) - New (Take 2)", "2", dir, mkv, map[string]string{"k": "a.flac"})
+	if len(tagger.calls) != 1 || tagger.calls[0].titleSuffix != "(Take 2) 2" {
+		t.Errorf("tag calls = %+v", tagger.calls)
+	}
+}
+
+func TestIsTrackNumber(t *testing.T) {
+	for in, want := range map[string]bool{"01": true, "1-01": true, "1.01": true, "": false, "-": false, ".": false, "01a": false, "Artist": false} {
+		if got := isTrackNumber(in); got != want {
+			t.Errorf("isTrackNumber(%q) = %v, want %v", in, got, want)
+		}
 	}
 }
 
@@ -357,11 +454,15 @@ func TestRun_FreeNameStillGetsStandardName(t *testing.T) {
 
 func TestExtraText(t *testing.T) {
 	for in, want := range map[string]string{
-		"01 - bob - bob (Special Music Video)": "(Special Music Video)",
-		"01 - A - B - A - B (Live)":            "(Live)",
-		"01 - bob - bob":                       "",
-		"01 - bob - other":                     "",
-		"NoSeparator":                          "",
+		"01 - bob - bob (Special Music Video)":     "(Special Music Video)",
+		"01 - A - B - A - B (Live)":                "(Live)",
+		"01 - A - A - A - A (Live)":                "(Live)",
+		"01 - Love - Love Me - Love - Love Me (X)": "(X)",
+		"01 - Bob - bob (Live)":                    "(Live)",
+		"05 - Run - Runaway":                       "",
+		"01 - bob - bob":                           "",
+		"01 - bob - other":                         "",
+		"NoSeparator":                              "",
 	} {
 		if got := extraText(in); got != want {
 			t.Errorf("extraText(%q) = %q, want %q", in, got, want)
