@@ -20,5 +20,6 @@ jobs:
         with:
           node-version: 24
 
+      # No file argument: a named file is validated as global, not repo, config.
       # --strict also fails on options Renovate would migrate.
-      - run: npx --yes --package renovate@44.181.0 -- renovate-config-validator --strict renovate.json
+      - run: npx --yes --package renovate@44.181.0 -- renovate-config-validator --strict
