@@ -301,6 +301,11 @@ func TestRun_CaseOnlyRename(t *testing.T) {
 	// On a case-insensitive filesystem the target "exists" (it is this file);
 	// that must not block the rename.
 	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "probe"), []byte{}, 0644)
+	if _, err := os.Stat(filepath.Join(dir, "PROBE")); err != nil {
+		t.Skip("filesystem is case-sensitive")
+	}
+	os.Remove(filepath.Join(dir, "probe"))
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 	os.WriteFile(filepath.Join(dir, "artist - song - song-video.mkv"), []byte{}, 0644)
 
@@ -331,6 +336,29 @@ func TestRun_DifferentFileWithSameNameStillProtected(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "Artist - Song - Song-video.mkv")); string(b) != "keep" {
 		t.Error("existing file was overwritten")
+	}
+}
+
+func TestRun_SymlinkToTargetNotRenamedOverIt(t *testing.T) {
+	// A video that is a symlink to the file holding the target name resolves to
+	// the same file, but renaming the link over it would destroy the data.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "Artist - Song - Song-video.mkv")
+	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	os.WriteFile(target, []byte("keep"), 0644)
+	if err := os.Symlink(target, filepath.Join(dir, "Artist - Song - Song x-video.mkv")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	if stats.Skipped != 1 {
+		t.Errorf("stats = %+v, want Skipped=1", stats)
+	}
+	if info, err := os.Lstat(target); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("target replaced: info=%v err=%v", info, err)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "keep" {
+		t.Error("target contents lost")
 	}
 }
 
