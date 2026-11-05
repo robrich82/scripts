@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -350,11 +351,68 @@ func TestRun_PlainSuffixedVideoPromptedBeforeVersioned(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
 	}
 	NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "r"}}).Run()
-	for _, n := range []string{"01 - New - New-video.mkv", "01 - New - New-video (Second Version).mkv"} {
+	assertFiles(t, dir, "01 - New - New-video.mkv", "01 - New - New-video (Second Version).mkv")
+	if stats, _, _ := NewProcessor(dir, "", &fakePrompter{}).Run(); stats != (Stats{}) {
+		t.Errorf("second run stats = %+v, want none", stats)
+	}
+}
+
+// musicDir creates a temp folder holding empty files with the given names.
+func musicDir(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func assertFiles(t *testing.T, dir string, names ...string) {
+	t.Helper()
+	for _, n := range names {
 		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
 			t.Errorf("want %q to exist: %v", n, err)
 		}
 	}
+}
+
+func TestRun_UnsuffixedPlainBeatsVersioned(t *testing.T) {
+	// A plain unsuffixed video owns the standard name over "-video (Second Version)".
+	dir := musicDir(t, "01 - New.flac", "01 - Old - Old.mkv", "01 - Old - Old-video (Second Version).mkv")
+	NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "r"}}).Run()
+	assertFiles(t, dir, "01 - New - New-video.mkv", "01 - New - New-video (Second Version).mkv")
+}
+
+func TestRun_UnsuffixedHolderCountsAsTaken(t *testing.T) {
+	// "01 - foo - foo.mkv" is accepted as the "-video" file, so it holds the name.
+	dir := musicDir(t, "01 - foo.flac", "01 - foo - foo.mkv", "01 - bob - bob (Special Music Video).mkv")
+	NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	assertFiles(t, dir, "01 - foo - foo.mkv", "01 - foo - foo (Special Music Video)-video.mkv")
+}
+
+func TestRun_OnlyIgnoredTextSetsApart(t *testing.T) {
+	// When ignored text is all that differs, keep it rather than get stuck.
+	dir := musicDir(t, "01 - New.flac", "01 - New - New-video.mkv", "01 - Old - Old-video [HD].mkv")
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
+	p.ignoreData.Global = []string{" [HD]"}
+	p.Run()
+	assertFiles(t, dir, "01 - New - New-video [HD].mkv")
+	p2 := NewProcessor(dir, "", &fakePrompter{})
+	p2.ignoreData = p.ignoreData
+	if stats, _, _ := p2.Run(); stats != (Stats{}) {
+		t.Errorf("second run stats = %+v, want none", stats)
+	}
+}
+
+func TestRun_RankAppliesIgnorePatterns(t *testing.T) {
+	// "(Official Video)" is ignored, so that file is the plain one and goes first.
+	dir := musicDir(t, "01 - New.flac", "01 - Old - Old (Live).mkv", "01 - Old - Old (Official Video).mkv")
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "r"}})
+	p.ignoreData.Global = []string{" (Official Video)"}
+	p.Run()
+	assertFiles(t, dir, "01 - New - New-video.mkv", "01 - New - New (Live)-video.mkv")
 }
 
 func TestRun_TakenNameOtherExtension(t *testing.T) {
@@ -372,7 +430,7 @@ func TestRun_TakenNameOtherExtension(t *testing.T) {
 func TestRun_TakenNameExtraAlreadyInTitle(t *testing.T) {
 	// The new title already ends in "(Live)": don't offer "… (Live) (Live)".
 	dir := t.TempDir()
-	for _, n := range []string{"01 - foo (Live).flac", "01 - foo (Live) - foo (Live)-video.mkv", "01 - foo - foo (Live).mkv"} {
+	for _, n := range []string{"01 - foo (Live).flac", "01 - foo (Live) - foo (Live)-video.mkv", "01 - foo - foo (live).mkv"} {
 		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
 	}
 	if stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run(); stats.Skipped != 1 {
@@ -607,7 +665,7 @@ func TestProcessVideo_Skipped_NoTagCopy(t *testing.T) {
 
 func TestFindIgnoredPatterns_MatchingPattern(t *testing.T) {
 	p := &Processor{ignoreData: IgnoreData{Global: []string{" (Alternate Version)"}}}
-	got := p.findIgnoredPatterns("09 - On My Way - On My Way (Alternate Version)", "")
+	got := strings.Join(p.ignoredPatternList("09 - On My Way - On My Way (Alternate Version)", ""), " ")
 	if got != "(Alternate Version)" {
 		t.Errorf("got %q, want '(Alternate Version)'", got)
 	}
@@ -615,7 +673,7 @@ func TestFindIgnoredPatterns_MatchingPattern(t *testing.T) {
 
 func TestFindIgnoredPatterns_NoMatch(t *testing.T) {
 	p := &Processor{ignoreData: IgnoreData{Global: []string{" (Live)"}}}
-	got := p.findIgnoredPatterns("01 - Song - Song", "")
+	got := strings.Join(p.ignoredPatternList("01 - Song - Song", ""), " ")
 	if got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
@@ -623,7 +681,7 @@ func TestFindIgnoredPatterns_NoMatch(t *testing.T) {
 
 func TestFindIgnoredPatterns_MultipleMatches(t *testing.T) {
 	p := &Processor{ignoreData: IgnoreData{Global: []string{" (Live)", " (Acoustic)"}}}
-	got := p.findIgnoredPatterns("01 - Song (Live) (Acoustic)", "")
+	got := strings.Join(p.ignoredPatternList("01 - Song (Live) (Acoustic)", ""), " ")
 	if got != "(Live) (Acoustic)" {
 		t.Errorf("got %q, want '(Live) (Acoustic)'", got)
 	}
@@ -635,12 +693,12 @@ func TestFindIgnoredPatterns_FileSpecific(t *testing.T) {
 		FilePatterns: map[string][]string{"Song (Stone Version).mkv": {"(Stone Version)"}},
 	}}
 	// File-specific pattern should appear for matching file (global first, then file-specific).
-	got := p.findIgnoredPatterns("Song (Stone Version) 1080p", "Song (Stone Version).mkv")
+	got := strings.Join(p.ignoredPatternList("Song (Stone Version) 1080p", "Song (Stone Version).mkv"), " ")
 	if got != "1080p (Stone Version)" {
 		t.Errorf("got %q, want '1080p (Stone Version)'", got)
 	}
 	// File-specific pattern should NOT appear for a different file.
-	got2 := p.findIgnoredPatterns("Song (Stone Version) 1080p", "Other Song.mkv")
+	got2 := strings.Join(p.ignoredPatternList("Song (Stone Version) 1080p", "Other Song.mkv"), " ")
 	if got2 != "1080p" {
 		t.Errorf("got %q, want '1080p'", got2)
 	}

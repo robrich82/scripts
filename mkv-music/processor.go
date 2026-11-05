@@ -204,16 +204,17 @@ func cleanVideoBase(base string) (clean, suffix, postSuffix string) {
 	return base, "", ""
 }
 
-// videoSuffixRank orders a folder's videos so the likeliest owner of the
-// standard name comes first: known suffix before none, and within each, no
-// extra text (" (Second Version)") before extra text.
-func videoSuffixRank(f string) int {
+// videoRank orders a folder's videos so the likeliest owner of the standard
+// name comes first: no extra text (" (Second Version)", ignore patterns
+// applied) before extra text, and within each, a known suffix before none.
+func (p *Processor) videoRank(dir, f string) int {
 	clean, suffix, post := cleanVideoBase(strings.TrimSuffix(f, filepath.Ext(f)))
+	pats := p.effectivePatterns(filepath.Join(dir, f))
 	rank := 0
-	if suffix == "" {
+	if extraText(removeIgnoredParts(clean, pats)) != "" || removeIgnoredParts(post, pats) != "" {
 		rank = 2
 	}
-	if extraText(clean) != "" || strings.TrimSpace(post) != "" {
+	if suffix == "" {
 		rank++
 	}
 	return rank
@@ -249,9 +250,10 @@ func extraText(name string) string {
 			return extra
 		}
 		title, after := rest[:i+j], rest[i+j+3:]
-		if len(after) >= len(title) && strings.EqualFold(after[:len(title)], title) &&
-			(len(after) == len(title) || after[len(title)] == ' ') {
-			extra = strings.TrimSpace(after[len(title):])
+		if len(after) >= len(title) && strings.EqualFold(after[:len(title)], title) {
+			if tail := after[len(title):]; tail == "" || tail[0] == ' ' {
+				extra = strings.TrimSpace(tail)
+			}
 		}
 		i += j + 3
 	}
@@ -334,14 +336,9 @@ func containsStr(slice []string, s string) bool {
 	return slices.Contains(slice, s)
 }
 
-// findIgnoredPatterns returns the trimmed, space-joined set of ignore patterns
-// that appear in cleanVideo. This is appended to the audio title when copying
-// tags so that e.g. " (Alternate Version)" survives in the MKV title tag.
-// videoFile is the video filename used to look up file-specific patterns.
-func (p *Processor) findIgnoredPatterns(cleanVideo, videoPath string) string {
-	return strings.Join(p.ignoredPatternList(cleanVideo, videoPath), " ")
-}
-
+// ignoredPatternList returns the trimmed ignore patterns that appear in
+// cleanVideo. They are appended to the audio title when copying tags so that
+// e.g. " (Alternate Version)" survives in the MKV title tag.
 func (p *Processor) ignoredPatternList(cleanVideo, videoPath string) []string {
 	var found []string
 	for _, pat := range p.effectivePatterns(videoPath) {
@@ -356,8 +353,8 @@ func (p *Processor) ignoredPatternList(cleanVideo, videoPath string) []string {
 
 // copyTagsIfConfigured copies tags from the matched audio file to mkvPath when
 // a tagger is configured. cleanVideo is the video base before ignore-pattern
-// stripping; postSuffix is extra title text, e.g. " (Second Version)" after the
-// video suffix. Both are used to build the MKV title suffix.
+// stripping; postSuffix is extra title text (" (Second Version)" after the
+// suffix, or kept "(Special Music Video)"). Both build the MKV title suffix.
 func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath string, audioPaths map[string]string) {
 	if p.tagger == nil || audioPaths == nil {
 		return
@@ -439,31 +436,37 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 	targetName := matchedBase + effectiveSuffix
 	currentName := cleanVideoIgnored + effectiveSuffix + postSuffixIgnored
 	fullPath := videoPath
-	if targetName == currentName {
+	if targetName == currentName || targetName == videoBase {
 		// Filename is already correct — just copy tags.
 		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath, audioPaths)
 		return ""
 	}
 
-	// Another video already has the standard name: if this one has extra text
-	// ("(Special Music Video)", " (Second Version)"), keep it in the name and
-	// title tag. Without any, the standard name is offered and "r" skips it.
+	// Another video already has the standard name (an unsuffixed one counts as
+	// "-video"): if this one has extra text ("(Special Music Video)",
+	// " (Second Version)"), keep it in the name and title tag. Without any, the
+	// standard name is offered and "r" refuses if that exact file exists.
 	tagPost, nameSuffix := postSuffix, effectiveSuffix
-	if videoNameTaken(videoDir, targetName, fullPath) {
-		extra := extraText(cleanVideoIgnored)
-		if extra != "" && strings.HasSuffix(matchedBase, " "+extra) {
+	if videoNameTaken(videoDir, targetName, fullPath) ||
+		(effectiveSuffix == "-video" && videoNameTaken(videoDir, matchedBase, fullPath)) {
+		clean, post := cleanVideoIgnored, keepLeadingSpace(postSuffix, postSuffixIgnored)
+		extra := extraText(clean)
+		if extra == "" && post == "" { // only ignored text sets it apart: keep that
+			clean, post = cleanVideo, postSuffix
+			extra = extraText(clean)
+		}
+		if extra != "" && strings.HasSuffix(strings.ToLower(matchedBase), " "+strings.ToLower(extra)) {
 			extra = "" // the new title already says it
 		}
-		if extra != "" || postSuffixIgnored != "" {
-			withExtra := matchedBase
+		if extra != "" || strings.TrimSpace(post) != "" {
+			targetName = matchedBase
 			if extra != "" {
-				withExtra += " " + extra
+				targetName += " " + extra
 			}
-			post := keepLeadingSpace(postSuffix, postSuffixIgnored)
-			targetName = withExtra + effectiveSuffix + post
+			targetName += effectiveSuffix + post
 			tagPost = extra + " " + strings.TrimSpace(postSuffix)
-			nameSuffix = foundSuffix // compare against the real name, so "-video" gets added
-			if targetName == cleanVideoIgnored+foundSuffix+post {
+			nameSuffix = foundSuffix // an unsuffixed file must still be renamed to add "-video"
+			if targetName == clean+foundSuffix+post || targetName == videoBase {
 				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
 				return ""
 			}
@@ -562,10 +565,9 @@ func (p *Processor) Run() (Stats, []string, []string) {
 		files := dirFiles[dir]
 		audioData := buildAudioData(files)
 		audioPaths := buildAudioPaths(files)
-		// A video without a known suffix is given "-video" as a guess; prompt for
-		// the ones that really are "-video" (etc.) first so they claim the name.
+		// Prompt for plain names first so they claim the standard name.
 		slices.SortStableFunc(files, func(a, b string) int {
-			return cmp.Compare(videoSuffixRank(a), videoSuffixRank(b))
+			return cmp.Compare(p.videoRank(dir, a), p.videoRank(dir, b))
 		})
 		for _, f := range files {
 			ext := strings.ToLower(filepath.Ext(f))

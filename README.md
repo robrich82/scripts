@@ -467,9 +467,10 @@ When a video's name starts with a track number (`01 - …`) and an audio file in
 the same folder has that track number, that audio file is the match even if the
 titles differ.
 
-Plain names are prompted first: a known suffix (`-video`, `-live`, …) before
-none, and `-video` before `-video (Second Version)`. When another video already
-has the standard name, a video keeps its extra text:
+Plain names are prompted first (`-video` before `-video (Second Version)`,
+ignore patterns applied), then a known suffix (`-video`, `-live`, …) before
+none. When another video already has the standard name, a video keeps its
+extra text:
 `01 - Old - Old (Special Music Video).mkv` → `01 - New - New (Special Music Video)-video.mkv`,
 and `01 - Old - Old-video (Second Version).mkv` → `01 - New - New-video (Second Version).mkv`.
 
