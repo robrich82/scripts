@@ -28,9 +28,14 @@
       "schedule": ["before 6am on monday"]
     },
     {
-      "description": "Go tags versions per module, not per package path as mise names staticcheck.",
+      "description": "mise names linters by package path; the Go proxy only knows the module, and without it there's no release time for minimumReleaseAge.",
       "matchDepNames": ["go:honnef.co/go/tools/cmd/staticcheck"],
       "overridePackageName": "honnef.co/go/tools"
+    },
+    {
+      "description": "Same as staticcheck.",
+      "matchDepNames": ["go:golang.org/x/vuln/cmd/govulncheck"],
+      "overridePackageName": "golang.org/x/vuln"
     }
   ]
 }
