@@ -4,5 +4,6 @@
     "config:recommended"
   ],
   "automerge": true,
-  "platformAutomerge": false
+  "platformAutomerge": false,
+  "minimumReleaseAge": "1 day"
 }
