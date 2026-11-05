@@ -15,7 +15,7 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 
 ## Requirements
 
-- Go 1.27.3+ (pinned in `mise.toml`)
+- Go and the linters `make vet` / `make vuln` run (staticcheck, unparam, govulncheck), pinned in `mise.toml`: run `mise install`. A copy you `go install`ed earlier shadows the pin, so delete it from `go env GOBIN`.
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
 
@@ -44,9 +44,8 @@ Run all tests:
 make test
 ```
 
-Scan all modules for known vulnerabilities in their dependencies (requires
-[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) —
-`go install golang.org/x/vuln/cmd/govulncheck@latest` — and network access):
+Scan all modules for known vulnerabilities in their dependencies with
+[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) (needs network access):
 
 ```sh
 make vuln

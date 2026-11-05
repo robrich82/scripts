@@ -72,11 +72,14 @@ jobs:
           go-version-file: ${{ matrix.module }}/go.mod
           cache-dependency-path: ${{ matrix.module }}/go.*
 
-      - name: Install linters
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
-          go install mvdan.cc/unparam@v0.0.0-20261011093844-7a2c2c0b7aa6
-          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      # Linter versions come from mise.toml, so CI and `make vet` share one pin.
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.11.0
+          install_args: >-
+            go:honnef.co/go/tools/cmd/staticcheck
+            go:mvdan.cc/unparam
+            go:golang.org/x/vuln/cmd/govulncheck
 
       - name: gofmt
         run: |

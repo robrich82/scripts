@@ -1,2 +1,5 @@
 [tools]
 go = "1.27.3"
+"go:honnef.co/go/tools/cmd/staticcheck" = "0.8.2"
+"go:mvdan.cc/unparam" = "0.0.0-20261011093844-7a2c2c0b7aa6"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"

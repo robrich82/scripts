@@ -26,6 +26,11 @@
       "matchManagers": ["custom.regex"],
       "matchDepNames": ["renovate"],
       "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "mise names staticcheck by package path, which has no version tags; look up its module.",
+      "matchDepNames": ["go:honnef.co/go/tools/cmd/staticcheck"],
+      "overridePackageName": "honnef.co/go/tools"
     }
   ]
 }
