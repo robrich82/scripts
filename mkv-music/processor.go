@@ -205,13 +205,15 @@ func cleanVideoBase(base string) (clean, suffix, postSuffix string) {
 }
 
 // videoRank orders a folder's videos so the likeliest owner of the standard
-// name comes first: no extra text (" (Second Version)", ignore patterns
-// applied) before extra text, and within each, a known suffix before none.
+// name comes first: no extra text, then only ignored extra text ("[HD]"), then
+// real extra text (" (Second Version)"); within each, a known suffix before none.
 func (p *Processor) videoRank(dir, f string) int {
 	clean, suffix, post := cleanVideoBase(strings.TrimSuffix(f, filepath.Ext(f)))
 	pats := p.effectivePatterns(filepath.Join(dir, f))
 	rank := 0
 	if extraText(removeIgnoredParts(clean, pats)) != "" || removeIgnoredParts(post, pats) != "" {
+		rank = 4
+	} else if extraText(clean) != "" || strings.TrimSpace(post) != "" {
 		rank = 2
 	}
 	if suffix == "" {

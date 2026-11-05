@@ -406,6 +406,17 @@ func TestRun_OnlyIgnoredTextSetsApart(t *testing.T) {
 	}
 }
 
+func TestRun_PlainBeatsIgnoredOnlyText(t *testing.T) {
+	// The truly plain file claims the standard name; the "[HD]" one keeps "[HD]".
+	for _, plain := range []string{"01 - Old - Old-video.mkv", "01 - Old - Old.mkv"} {
+		dir := musicDir(t, "01 - New.flac", plain, "01 - Old - Old-video [HD].mkv")
+		p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "r"}})
+		p.ignoreData.Global = []string{" [HD]"}
+		p.Run()
+		assertFiles(t, dir, "01 - New - New-video.mkv", "01 - New - New-video [HD].mkv")
+	}
+}
+
 func TestRun_RankAppliesIgnorePatterns(t *testing.T) {
 	// "(Official Video)" is ignored, so that file is the plain one and goes first.
 	dir := musicDir(t, "01 - New.flac", "01 - Old - Old (Live).mkv", "01 - Old - Old (Official Video).mkv")
