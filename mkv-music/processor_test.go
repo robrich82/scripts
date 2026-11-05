@@ -301,7 +301,9 @@ func TestRun_CaseOnlyRename(t *testing.T) {
 	// On a case-insensitive filesystem the target "exists" (it is this file);
 	// that must not block the rename.
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "probe"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "probe"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "PROBE")); err != nil {
 		t.Skip("filesystem is case-sensitive")
 	}
@@ -359,6 +361,48 @@ func TestRun_SymlinkToTargetNotRenamedOverIt(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(target); string(b) != "keep" {
 		t.Error("target contents lost")
+	}
+}
+
+// kelvinVideo is a video name that strings.EqualFold treats as equal to
+// "Artist - Kick - Kick-video.mkv" (U+212A KELVIN SIGN folds to "k"), but NTFS
+// and case-sensitive filesystems keep as a separate name.
+const kelvinVideo = "Artist - Kick - Kick-video.mkv"
+
+func TestRun_FoldEqualDifferentFileProtected(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "Artist - Kick - Kick-video.mkv")
+	os.WriteFile(filepath.Join(dir, "Artist - Kick.flac"), []byte{}, 0644)
+	os.WriteFile(target, []byte("keep"), 0644)
+	os.WriteFile(filepath.Join(dir, kelvinVideo), []byte("video"), 0644)
+	if b, _ := os.ReadFile(target); string(b) != "keep" {
+		t.Skip("filesystem treats the two names as one")
+	}
+
+	stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	if stats.Skipped != 1 {
+		t.Errorf("stats = %+v, want Skipped=1", stats)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "keep" {
+		t.Error("existing file was overwritten")
+	}
+}
+
+func TestRun_FoldEqualSymlinkNotRenamedOverTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "Artist - Kick - Kick-video.mkv")
+	os.WriteFile(filepath.Join(dir, "Artist - Kick.flac"), []byte{}, 0644)
+	os.WriteFile(target, []byte("keep"), 0644)
+	if err := os.Symlink(target, filepath.Join(dir, kelvinVideo)); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	if stats.Skipped != 1 {
+		t.Errorf("stats = %+v, want Skipped=1", stats)
+	}
+	if info, err := os.Lstat(target); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("target replaced: info=%v err=%v", info, err)
 	}
 }
 

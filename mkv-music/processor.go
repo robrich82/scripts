@@ -203,9 +203,9 @@ func cleanVideoBase(base string) (clean, suffix, postSuffix string) {
 	return base, "", ""
 }
 
-// sameFile reports whether info and path are the same directory entry, as
-// with a case-only rename on a case-insensitive filesystem. Links are compared
-// as themselves, not their targets.
+// sameFile reports whether info and path are the same file (volume and file
+// ID, so hard links count as one), as with a case-only rename on a
+// case-insensitive filesystem. Symlinks are compared as links, not targets.
 func sameFile(info fs.FileInfo, path string) bool {
 	other, err := os.Lstat(path)
 	return err == nil && os.SameFile(info, other)
