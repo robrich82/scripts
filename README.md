@@ -465,7 +465,8 @@ The tool prompts for manual confirmation when a match is ambiguous.
 
 When a video's name starts with a track number (`01 - …`) and an audio file in
 the same folder has that track number, that audio file is the match even if the
-titles differ.
+titles differ. A number shared by every audio file in the folder (an artist such
+as `311`, or a folder of `01 - …` singles) is matched on title instead.
 
 Plain names are prompted first (`-video` before `-video (Second Version)`,
 ignore patterns applied), then a known suffix (`-video`, `-live`, …) before

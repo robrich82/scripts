@@ -815,6 +815,18 @@ func TestFindMatch_NoSameTrackFallsBackToTitle(t *testing.T) {
 	}
 }
 
+func TestFindMatch_NumberSharedByEveryAudioKeepsCutoff(t *testing.T) {
+	// "311" on every audio file is an artist, not a track: no forced match.
+	audio := buildAudioData([]string{"311 - Amber.flac", "311 - Down.flac"})
+	long := "Qqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+	if m, ok := findMatch("311 - "+long+" - "+long, audio); ok {
+		t.Errorf("got %q, want no match", m)
+	}
+	if m, ok := findMatch("311 - Down - Down", audio); !ok || m != "311 - Down" {
+		t.Errorf("got %q, %v; want %q", m, ok, "311 - Down")
+	}
+}
+
 func TestFindMatch_ArtistPrefixKeepsCutoff(t *testing.T) {
 	// A non-numeric prefix is an artist, not a track: no forced match.
 	audio := buildAudioData([]string{"Artist - Zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.flac"})

@@ -304,7 +304,10 @@ func findMatch(cleanVideoIgnored string, audioData map[string]string) (string, b
 				trackMatches = append(trackMatches, k)
 			}
 		}
-		if m, ok := getCloseMatch(cleanVideoIgnored, trackMatches, 0); ok {
+		// A number on every audio file ("311 - …", a folder of "01 - …" singles)
+		// says nothing about which track this is.
+		shared := len(trackMatches) > 1 && len(trackMatches) == len(choices)
+		if m, ok := getCloseMatch(cleanVideoIgnored, trackMatches, 0); ok && !shared {
 			return m, true
 		}
 	}
