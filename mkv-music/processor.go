@@ -416,21 +416,26 @@ func (p *Processor) syncTimestamps(mkvPath string) {
 	}
 }
 
-// processVideo handles one video file: matches it to audio data, prints a
-// mismatch if needed, and interactively renames/ignores/skips.
-// Returns "renamed", "skipped", or "" (no action / no match).
-func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPaths map[string]string) string {
+// videoPlan is what processVideo decides for one video filename.
+type videoPlan struct {
+	matchKey, matchedBase                     string
+	cleanVideo, postSuffix, postSuffixIgnored string
+	targetName, nameSuffix, tagPost           string
+	correct                                   bool // the name needs no change
+}
+
+// planVideo matches videoFile to audioData and works out its target name and
+// title-tag inputs. ok is false when no audio file matches.
+func (p *Processor) planVideo(videoDir, videoFile string, audioData map[string]string) (plan videoPlan, ok bool) {
 	videoPath := filepath.Join(videoDir, videoFile)
-	ext := filepath.Ext(videoFile)
-	videoBase := strings.TrimSuffix(videoFile, ext)
+	videoBase := strings.TrimSuffix(videoFile, filepath.Ext(videoFile))
 	cleanVideo, foundSuffix, postSuffix := cleanVideoBase(videoBase)
 	cleanVideoIgnored := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoPath))
 	postSuffixIgnored := removeIgnoredParts(postSuffix, p.effectivePatterns(videoPath))
 
 	matchKey, ok := findMatch(cleanVideoIgnored, audioData)
 	if !ok {
-		fmt.Printf("[WARN] No audio match found: %s\n", videoFile)
-		return "unmatched"
+		return videoPlan{}, false
 	}
 
 	matchedBase := audioData[matchKey]
@@ -438,22 +443,23 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 	if effectiveSuffix == "" {
 		effectiveSuffix = "-video"
 	}
-	targetName := matchedBase + effectiveSuffix
+	plan = videoPlan{
+		matchKey: matchKey, matchedBase: matchedBase,
+		cleanVideo: cleanVideo, postSuffix: postSuffix, postSuffixIgnored: postSuffixIgnored,
+		targetName: matchedBase + effectiveSuffix, nameSuffix: effectiveSuffix, tagPost: postSuffix,
+	}
 	currentName := cleanVideoIgnored + effectiveSuffix + postSuffixIgnored
-	fullPath := videoPath
-	if targetName == currentName || targetName == videoBase {
-		// Filename is already correct — just copy tags.
-		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath, audioPaths)
-		return ""
+	if plan.targetName == currentName || plan.targetName == videoBase {
+		plan.correct = true
+		return plan, true
 	}
 
 	// Another video already has the standard name (an unsuffixed one counts as
 	// "-video"): if this one has extra text ("(Special Music Video)",
 	// " (Second Version)"), keep it in the name and title tag. Without any, the
 	// standard name is offered and "r" refuses if that exact file exists.
-	tagPost, nameSuffix := postSuffix, effectiveSuffix
-	if videoNameTaken(videoDir, targetName, fullPath) ||
-		(effectiveSuffix == "-video" && videoNameTaken(videoDir, matchedBase, fullPath)) {
+	if videoNameTaken(videoDir, plan.targetName, videoPath) ||
+		(effectiveSuffix == "-video" && videoNameTaken(videoDir, matchedBase, videoPath)) {
 		clean, post := cleanVideoIgnored, keepLeadingSpace(postSuffix, postSuffixIgnored)
 		extra := extraText(clean)
 		if extra == "" && post == "" { // only ignored text sets it apart: keep that
@@ -464,18 +470,37 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			extra = "" // the new title already says it
 		}
 		if extra != "" || strings.TrimSpace(post) != "" {
-			targetName = matchedBase
+			plan.targetName = matchedBase
 			if extra != "" {
-				targetName += " " + extra
+				plan.targetName += " " + extra
 			}
-			targetName += effectiveSuffix + post
-			tagPost = extra + " " + strings.TrimSpace(postSuffix)
-			nameSuffix = foundSuffix // an unsuffixed file must still be renamed to add "-video"
-			if targetName == clean+foundSuffix+post || targetName == videoBase {
-				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
-				return ""
-			}
+			plan.targetName += effectiveSuffix + post
+			plan.tagPost = extra + " " + strings.TrimSpace(postSuffix)
+			plan.nameSuffix = foundSuffix // an unsuffixed file must still be renamed to add "-video"
+			plan.correct = plan.targetName == clean+foundSuffix+post || plan.targetName == videoBase
 		}
+	}
+	return plan, true
+}
+
+// processVideo handles one video file: matches it to audio data, prints a
+// mismatch if needed, and interactively renames/ignores/skips.
+// Returns "renamed", "skipped", or "" (no action / no match).
+func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPaths map[string]string) string {
+	videoPath := filepath.Join(videoDir, videoFile)
+	ext := filepath.Ext(videoFile)
+	plan, ok := p.planVideo(videoDir, videoFile, audioData)
+	if !ok {
+		fmt.Printf("[WARN] No audio match found: %s\n", videoFile)
+		return "unmatched"
+	}
+	matchKey, matchedBase, cleanVideo, postSuffix := plan.matchKey, plan.matchedBase, plan.cleanVideo, plan.postSuffix
+	targetName, tagPost := plan.targetName, plan.tagPost
+	fullPath := videoPath
+	if plan.correct {
+		// Filename is already correct — just copy tags.
+		p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
+		return ""
 	}
 
 	fmt.Printf("\n[?] UNMATCHED VIDEO: %s\n", videoFile)
@@ -505,13 +530,18 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		} else {
 			fmt.Printf("    [OK] Renamed to: %s%s\n", targetName, ext)
 			p.markArtistTouched(videoDir)
-			p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
+			// Tag from the new name, as the next run will, so the tag settles now.
+			if next, ok := p.planVideo(videoDir, targetName+ext, audioData); ok && next.correct {
+				p.copyTagsIfConfigured(newPath, next.matchKey, next.cleanVideo, next.tagPost, videoDir, newPath, audioPaths)
+			} else {
+				p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
+			}
 			return "renamed"
 		}
 	case "i":
 		diff := computeDiff(cleanVideo, matchedBase)
 		if diff == "" {
-			diff = strings.TrimSpace(postSuffixIgnored)
+			diff = strings.TrimSpace(plan.postSuffixIgnored)
 		}
 		pattern, err := p.prompter.Ask(fmt.Sprintf("    Enter the part to ignore (default: '%s'): ", diff))
 		if err != nil {
@@ -532,7 +562,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			}
 			reCheckedClean := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoPath))
 			reCheckedPost := keepLeadingSpace(postSuffix, removeIgnoredParts(postSuffix, p.effectivePatterns(videoPath)))
-			if reCheckedClean+nameSuffix+reCheckedPost == targetName {
+			if reCheckedClean+plan.nameSuffix+reCheckedPost == targetName {
 				fmt.Println("    [OK] File now matches after ignoring pattern!")
 				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
 			} else {

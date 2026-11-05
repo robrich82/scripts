@@ -378,6 +378,58 @@ func assertFiles(t *testing.T, dir string, names ...string) {
 	}
 }
 
+// assertTagsStable runs dir twice and checks the second run writes each video
+// the title suffix the first run gave it: a renamed file's tag must not change
+// once more on the next run.
+func assertTagsStable(t *testing.T, dir string, global []string, answers ...string) {
+	t.Helper()
+	suffixes := func(answers []string) map[string]string {
+		tagger := &fakeTagger{}
+		p := NewProcessor(dir, "", &fakePrompter{answers: answers})
+		p.ignoreData.Global = global
+		p.tagger = tagger
+		p.Run()
+		got := map[string]string{}
+		for _, c := range tagger.calls {
+			got[filepath.Base(c.mkvPath)] = c.titleSuffix
+		}
+		return got
+	}
+	first := suffixes(answers)
+	second := suffixes(nil)
+	if len(second) == 0 {
+		t.Fatal("second run tagged nothing")
+	}
+	for name, want := range second {
+		if got, ok := first[name]; !ok || got != want {
+			t.Errorf("%s: first run tag %q (tagged %v), second run %q", name, got, ok, want)
+		}
+	}
+}
+
+func TestRun_RenameTagsLikeNextRun(t *testing.T) {
+	t.Run("lone versioned video", func(t *testing.T) {
+		dir := musicDir(t, "01 - New.flac", "01 - Old - Old-video (Second Version).mkv")
+		assertTagsStable(t, dir, nil, "r")
+		assertFiles(t, dir, "01 - New - New-video.mkv")
+	})
+	t.Run("ignored text", func(t *testing.T) {
+		dir := musicDir(t, "01 - New.flac", "01 - Old - Old-video [HD].mkv")
+		assertTagsStable(t, dir, []string{" [HD]"}, "r")
+		assertFiles(t, dir, "01 - New - New-video.mkv")
+	})
+	t.Run("ignored text dropped from kept extra", func(t *testing.T) {
+		dir := musicDir(t, "01 - New.flac", "01 - New - New-video.mkv", "01 - Old - Old (Live) (Official Video).mkv")
+		assertTagsStable(t, dir, []string{" (Official Video)"}, "r")
+		assertFiles(t, dir, "01 - New - New (Live)-video.mkv")
+	})
+	t.Run("taken name keeps extra text", func(t *testing.T) {
+		dir := musicDir(t, "01 - foo.flac", "01 - bob - bob-video.mkv", "01 - bob - bob (Special Music Video).mkv")
+		assertTagsStable(t, dir, nil, "r", "r")
+		assertFiles(t, dir, "01 - foo - foo-video.mkv", "01 - foo - foo (Special Music Video)-video.mkv")
+	})
+}
+
 func TestRun_UnsuffixedPlainBeatsVersioned(t *testing.T) {
 	// A plain unsuffixed video owns the standard name over "-video (Second Version)".
 	dir := musicDir(t, "01 - New.flac", "01 - Old - Old.mkv", "01 - Old - Old-video (Second Version).mkv")
@@ -472,17 +524,14 @@ func TestRun_TakenNameIgnoredTextSettles(t *testing.T) {
 
 func TestRun_TitleSuffixNotDoubled(t *testing.T) {
 	// Ignored text inside the kept extra must reach the title tag once.
-	dir := t.TempDir()
-	for _, n := range []string{"01 - New.flac", "01 - New - New-video.mkv", "01 - Old - Old (Live) (Official Video).mkv"} {
-		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
-	}
+	dir := musicDir(t, "01 - New.flac", "01 - New - New-video.mkv", "01 - New - New (Live) (Official Video)-video.mkv")
 	tagger := &fakeTagger{}
-	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
+	p := NewProcessor(dir, "", &fakePrompter{})
 	p.ignoreData.Global = []string{" (Official Video)"}
 	p.tagger = tagger
 	p.Run()
 	last := tagger.calls[len(tagger.calls)-1]
-	if filepath.Base(last.mkvPath) != "01 - New - New (Live)-video.mkv" || last.titleSuffix != "(Official Video) (Live)" {
+	if filepath.Base(last.mkvPath) != "01 - New - New (Live) (Official Video)-video.mkv" || last.titleSuffix != "(Official Video) (Live)" {
 		t.Errorf("tag calls = %+v", tagger.calls)
 	}
 }
