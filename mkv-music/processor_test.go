@@ -618,6 +618,38 @@ func TestRun_IgnoredTextInAudioTitleNotRepeatedInTag(t *testing.T) {
 	}
 }
 
+func TestCopyTags_IgnoredPatternInPostSuffixNotRepeated(t *testing.T) {
+	// "(Official Video)" is ignored in the name and already in postSuffix:
+	// the title suffix carries it once.
+	dir := t.TempDir()
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{})
+	p.ignoreData.Global = []string{" (Official Video)"}
+	p.tagger = tagger
+	mkv := filepath.Join(dir, "v.mkv")
+	p.copyTagsIfConfigured(mkv, "k", "01 - New - New (Official Video)", "(Official Video) (Live)", dir, mkv, map[string]string{"k": "a.flac"})
+	if len(tagger.calls) != 1 || tagger.calls[0].titleSuffix != "(Official Video) (Live)" {
+		t.Errorf("tag calls = %+v", tagger.calls)
+	}
+}
+
+func TestRun_IgnoreOnUnsuffixedTakenNameStillNeedsRename(t *testing.T) {
+	// The unsuffixed file must gain "-video": ignoring an unrelated pattern
+	// doesn't make its current name match, so it must not be tagged as matched.
+	dir := musicDir(t, "01 - foo.flac", "01 - foo - foo.mkv", "01 - foo - foo (Live).mkv")
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", "zzz"}})
+	p.patternAppender = func(string, string, string) error { return nil }
+	p.tagger = tagger
+	p.Run()
+	for _, c := range tagger.calls {
+		if filepath.Base(c.mkvPath) == "01 - foo - foo (Live).mkv" {
+			t.Errorf("tagged %s as matched after ignoring an unrelated pattern", c.mkvPath)
+		}
+	}
+	assertFiles(t, dir, "01 - foo - foo (Live).mkv")
+}
+
 func TestIsTrackNumber(t *testing.T) {
 	for in, want := range map[string]bool{"01": true, "1-01": true, "1.01": true, "": false, "-": false, ".": false, "01a": false, "Artist": false} {
 		if got := isTrackNumber(in); got != want {
