@@ -79,7 +79,7 @@ jobs:
         env:
           MISE_DISABLE_TOOLS: go
         with:
-          version: 2026.11.0
+          version: 2026.11.1
           install_args: >-
             go:honnef.co/go/tools/cmd/staticcheck
             go:mvdan.cc/unparam
