@@ -650,6 +650,27 @@ func TestRun_IgnoreOnUnsuffixedTakenNameStillNeedsRename(t *testing.T) {
 	assertFiles(t, dir, "01 - foo - foo (Live).mkv")
 }
 
+func TestRun_SkippedPlainVideoKeepsTheStandardName(t *testing.T) {
+	for _, versioned := range []string{"01 - Old - Old (Special Music Video).mkv", "01 - Old - Old-video (Second Version).mkv"} {
+		t.Run(versioned, func(t *testing.T) {
+			dir := musicDir(t, "01 - New.flac", "01 - Old - Old.mkv", versioned)
+			// Skip the plain video; the versioned one must keep its extra text.
+			NewProcessor(dir, "", &fakePrompter{answers: []string{"s", "r"}}).Run()
+			kept := map[string]string{
+				"01 - Old - Old (Special Music Video).mkv":  "01 - New - New (Special Music Video)-video.mkv",
+				"01 - Old - Old-video (Second Version).mkv": "01 - New - New-video (Second Version).mkv",
+			}[versioned]
+			assertFiles(t, dir, "01 - Old - Old.mkv", kept)
+			// The plain video can still take the standard name later.
+			NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+			assertFiles(t, dir, "01 - New - New-video.mkv", kept)
+			if stats, _, _ := NewProcessor(dir, "", &fakePrompter{}).Run(); stats != (Stats{}) {
+				t.Errorf("third run stats = %+v, want none", stats)
+			}
+		})
+	}
+}
+
 func TestIsTrackNumber(t *testing.T) {
 	for in, want := range map[string]bool{"01": true, "1-01": true, "1.01": true, "": false, "-": false, ".": false, "01a": false, "Artist": false} {
 		if got := isTrackNumber(in); got != want {

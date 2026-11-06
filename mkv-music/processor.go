@@ -231,6 +231,32 @@ func (p *Processor) videoRank(dir, f string) int {
 	return rank
 }
 
+// plainerVideoClaims reports whether another video in dir with no extra text
+// matches matchKey. That video owns the standard name even while it still has
+// its old name (it was skipped), so videoFile, which has extra text, must not
+// take the name from it.
+func (p *Processor) plainerVideoClaims(dir, videoFile, matchKey string, audioData map[string]string) bool {
+	if p.videoRank(dir, videoFile) < 2 {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		f := e.Name()
+		if e.IsDir() || strings.EqualFold(f, videoFile) || !containsStr(videoExts, strings.ToLower(filepath.Ext(f))) ||
+			p.videoRank(dir, f) >= 2 {
+			continue
+		}
+		clean, _, _ := cleanVideoBase(strings.TrimSuffix(f, filepath.Ext(f)))
+		if k, ok := findMatch(removeIgnoredParts(clean, p.effectivePatterns(filepath.Join(dir, f))), audioData); ok && k == matchKey {
+			return true
+		}
+	}
+	return false
+}
+
 // videoNameTaken reports whether a video other than self is named base with
 // any video extension.
 func videoNameTaken(dir, base, self string) bool {
@@ -503,11 +529,13 @@ func (p *Processor) planVideo(videoDir, videoFile string, audioData map[string]s
 	}
 
 	// Another video already has the standard name (an unsuffixed one counts as
-	// "-video"): if this one has extra text ("(Special Music Video)",
-	// " (Second Version)"), keep it in the name and title tag. Without any, the
-	// standard name is offered and "r" refuses if that exact file exists.
+	// "-video"), or a plainer one will claim it: if this one has extra text
+	// ("(Special Music Video)", " (Second Version)"), keep it in the name and
+	// title tag. Without any, the standard name is offered and "r" refuses if
+	// that exact file exists.
 	if videoNameTaken(videoDir, plan.targetName, videoPath) ||
-		(effectiveSuffix == "-video" && videoNameTaken(videoDir, matchedBase, videoPath)) {
+		(effectiveSuffix == "-video" && videoNameTaken(videoDir, matchedBase, videoPath)) ||
+		p.plainerVideoClaims(videoDir, videoFile, matchKey, audioData) {
 		clean, post := cleanVideoIgnored, keepLeadingSpace(postSuffix, postSuffixIgnored)
 		extra := extraText(clean)
 		if extra == "" && post == "" { // only ignored text sets it apart: keep that
