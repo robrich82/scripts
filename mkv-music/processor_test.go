@@ -681,23 +681,29 @@ func TestRun_SkippedPlainVideoKeepsTheStandardName(t *testing.T) {
 }
 
 func TestRun_RenameKeepsFilePatternText(t *testing.T) {
+	const newer, song = "01 - Newer.flac", "01 - Song (Alt Take).flac"
 	for _, tc := range []struct {
-		name, video, pattern, want, tag string
-		holder                          bool
+		name, audio, holder, video string
+		patterns                   []string
+		want, tag                  string
 	}{
-		{"in title", "01 - New - New (Alt Take)-video.mkv", " (Alt Take)", "01 - Newer - Newer (Alt Take)-video.mkv", "(Alt Take)", false},
-		{"after suffix", "01 - New - New-video (Alt Take).mkv", " (Alt Take)", "01 - Newer - Newer-video (Alt Take).mkv", "(Alt Take)", false},
-		{"taken name", "01 - New - New (Live) (Alt Take)-video.mkv", " (Alt Take)", "01 - Newer - Newer (Live) (Alt Take)-video.mkv", "(Alt Take) (Live)", true},
+		{"in title", newer, "", "01 - New - New (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Newer - Newer (Alt Take)-video.mkv", "(Alt Take)"},
+		{"after suffix", newer, "", "01 - New - New-video (Alt Take).mkv", []string{" (Alt Take)"}, "01 - Newer - Newer-video (Alt Take).mkv", "(Alt Take)"},
+		{"taken name", newer, "01 - Newer - Newer-video.mkv", "01 - New - New (Live) (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Newer - Newer (Live) (Alt Take)-video.mkv", "(Alt Take) (Live)"},
+		{"new title has it", song, "", "01 - Old - Old (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Song (Alt Take) - Song (Alt Take)-video.mkv", ""},
+		{"taken, new title has it", song, "01 - Song (Alt Take) - Song (Alt Take)-video.mkv", "01 - Old - Old (Live) (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Song (Alt Take) - Song (Alt Take) (Live)-video.mkv", "(Live)"},
+		{"pattern wouldn't match re-placed", newer, "", "01 - New - New (Alt) (Live)-video.mkv", []string{"(Alt) "}, "01 - Newer - Newer-video.mkv", ""},
+		{"overlapping patterns", newer, "", "01 - New - New (Alt) (Take 2)-video.mkv", []string{" (Alt)", " (Alt) (Take 2)"}, "01 - Newer - Newer (Alt) (Take 2)-video.mkv", "(Alt) (Take 2)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// The audio was retitled after "i" saved a pattern for this file.
-			dir := musicDir(t, "01 - Newer.flac", tc.video)
-			if tc.holder {
-				musicFile(t, dir, "01 - Newer - Newer-video.mkv")
+			// The audio was retitled after "i" saved patterns for this file.
+			dir := musicDir(t, tc.audio, tc.video)
+			if tc.holder != "" {
+				musicFile(t, dir, tc.holder)
 			}
 			ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
 			oldPath, newPath := filepath.Join(dir, tc.video), filepath.Join(dir, tc.want)
-			writeIgnoreJSON(t, ignoreFile, IgnoreData{FilePatterns: map[string][]string{oldPath: {tc.pattern}}})
+			writeIgnoreJSON(t, ignoreFile, IgnoreData{FilePatterns: map[string][]string{oldPath: tc.patterns}})
 
 			run := func(answers ...string) (Stats, *fakeTagger) {
 				tagger := &fakeTagger{}
@@ -726,8 +732,8 @@ func TestRun_RenameKeepsFilePatternText(t *testing.T) {
 			b, _ := os.ReadFile(ignoreFile)
 			var saved IgnoreData
 			json.Unmarshal(b, &saved)
-			if _, ok := saved.FilePatterns[oldPath]; ok || !slices.Equal(saved.FilePatterns[newPath], []string{tc.pattern}) {
-				t.Errorf("saved file patterns = %q, want only %q under the new path", saved.FilePatterns, tc.pattern)
+			if _, ok := saved.FilePatterns[oldPath]; ok || !slices.Equal(saved.FilePatterns[newPath], tc.patterns) {
+				t.Errorf("saved file patterns = %q, want only %q under the new path", saved.FilePatterns, tc.patterns)
 			}
 
 			stats, tagger := run()
@@ -828,6 +834,40 @@ func TestDefaultPatternMover(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
 		t.Errorf("dir holds %d entries, want only the ignore file", len(entries))
+	}
+
+	// A rename onto the same path moves nothing, on disk or in memory.
+	if err := defaultPatternMover(ignoreFile, newPath, newPath); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := os.ReadFile(ignoreFile); string(again) != string(b) {
+		t.Errorf("same-path move changed the file:\n%s", again)
+	}
+	p := NewProcessor(dir, "", &fakePrompter{})
+	p.ignoreData = got
+	p.moveFilePatterns(newPath, newPath)
+	if !slices.Equal(p.ignoreData.FilePatterns[newPath], want.FilePatterns[newPath]) {
+		t.Errorf("same-path move in memory left %q", p.ignoreData.FilePatterns[newPath])
+	}
+}
+
+func TestProcessVideo_IgnoreWithKeptTextMatchesNow(t *testing.T) {
+	// " (Alt)" is already ignored for this file; ignoring " (Foo)" too makes it
+	// match, and the kept " (Alt)" must not make the re-check say otherwise.
+	video := "01 - New - New (Alt) (Foo)-video.mkv"
+	dir := musicDir(t, "01 - New.flac", video)
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", " (Foo)"}})
+	p.ignoreData.FilePatterns = map[string][]string{filepath.Join(dir, video): {" (Alt)"}}
+	p.patternAppender = func(string, string, string) error { return nil }
+	p.tagger = tagger
+	out := captureStdout(t, func() { p.Run() })
+
+	if !strings.Contains(out, "File now matches after ignoring pattern!") {
+		t.Errorf("output:\n%s", out)
+	}
+	if len(tagger.calls) != 1 || tagger.calls[0].titleSuffix != "(Alt) (Foo)" {
+		t.Errorf("tag calls = %+v, want one with (Alt) (Foo)", tagger.calls)
 	}
 }
 
