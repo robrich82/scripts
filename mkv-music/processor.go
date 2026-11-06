@@ -141,8 +141,12 @@ func writeIgnoreFile(ignoreFile string, data IgnoreData) error {
 	if cerr := tmp.Close(); werr == nil {
 		werr = cerr
 	}
-	if werr == nil {
-		werr = os.Chmod(tmp.Name(), 0644) // CreateTemp makes it 0600
+	if werr == nil { // CreateTemp makes it 0600: keep the old file's mode
+		mode := fs.FileMode(0644)
+		if info, err := os.Stat(ignoreFile); err == nil {
+			mode = info.Mode().Perm()
+		}
+		werr = os.Chmod(tmp.Name(), mode)
 	}
 	if werr == nil {
 		werr = os.Rename(tmp.Name(), ignoreFile)
@@ -223,7 +227,7 @@ func (p *Processor) keptText(s, videoPath, matchedBase string) string {
 	for _, pat := range p.filePatterns(videoPath) {
 		t := strings.TrimSpace(pat)
 		if t != "" && strings.Contains(s, pat) && strings.Contains(" "+t, pat) &&
-			!strings.Contains(strings.ToLower(matchedBase), strings.ToLower(t)) && !slices.Contains(kept, t) {
+			!strings.Contains(matchedBase, pat) && !containsWord(matchedBase, t) && !slices.Contains(kept, t) {
 			kept = append(kept, t)
 		}
 	}
@@ -531,12 +535,18 @@ func (p *Processor) ignoredPatternList(cleanVideo, videoPath string) []string {
 	var found []string
 	for _, pat := range p.effectivePatterns(videoPath) {
 		if strings.Contains(cleanVideo, pat) {
-			if t := strings.TrimSpace(pat); t != "" {
+			if t := strings.TrimSpace(pat); t != "" && !slices.Contains(found, t) {
 				found = append(found, t)
 			}
 		}
 	}
 	return dropContained(found)
+}
+
+// containsWord reports whether s has word, case-insensitively and bounded by
+// spaces or the ends of s ("Live" is in "Song Live", not in "Alive").
+func containsWord(s, word string) bool {
+	return strings.Contains(" "+strings.ToLower(s)+" ", " "+strings.ToLower(word)+" ")
 }
 
 // dropContained removes each text that sits inside another one in ts, so
@@ -570,7 +580,9 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 			parts = append(parts, pat)
 		}
 	}
-	if t != "" {
+	// ...and skip postSuffix when a pattern already carries it ("(Live)" in a
+	// kept "(Live) [HD]").
+	if t != "" && !slices.ContainsFunc(parts, func(part string) bool { return containsWord(part, t) }) {
 		parts = append(parts, t)
 	}
 	titleSuffix := strings.Join(parts, " ")
@@ -676,11 +688,21 @@ func (p *Processor) planVideo(videoDir, videoFile string, audioData map[string]s
 			plan.nameSuffix = foundSuffix // an unsuffixed file must still be renamed to add "-video"
 			plan.correct = plan.targetName == clean+foundSuffix+post || plan.targetName == videoBase
 			if !plan.correct && clean == cleanVideoIgnored { // put back what this file's own patterns stripped
+				// Kept text may hold extra's text too, when a global pattern sits inside
+				// it (" (Live) [HD]" around " [HD]"): then it replaces extra.
 				if keepClean != "" && !strings.Contains(extra, keepClean) {
-					extra = strings.TrimSpace(extra + withSpace(keepClean))
+					if strings.Contains(keepClean, extra) {
+						extra = keepClean
+					} else {
+						extra += " " + keepClean
+					}
 				}
 				if keepPost != "" && !strings.Contains(post, keepPost) {
-					post += withSpace(keepPost)
+					if strings.Contains(keepPost, strings.TrimSpace(post)) {
+						post = " " + keepPost
+					} else {
+						post += " " + keepPost
+					}
 				}
 				plan.targetName = matchedBase + withSpace(extra) + effectiveSuffix + post
 				plan.correct = plan.targetName == videoBase

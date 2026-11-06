@@ -617,6 +617,20 @@ func TestCopyTags_ShortPostSuffixInsidePatternKept(t *testing.T) {
 	}
 }
 
+func TestCopyTags_SamePatternTwiceTaggedOnce(t *testing.T) {
+	// A global "[HD]" and a file " [HD]" both match: the tag says it once.
+	dir := t.TempDir()
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, "", &fakePrompter{})
+	mkv := filepath.Join(dir, "v.mkv")
+	p.ignoreData = IgnoreData{Global: []string{"[HD]"}, FilePatterns: map[string][]string{mkv: {" [HD]"}}}
+	p.tagger = tagger
+	p.copyTagsIfConfigured(mkv, "k", "01 - Song [HD] - Song [HD]", "", dir, mkv, map[string]string{"k": "a.flac"})
+	if len(tagger.calls) != 1 || tagger.calls[0].titleSuffix != "[HD]" {
+		t.Errorf("tag calls = %+v", tagger.calls)
+	}
+}
+
 func TestRun_IgnoredTextInAudioTitleNotRepeatedInTag(t *testing.T) {
 	// The audio title "Song (Live)" already says "(Live)": the tag title
 	// suffix must not add it again.
@@ -686,14 +700,18 @@ func TestRun_RenameKeepsFilePatternText(t *testing.T) {
 		name, audio, holder, video string
 		patterns                   []string
 		want, tag                  string
+		global                     []string
 	}{
-		{"in title", newer, "", "01 - New - New (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Newer - Newer (Alt Take)-video.mkv", "(Alt Take)"},
-		{"after suffix", newer, "", "01 - New - New-video (Alt Take).mkv", []string{" (Alt Take)"}, "01 - Newer - Newer-video (Alt Take).mkv", "(Alt Take)"},
-		{"taken name", newer, "01 - Newer - Newer-video.mkv", "01 - New - New (Live) (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Newer - Newer (Live) (Alt Take)-video.mkv", "(Alt Take) (Live)"},
-		{"new title has it", song, "", "01 - Old - Old (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Song (Alt Take) - Song (Alt Take)-video.mkv", ""},
-		{"taken, new title has it", song, "01 - Song (Alt Take) - Song (Alt Take)-video.mkv", "01 - Old - Old (Live) (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Song (Alt Take) - Song (Alt Take) (Live)-video.mkv", "(Live)"},
-		{"pattern wouldn't match re-placed", newer, "", "01 - New - New (Alt) (Live)-video.mkv", []string{"(Alt) "}, "01 - Newer - Newer-video.mkv", ""},
-		{"overlapping patterns", newer, "", "01 - New - New (Alt) (Take 2)-video.mkv", []string{" (Alt)", " (Alt) (Take 2)"}, "01 - Newer - Newer (Alt) (Take 2)-video.mkv", "(Alt) (Take 2)"},
+		{"in title", newer, "", "01 - New - New (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Newer - Newer (Alt Take)-video.mkv", "(Alt Take)", nil},
+		{"after suffix", newer, "", "01 - New - New-video (Alt Take).mkv", []string{" (Alt Take)"}, "01 - Newer - Newer-video (Alt Take).mkv", "(Alt Take)", nil},
+		{"taken name", newer, "01 - Newer - Newer-video.mkv", "01 - New - New (Live) (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Newer - Newer (Live) (Alt Take)-video.mkv", "(Alt Take) (Live)", nil},
+		{"new title has it", song, "", "01 - Old - Old (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Song (Alt Take) - Song (Alt Take)-video.mkv", "", nil},
+		{"taken, new title has it", song, "01 - Song (Alt Take) - Song (Alt Take)-video.mkv", "01 - Old - Old (Live) (Alt Take)-video.mkv", []string{" (Alt Take)"}, "01 - Song (Alt Take) - Song (Alt Take) (Live)-video.mkv", "(Live)", nil},
+		{"pattern wouldn't match re-placed", newer, "", "01 - New - New (Alt) (Live)-video.mkv", []string{"(Alt) "}, "01 - Newer - Newer-video.mkv", "", nil},
+		{"overlapping patterns", newer, "", "01 - New - New (Alt) (Take 2)-video.mkv", []string{" (Alt)", " (Alt) (Take 2)"}, "01 - Newer - Newer (Alt) (Take 2)-video.mkv", "(Alt) (Take 2)", nil},
+		{"taken, global inside kept", newer, "01 - Newer - Newer-video.mkv", "01 - Old - Old (Live) [HD]-video.mkv", []string{" (Live) [HD]"}, "01 - Newer - Newer (Live) [HD]-video.mkv", "(Live) [HD]", []string{" [HD]"}},
+		{"word inside new title", "01 - Alive.flac", "", "01 - Old - Old Live-video.mkv", []string{" Live"}, "01 - Alive - Alive Live-video.mkv", "Live", nil},
+		{"pattern would cut new title", song, "", "01 - Old - Old Fan-video.mkv", []string{" Fan", "Alt"}, "01 - Song (Alt Take) - Song (Alt Take) Fan-video.mkv", "Fan", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// The audio was retitled after "i" saved patterns for this file.
@@ -703,7 +721,7 @@ func TestRun_RenameKeepsFilePatternText(t *testing.T) {
 			}
 			ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
 			oldPath, newPath := filepath.Join(dir, tc.video), filepath.Join(dir, tc.want)
-			writeIgnoreJSON(t, ignoreFile, IgnoreData{FilePatterns: map[string][]string{oldPath: tc.patterns}})
+			writeIgnoreJSON(t, ignoreFile, IgnoreData{Global: tc.global, FilePatterns: map[string][]string{oldPath: tc.patterns}})
 
 			run := func(answers ...string) (Stats, *fakeTagger) {
 				tagger := &fakeTagger{}
