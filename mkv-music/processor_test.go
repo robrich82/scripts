@@ -707,7 +707,7 @@ func TestRun_SymlinkToTargetNotRenamedOverIt(t *testing.T) {
 	target := filepath.Join(dir, "Artist - Song - Song-video.mkv")
 	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
 	os.WriteFile(target, []byte("keep"), 0644)
-	if err := os.Symlink(target, filepath.Join(dir, "Artist - Song - Song x-video.mkv")); err != nil {
+	if err := os.Symlink(target, filepath.Join(dir, "Artist - Sonng - Sonng-video.mkv")); err != nil {
 		t.Skipf("cannot create symlink: %v", err)
 	}
 
