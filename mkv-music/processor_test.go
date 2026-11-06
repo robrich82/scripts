@@ -394,6 +394,13 @@ func musicDir(t *testing.T, names ...string) string {
 	return dir
 }
 
+func musicFile(t *testing.T, dir, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func assertFiles(t *testing.T, dir string, names ...string) {
 	t.Helper()
 	for _, n := range names {
@@ -666,6 +673,67 @@ func TestRun_SkippedPlainVideoKeepsTheStandardName(t *testing.T) {
 			assertFiles(t, dir, "01 - New - New-video.mkv", kept)
 			if stats, _, _ := NewProcessor(dir, "", &fakePrompter{}).Run(); stats != (Stats{}) {
 				t.Errorf("third run stats = %+v, want none", stats)
+			}
+		})
+	}
+}
+
+func TestRun_RenameKeepsFilePatternText(t *testing.T) {
+	for _, tc := range []struct {
+		name, video, pattern, want, tag string
+		holder                          bool
+	}{
+		{"in title", "01 - New - New (Alt Take)-video.mkv", " (Alt Take)", "01 - Newer - Newer (Alt Take)-video.mkv", "(Alt Take)", false},
+		{"after suffix", "01 - New - New-video (Alt Take).mkv", " (Alt Take)", "01 - Newer - Newer-video (Alt Take).mkv", "(Alt Take)", false},
+		{"taken name", "01 - New - New (Live) (Alt Take)-video.mkv", " (Alt Take)", "01 - Newer - Newer (Live) (Alt Take)-video.mkv", "(Alt Take) (Live)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The audio was retitled after "i" saved a pattern for this file.
+			dir := musicDir(t, "01 - Newer.flac", tc.video)
+			if tc.holder {
+				musicFile(t, dir, "01 - Newer - Newer-video.mkv")
+			}
+			ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
+			oldPath, newPath := filepath.Join(dir, tc.video), filepath.Join(dir, tc.want)
+			writeIgnoreJSON(t, ignoreFile, IgnoreData{FilePatterns: map[string][]string{oldPath: {tc.pattern}}})
+
+			run := func(answers ...string) (Stats, *fakeTagger) {
+				tagger := &fakeTagger{}
+				p := NewProcessor(dir, ignoreFile, &fakePrompter{answers: answers})
+				if err := p.LoadIgnorePatterns(); err != nil {
+					t.Fatal(err)
+				}
+				p.tagger = tagger
+				stats, _, _ := p.Run()
+				return stats, tagger
+			}
+			tagOf := func(tg *fakeTagger) string {
+				for _, c := range tg.calls {
+					if c.mkvPath == newPath {
+						return c.titleSuffix
+					}
+				}
+				return "<untagged>"
+			}
+
+			_, tagger := run("r")
+			assertFiles(t, dir, tc.want)
+			if got := tagOf(tagger); got != tc.tag {
+				t.Errorf("rename run tag = %q, want %q", got, tc.tag)
+			}
+			b, _ := os.ReadFile(ignoreFile)
+			var saved IgnoreData
+			json.Unmarshal(b, &saved)
+			if _, ok := saved.FilePatterns[oldPath]; ok || !slices.Equal(saved.FilePatterns[newPath], []string{tc.pattern}) {
+				t.Errorf("saved file patterns = %q, want only %q under the new path", saved.FilePatterns, tc.pattern)
+			}
+
+			stats, tagger := run()
+			if stats != (Stats{}) {
+				t.Errorf("second run stats = %+v, want none", stats)
+			}
+			if got := tagOf(tagger); got != tc.tag {
+				t.Errorf("second run tag = %q, want %q", got, tc.tag)
 			}
 		})
 	}

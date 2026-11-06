@@ -508,7 +508,9 @@ matching a particular video filename).
 
 When you choose `(i)gnore pattern` interactively, the pattern is saved under
 `file_patterns` for the specific video file being matched — it does **not**
-become a global pattern.
+become a global pattern. If that file is renamed later (say the audio was
+retitled), the new name keeps the text its patterns match, and the patterns
+move to the new name.
 
 ---
 
