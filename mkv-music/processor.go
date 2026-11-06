@@ -123,11 +123,31 @@ func defaultPatternAppender(ignoreFile, videoFile, pattern string) error {
 		data.FilePatterns = make(map[string][]string)
 	}
 	data.FilePatterns[videoFile] = append(data.FilePatterns[videoFile], pattern)
+	return writeIgnoreFile(ignoreFile, data)
+}
+
+// writeIgnoreFile replaces ignoreFile with data via a temp file and rename, so
+// a failed write leaves the old file intact rather than truncated.
+func writeIgnoreFile(ignoreFile string, data IgnoreData) error {
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ignoreFile, b, 0644)
+	tmp, err := os.CreateTemp(filepath.Dir(ignoreFile), filepath.Base(ignoreFile)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(b)
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), ignoreFile)
+	}
+	if werr != nil {
+		os.Remove(tmp.Name())
+	}
+	return werr
 }
 
 // defaultPatternMover moves oldPath's file-specific patterns (and any legacy
@@ -141,7 +161,7 @@ func defaultPatternMover(ignoreFile, oldPath, newPath string) error {
 	if err := json.Unmarshal(existing, &data); err != nil {
 		return err
 	}
-	moved := append(data.FilePatterns[oldPath], data.FilePatterns[filepath.Base(oldPath)]...)
+	moved := slices.Concat(data.FilePatterns[oldPath], data.FilePatterns[filepath.Base(oldPath)])
 	if len(moved) == 0 {
 		return nil
 	}
@@ -151,11 +171,7 @@ func defaultPatternMover(ignoreFile, oldPath, newPath string) error {
 		}
 	}
 	delete(data.FilePatterns, oldPath)
-	b, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(ignoreFile, b, 0644)
+	return writeIgnoreFile(ignoreFile, data)
 }
 
 // moveFilePatterns carries oldPath's file-specific patterns over to newPath
@@ -176,7 +192,7 @@ func (p *Processor) moveFilePatterns(oldPath, newPath string) {
 		return
 	}
 	if err := p.patternMover(p.ignoreFile, oldPath, newPath); err != nil {
-		fmt.Printf("    [WARN] Could not move ignore patterns to the new name: %v\n", err)
+		fmt.Printf("    [ERROR] Could not move ignore patterns in %s from %q to %q: %v\n", p.ignoreFile, oldPath, newPath, err)
 	}
 }
 

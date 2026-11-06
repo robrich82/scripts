@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -736,6 +738,113 @@ func TestRun_RenameKeepsFilePatternText(t *testing.T) {
 				t.Errorf("second run tag = %q, want %q", got, tc.tag)
 			}
 		})
+	}
+}
+
+// captureStdout returns what fn prints to os.Stdout.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+	done := make(chan []byte)
+	go func() { b, _ := io.ReadAll(r); done <- b }()
+	fn()
+	w.Close()
+	return string(<-done)
+}
+
+func TestRun_RenameReportsFailedPatternMove(t *testing.T) {
+	video, want := "01 - New - New (Alt Take)-video.mkv", "01 - Newer - Newer (Alt Take)-video.mkv"
+	dir := musicDir(t, "01 - Newer.flac", video)
+	ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
+	oldPath, newPath := filepath.Join(dir, video), filepath.Join(dir, want)
+	writeIgnoreJSON(t, ignoreFile, IgnoreData{FilePatterns: map[string][]string{oldPath: {" (Alt Take)"}}})
+	before, _ := os.ReadFile(ignoreFile)
+
+	tagger := &fakeTagger{}
+	p := NewProcessor(dir, ignoreFile, &fakePrompter{answers: []string{"r"}})
+	if err := p.LoadIgnorePatterns(); err != nil {
+		t.Fatal(err)
+	}
+	p.tagger = tagger
+	p.patternMover = func(string, string, string) error { return os.ErrPermission }
+	out := captureStdout(t, func() { p.Run() })
+
+	assertFiles(t, dir, want)
+	if msg := fmt.Sprintf("[ERROR] Could not move ignore patterns in %s from %q to %q", ignoreFile, oldPath, newPath); !strings.Contains(out, msg) {
+		t.Errorf("output missing %q:\n%s", msg, out)
+	}
+	// The in-memory move still lets this run tag from the new name.
+	if len(tagger.calls) != 1 || tagger.calls[0].mkvPath != newPath || tagger.calls[0].titleSuffix != "(Alt Take)" {
+		t.Errorf("tag calls = %+v, want one for %s with (Alt Take)", tagger.calls, newPath)
+	}
+	if after, _ := os.ReadFile(ignoreFile); string(after) != string(before) {
+		t.Errorf("ignore file changed despite the failed move:\n%s", after)
+	}
+}
+
+func TestDefaultPatternMover(t *testing.T) {
+	dir := t.TempDir()
+	ignoreFile := filepath.Join(dir, "ignore.json")
+	oldPath, newPath := filepath.Join(dir, "Old (A).mkv"), filepath.Join(dir, "New (A).mkv")
+	writeIgnoreJSON(t, ignoreFile, IgnoreData{
+		Global: []string{"[HD]"},
+		FilePatterns: map[string][]string{
+			oldPath:       {" (A)", " (B)"},
+			"Old (A).mkv": {" (B)", " (C)"},
+			newPath:       {" (A)"},
+			"other.mkv":   {" (D)"},
+		},
+	})
+
+	if err := defaultPatternMover(ignoreFile, oldPath, newPath); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(ignoreFile)
+	var got IgnoreData
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := IgnoreData{
+		Global: []string{"[HD]"},
+		FilePatterns: map[string][]string{
+			"Old (A).mkv": {" (B)", " (C)"}, // legacy bare-name entry is copied, not moved
+			newPath:       {" (A)", " (B)", " (C)"},
+			"other.mkv":   {" (D)"},
+		},
+	}
+	if !slices.Equal(got.Global, want.Global) || len(got.FilePatterns) != len(want.FilePatterns) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	for k, v := range want.FilePatterns {
+		if !slices.Equal(got.FilePatterns[k], v) {
+			t.Errorf("FilePatterns[%q] = %q, want %q", k, got.FilePatterns[k], v)
+		}
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("dir holds %d entries, want only the ignore file", len(entries))
+	}
+}
+
+func TestWriteIgnoreFile_FailureKeepsTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "ignore.json")
+	if err := os.Mkdir(target, 0755); err != nil { // a directory can't be replaced by a file
+		t.Fatal(err)
+	}
+	if err := writeIgnoreFile(target, IgnoreData{Global: []string{"x"}}); err == nil {
+		t.Fatal("want an error replacing a directory")
+	}
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Errorf("target disturbed: info=%v err=%v", info, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("temp file left behind: %d entries", len(entries))
 	}
 }
 
