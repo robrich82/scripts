@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -191,17 +193,24 @@ func buildAudioPaths(dirFiles []string) map[string]string {
 	return m
 }
 
-// cleanVideoBase strips the last occurrence of a known suffix from base.
-// Returns the cleaned name, the matched suffix, and any text that followed
-// the suffix (e.g. " (Second Version)"). All three are "" when no suffix matches.
+// cleanVideoBase strips the rightmost known suffix from base. A suffix followed
+// by a letter is part of a word ("Long-lived"), not a suffix. Returns the
+// cleaned name, the matched suffix, and any text that followed the suffix
+// (e.g. " (Second Version)"). suffix and postSuffix are "" when none matches.
 func cleanVideoBase(base string) (clean, suffix, postSuffix string) {
+	idx := -1
 	for _, s := range videoSuffixes {
-		if strings.Contains(base, s) {
-			idx := strings.LastIndex(base, s)
-			return base[:idx], s, base[idx+len(s):]
+		for i := strings.LastIndex(base, s); i > idx; i = strings.LastIndex(base[:i], s) {
+			if r, _ := utf8.DecodeRuneInString(base[i+len(s):]); !unicode.IsLetter(r) {
+				idx, suffix = i, s
+				break
+			}
 		}
 	}
-	return base, "", ""
+	if idx < 0 {
+		return base, "", ""
+	}
+	return base[:idx], suffix, base[idx+len(suffix):]
 }
 
 // videoRank orders a folder's videos so the likeliest owner of the standard

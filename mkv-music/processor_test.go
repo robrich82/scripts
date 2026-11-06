@@ -116,6 +116,30 @@ func TestCleanVideoBase_PostSuffix(t *testing.T) {
 	}
 }
 
+func TestCleanVideoBase_SuffixInsideWordIgnored(t *testing.T) {
+	for _, tc := range []struct{ base, clean, suffix, post string }{
+		{"01 - Long-lived - Long-lived-video", "01 - Long-lived - Long-lived", "-video", ""},
+		{"01 - Long-lived - Long-lived", "01 - Long-lived - Long-lived", "", ""},
+		{"01 - Re-live - Re-live-video (Second Version)", "01 - Re-live - Re-live", "-video", " (Second Version)"},
+		{"Artist - Song-video2", "Artist - Song", "-video", "2"},
+	} {
+		clean, suffix, post := cleanVideoBase(tc.base)
+		if clean != tc.clean || suffix != tc.suffix || post != tc.post {
+			t.Errorf("cleanVideoBase(%q) = %q, %q, %q; want %q, %q, %q", tc.base, clean, suffix, post, tc.clean, tc.suffix, tc.post)
+		}
+	}
+}
+
+func TestRun_SuffixKeywordInTitleStaysRenamed(t *testing.T) {
+	// "-live" inside "Long-lived" must not turn the video into a live extra.
+	dir := musicDir(t, "01 - Long-lived.flac", "01 - Old - Old-video (Second Version).mkv")
+	assertTagsStable(t, dir, nil, "r")
+	assertFiles(t, dir, "01 - Long-lived - Long-lived-video.mkv")
+	if stats, _, _ := NewProcessor(dir, "", &fakePrompter{}).Run(); stats != (Stats{}) {
+		t.Errorf("third run stats = %+v, want none", stats)
+	}
+}
+
 // --- processVideo tests ---
 
 func TestProcessVideo_NoAudioData_Unmatched(t *testing.T) {
