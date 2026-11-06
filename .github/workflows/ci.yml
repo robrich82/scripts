@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       modules: ${{ steps.pick.outputs.modules }}
     steps:
@@ -25,8 +25,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Every module on a schedule, a ci.yml change, or an unknown base
-      # (new branch, force push); otherwise only modules with changed files.
+      # Every module on a schedule, a ci.yml or mise.toml change, or an unknown
+      # base (new branch, force push); otherwise only modules with changed files.
       - id: pick
         env:
           EVENT: ${{ github.event_name }}
@@ -38,7 +38,7 @@ jobs:
             picked=$all
           else
             files=$(git diff --name-only "$BASE...$HEAD")
-            if grep -qx '.github/workflows/ci.yml' <<<"$files"; then
+            if grep -qxE '\.github/workflows/ci\.yml|mise\.toml' <<<"$files"; then
               picked=$all
             else
               picked=$(for m in $all; do grep -q "^$m/" <<<"$files" && echo "$m"; done || true)
@@ -51,7 +51,7 @@ jobs:
     if: needs.changes.outputs.modules != '[]'
     name: ${{ matrix.module }}
     # The tools target Windows (filetime, process detection), so test there.
-    runs-on: windows-latest
+    runs-on: windows-2025
     strategy:
       fail-fast: false
       matrix:
@@ -72,11 +72,18 @@ jobs:
           go-version-file: ${{ matrix.module }}/go.mod
           cache-dependency-path: ${{ matrix.module }}/go.*
 
-      - name: Install linters
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
-          go install mvdan.cc/unparam@v0.0.0-20261011093844-7a2c2c0b7aa6
-          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      # Linters at the versions mise.toml pins. Go stays with setup-go (go.mod's
+      # version, build cache); without MISE_DISABLE_TOOLS mise refuses to build
+      # the linters until its own Go is installed.
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        env:
+          MISE_DISABLE_TOOLS: go
+        with:
+          version: 2026.11.0
+          install_args: >-
+            go:honnef.co/go/tools/cmd/staticcheck
+            go:mvdan.cc/unparam
+            go:golang.org/x/vuln/cmd/govulncheck
 
       - name: gofmt
         run: |
@@ -86,6 +93,9 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+      - name: go mod tidy
+        run: go mod tidy -diff
 
       - name: go vet
         run: go vet ./...
@@ -102,5 +112,7 @@ jobs:
       - name: go test
         run: go test ./...
 
+      # A new advisory shouldn't block unrelated merges; the weekly run still goes red.
       - name: govulncheck
         run: govulncheck ./...
+        continue-on-error: ${{ github.event_name != 'schedule' }}
