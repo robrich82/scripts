@@ -607,6 +607,16 @@ func TestCopyTags_ShortPostSuffixInsidePatternKept(t *testing.T) {
 	}
 }
 
+func TestRun_IgnoredTextInAudioTitleNotRepeatedInTag(t *testing.T) {
+	// The audio title "Song (Live)" already says "(Live)": the tag title
+	// suffix must not add it again.
+	dir := musicDir(t, "01 - Song (Live).flac", "01 - Old - Old-video.mkv")
+	tags := assertTagsStable(t, dir, []string{" (Live)"}, "r")
+	if got, ok := tags["01 - Song (Live) - Song (Live)-video.mkv"]; !ok || got != "" {
+		t.Errorf("tags = %q, want the renamed video tagged with no suffix", tags)
+	}
+}
+
 func TestIsTrackNumber(t *testing.T) {
 	for in, want := range map[string]bool{"01": true, "1-01": true, "1.01": true, "": false, "-": false, ".": false, "01a": false, "Artist": false} {
 		if got := isTrackNumber(in); got != want {

@@ -407,9 +407,12 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 	}
 	audioFullPath := filepath.Join(videoDir, audioFilename)
 	t := strings.TrimSpace(postSuffix)
+	_, audioTitle, _ := strings.Cut(matchKey, " - ")
 	var parts []string
 	for _, pat := range p.ignoredPatternList(cleanVideo, videoPath) {
-		if !strings.Contains(t, pat) { // already carried by postSuffix
+		// Skip text already carried by postSuffix or by the audio's own title,
+		// which the tag title starts with ("Song (Live)" + "(Live)").
+		if !strings.Contains(t, pat) && !strings.Contains(audioTitle, pat) {
 			parts = append(parts, pat)
 		}
 	}
