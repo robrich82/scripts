@@ -316,11 +316,27 @@ func findMatch(cleanVideoIgnored string, audioData map[string]string) (string, b
 		// A number on every audio file ("311 - …", a folder of "01 - …" singles)
 		// says nothing about which track this is.
 		shared := len(trackMatches) > 1 && len(trackMatches) == len(choices)
-		if m, ok := getCloseMatch(cleanVideoIgnored, trackMatches, 0); ok && !shared {
+		if m, ok := closestAudio(cleanVideoIgnored, trackMatches, audioData, 0); ok && !shared {
 			return m, true
 		}
 	}
-	return getCloseMatch(cleanVideoIgnored, choices, 0.3)
+	return closestAudio(cleanVideoIgnored, choices, audioData, 0.3)
+}
+
+// closestAudio returns the audio key most similar to query, scoring each key by
+// the better of its filename and its display name ("01 - T - T"), so a video
+// already named after its audio isn't pulled to a longer, similar title.
+func closestAudio(query string, keys []string, audioData map[string]string, cutoff float64) (string, bool) {
+	best, bestRatio := "", -1.0
+	for _, k := range keys {
+		if r := max(sequenceRatio(query, k), sequenceRatio(query, audioData[k])); r > bestRatio {
+			best, bestRatio = k, r
+		}
+	}
+	if bestRatio < cutoff {
+		return "", false
+	}
+	return best, true
 }
 
 // isTrackNumber reports whether s looks like a track number ("01", "1-01"),

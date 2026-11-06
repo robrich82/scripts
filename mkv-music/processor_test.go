@@ -552,17 +552,30 @@ func TestRun_TakenNameIgnoredTextSettles(t *testing.T) {
 }
 
 func TestRun_RenameTagsFromRenameMatchWhenNewNameRematches(t *testing.T) {
-	// The new name "01 - Love - Love-video" fuzzy-matches "01 - Love Love"
-	// better, so it isn't judged correct: tag from the audio the rename used.
-	dir := musicDir(t, "01 - Love.flac", "01 - Love Love.flac", "01 - Love.mkv")
+	// Ignoring " Love" strips the new name "01 - Love - Love-video" down to
+	// "01 - -", which then matches "01 - Live": the new name isn't judged
+	// correct, so tag from the audio the rename used.
+	dir := musicDir(t, "01 - Love.flac", "01 - Live.flac", "01 - Song - Song [HD].mkv")
 	tagger := &fakeTagger{}
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
+	p.ignoreData.Global = []string{" Love"}
 	p.tagger = tagger
 	p.Run()
 	assertFiles(t, dir, "01 - Love - Love-video.mkv")
 	if len(tagger.calls) != 1 || filepath.Base(tagger.calls[0].mkvPath) != "01 - Love - Love-video.mkv" ||
 		filepath.Base(tagger.calls[0].audioPath) != "01 - Love.flac" {
 		t.Errorf("tag calls = %+v", tagger.calls)
+	}
+}
+
+func TestRun_RenamedVideoKeepsItsTrack(t *testing.T) {
+	// "01 - Love - Love" is closer to "01 - Love Love" by filename, but it is
+	// exactly the display name of "01 - Love": it must not move on run 2.
+	dir := musicDir(t, "01 - Love.flac", "01 - Love Love.flac", "01 - Old - Old (Live).mkv")
+	NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
+	assertFiles(t, dir, "01 - Love - Love-video.mkv")
+	if stats, _, _ := NewProcessor(dir, "", &fakePrompter{}).Run(); stats != (Stats{}) {
+		t.Errorf("second run stats = %+v, want none", stats)
 	}
 }
 
