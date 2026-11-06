@@ -250,20 +250,26 @@ func videoNameTaken(dir, base, self string) bool {
 // name ("(Special Music Video)"), or "". The longest repeated title wins, so a
 // title containing " - " isn't cut short.
 func extraText(name string) string {
-	_, rest, ok := strings.Cut(name, " - ")
-	if !ok {
-		return ""
+	extra, _ := repeatedTitle(name)
+	return extra
+}
+
+// repeatedTitle reports whether name has the "NN - Title - Title…" shape, and
+// returns the text after the repeated title as extraText does.
+func repeatedTitle(name string) (extra string, ok bool) {
+	_, rest, found := strings.Cut(name, " - ")
+	if !found {
+		return "", false
 	}
-	extra := ""
 	for i := 0; ; {
 		j := strings.Index(rest[i:], " - ")
 		if j < 0 {
-			return extra
+			return extra, ok
 		}
 		title, after := rest[:i+j], rest[i+j+3:]
 		if len(after) >= len(title) && strings.EqualFold(after[:len(title)], title) {
 			if tail := after[len(title):]; tail == "" || tail[0] == ' ' {
-				extra = strings.TrimSpace(tail)
+				extra, ok = strings.TrimSpace(tail), true
 			}
 		}
 		i += j + 3
@@ -323,13 +329,19 @@ func findMatch(cleanVideoIgnored string, audioData map[string]string) (string, b
 	return closestAudio(cleanVideoIgnored, choices, audioData, 0.3)
 }
 
-// closestAudio returns the audio key most similar to query, scoring each key by
-// the better of its filename and its display name ("01 - T - T"), so a video
-// already named after its audio isn't pulled to a longer, similar title.
+// closestAudio returns the audio key most similar to query. A query already in
+// the "NN - T - T" shape is also scored against each display name, taking the
+// better ratio, so a renamed video isn't pulled to a longer, similar title.
+// Other queries use filenames only: display names would loosen the cutoff.
 func closestAudio(query string, keys []string, audioData map[string]string, cutoff float64) (string, bool) {
+	_, useDisplay := repeatedTitle(query)
 	best, bestRatio := "", -1.0
 	for _, k := range keys {
-		if r := max(sequenceRatio(query, k), sequenceRatio(query, audioData[k])); r > bestRatio {
+		r := sequenceRatio(query, k)
+		if useDisplay {
+			r = max(r, sequenceRatio(query, audioData[k]))
+		}
+		if r > bestRatio {
 			best, bestRatio = k, r
 		}
 	}

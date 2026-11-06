@@ -933,6 +933,15 @@ func TestFindMatch_NumberSharedByEveryAudioKeepsCutoff(t *testing.T) {
 	}
 }
 
+func TestFindMatch_NoAudioForSongStaysUnmatched(t *testing.T) {
+	// Display names only count for "NN - T - T" names; scoring this against
+	// them would lift "03 - Reprise" over the cutoff.
+	audio := buildAudioData([]string{"01 - Lucky.flac", "03 - Reprise.flac", "04 - Sunshine.flac", "05 - Midnight.flac", "07 - Golden Hour.flac"})
+	if m, ok := findMatch("Purple Rain", audio); ok {
+		t.Errorf("got %q, want no match", m)
+	}
+}
+
 func TestFindMatch_ArtistPrefixKeepsCutoff(t *testing.T) {
 	// A non-numeric prefix is an artist, not a track: no forced match.
 	audio := buildAudioData([]string{"Artist - Zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.flac"})
