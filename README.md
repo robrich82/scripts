@@ -15,7 +15,8 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 
 ## Requirements
 
-- Go 1.27.3+ (pinned in `mise.toml`)
+- Go 1.27.3, staticcheck, unparam and govulncheck, pinned in `mise.toml`: run `mise install`.
+  - A linter `go install`ed into `go env GOBIN` shadows the pinned one; delete it there.
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
 
@@ -44,9 +45,8 @@ Run all tests:
 make test
 ```
 
-Scan all modules for known vulnerabilities in their dependencies (requires
-[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) —
-`go install golang.org/x/vuln/cmd/govulncheck@latest` — and network access):
+Scan all modules for known vulnerabilities in their dependencies with
+[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) (needs network access):
 
 ```sh
 make vuln
@@ -462,6 +462,20 @@ mkv-music
 ```
 
 The tool prompts for manual confirmation when a match is ambiguous.
+
+When a video's name starts with a track number (`01 - …`) and an audio file in
+the same folder has that track number, that audio file is the match even if the
+titles differ. A number shared by every audio file in the folder (an artist such
+as `311`, or a folder of `01 - …` singles) is matched on title instead.
+
+Plain names are prompted first (`-video` before `-video (Second Version)`,
+ignore patterns applied), then a known suffix (`-video`, `-live`, …) before
+none. When another video already has the standard name, a video keeps its
+extra text:
+`01 - Old - Old (Special Music Video).mkv` → `01 - New - New (Special Music Video)-video.mkv`,
+and `01 - Old - Old-video (Second Version).mkv` → `01 - New - New-video (Second Version).mkv`.
+A renamed MKV's title tag is built from its new name, so text the rename drops
+(`(Second Version)` on a lone video, an ignored `[HD]`) is left out of the tag.
 
 ### Flags
 

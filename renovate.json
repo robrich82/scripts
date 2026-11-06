@@ -5,6 +5,7 @@
   ],
   "automerge": true,
   "platformAutomerge": false,
+  "postUpdateOptions": ["gomodTidy"],
   "minimumReleaseAge": "1 day",
   "vulnerabilityAlerts": {
     "description": "Renovate defaults this to null, so security-fix PRs would skip the wait.",
@@ -26,6 +27,23 @@
       "matchManagers": ["custom.regex"],
       "matchDepNames": ["renovate"],
       "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "mise names linters by package path; the Go proxy only knows the module, and without it there's no release time for minimumReleaseAge.",
+      "matchDepNames": ["go:honnef.co/go/tools/cmd/staticcheck"],
+      "overridePackageName": "honnef.co/go/tools"
+    },
+    {
+      "description": "Same as staticcheck.",
+      "matchDepNames": ["go:golang.org/x/vuln/cmd/govulncheck"],
+      "overridePackageName": "golang.org/x/vuln"
+    },
+    {
+      "description": "Bump go.mod's go line with mise.toml's Go, in one PR; by default Renovate leaves the go line alone.",
+      "matchManagers": ["gomod", "mise"],
+      "matchDepNames": ["go"],
+      "rangeStrategy": "bump",
+      "groupName": "Go"
     }
   ]
 }
