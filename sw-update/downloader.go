@@ -39,6 +39,9 @@ var retryBackoff = 3 * time.Second
 // referer is the page the asset was found on; sites that only serve downloads
 // to visitors of their own pages need it.
 func downloadAsset(asset Asset, destDir, referer string) (string, error) {
+	if err := checkAssetName(asset.Name); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return "", err
 	}
@@ -83,6 +86,16 @@ func downloadAsset(asset Asset, destDir, referer string) (string, error) {
 		}
 	}
 	return "", lastErr
+}
+
+// checkAssetName rejects anything but a plain file name. Names scraped from
+// links are URL-decoded, so "%5C..%5C" arrives as a backslash path that
+// filepath.Join would resolve outside destDir.
+func checkAssetName(name string) error {
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\:`) || !filepath.IsLocal(name) {
+		return fmt.Errorf("unsafe asset name %q", name)
+	}
+	return nil
 }
 
 // maxInterstitialHops bounds how many "your download will start shortly"
