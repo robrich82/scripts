@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -78,7 +79,7 @@ func newHTTPTMDBOriginClient(apiKey string) *httpTMDBOriginClient {
 func (c *httpTMDBOriginClient) getTMDB(u string) (*http.Response, error) {
 	resp, err := c.client.Get(u)
 	if err != nil {
-		return nil, err
+		return nil, redactAPIKey(err)
 	}
 	if resp.StatusCode/100 != 2 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
@@ -267,4 +268,20 @@ func dirTitleYear(dirName string) (title, year string) {
 	year = dirName[m[2]:m[3]]
 	title = strings.TrimSpace(dirName[:m[0]])
 	return
+}
+
+// redactAPIKey blanks the api_key in a *url.Error, whose message otherwise
+// prints the whole request URL, key included.
+func redactAPIKey(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	if u, perr := url.Parse(ue.URL); perr == nil && u.Query().Has("api_key") {
+		q := u.Query()
+		q.Set("api_key", "REDACTED")
+		u.RawQuery = q.Encode()
+		ue.URL = u.String()
+	}
+	return err
 }

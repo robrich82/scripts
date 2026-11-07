@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -99,7 +100,7 @@ func (t *tmdbMovieSource) searchMovie(title, year string) (string, error) {
 
 	resp, err := t.httpClient.Get(u)
 	if err != nil {
-		return "", err
+		return "", redactAPIKey(err)
 	}
 	defer resp.Body.Close()
 
@@ -129,7 +130,7 @@ func (t *tmdbMovieSource) nzCertification(tmdbID string) (NZRating, error) {
 
 	resp, err := t.httpClient.Get(u)
 	if err != nil {
-		return RatingNone, err
+		return RatingNone, redactAPIKey(err)
 	}
 	defer resp.Body.Close()
 
@@ -181,7 +182,7 @@ func (t *tmdbMovieSource) GetMovieDetails(tmdbID string) (MovieDetails, error) {
 
 	resp, err := t.httpClient.Get(u)
 	if err != nil {
-		return MovieDetails{}, err
+		return MovieDetails{}, redactAPIKey(err)
 	}
 	defer resp.Body.Close()
 
@@ -323,4 +324,20 @@ func titleFromFilename(filename, year string) string {
 		filename = strings.ReplaceAll(filename, r.from, r.to)
 	}
 	return strings.TrimSpace(filename)
+}
+
+// redactAPIKey blanks the api_key in a *url.Error, whose message otherwise
+// prints the whole request URL, key included.
+func redactAPIKey(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	if u, perr := url.Parse(ue.URL); perr == nil && u.Query().Has("api_key") {
+		q := u.Query()
+		q.Set("api_key", "REDACTED")
+		u.RawQuery = q.Encode()
+		ue.URL = u.String()
+	}
+	return err
 }

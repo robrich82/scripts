@@ -108,20 +108,17 @@ func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	}
 }
 
-// plexGet performs a GET request to path (relative to baseURL), appending the
-// Plex token and an Accept: application/json header.
+// plexGet performs a GET request to path (relative to baseURL) with an
+// Accept: application/json header. The Plex token goes in a header, not the
+// URL, so transport errors (which print the URL) can't leak it.
 func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
 	u := c.baseURL + path
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	u += sep + "X-Plex-Token=" + url.QueryEscape(c.token)
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 	return c.httpClient.Do(req)
 }
 
@@ -543,13 +540,13 @@ func (c *httpPlexClient) SetEpisodeMetadata(ratingKey, title, originallyAvailabl
 	if originallyAvailableAt != "" {
 		path += "&originallyAvailableAt.value=" + url.QueryEscape(originallyAvailableAt) + "&originallyAvailableAt.locked=1"
 	}
-	path += "&X-Plex-Token=" + url.QueryEscape(c.token)
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("plex: build put request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -600,14 +597,15 @@ func plexAudioLangTag(code string) string {
 // plexAudioLangTag) to match Plex Web, so the value shows correctly in the
 // per-item Settings dialog rather than as "Account default".
 func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) error {
-	path := fmt.Sprintf("/library/metadata/%s/prefs?audioLanguage=%s&X-Plex-Token=%s",
-		ratingKey, url.QueryEscape(plexAudioLangTag(langs.Default)), url.QueryEscape(c.token))
+	path := fmt.Sprintf("/library/metadata/%s/prefs?audioLanguage=%s",
+		ratingKey, url.QueryEscape(plexAudioLangTag(langs.Default)))
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("plex: build put request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -803,14 +801,15 @@ func (c *httpPlexClient) SetContentRating(ratingKey string, itemType PlexItemTyp
 	// "nz/R16"). Without the prefix the value is stored as a raw string and
 	// won't be recognised as an NZ classification rating.
 	plexRating := "nz/" + string(rating)
-	path := fmt.Sprintf("/library/metadata/%s?type=%d&id=%s&contentRating.value=%s&contentRating.locked=1&X-Plex-Token=%s",
-		ratingKey, itemType, ratingKey, url.QueryEscape(plexRating), url.QueryEscape(c.token))
+	path := fmt.Sprintf("/library/metadata/%s?type=%d&id=%s&contentRating.value=%s&contentRating.locked=1",
+		ratingKey, itemType, ratingKey, url.QueryEscape(plexRating))
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("plex: build put request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

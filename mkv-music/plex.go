@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -51,20 +50,17 @@ func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	}
 }
 
-// plexGet performs a GET request to path (relative to baseURL), appending the
-// Plex token and an Accept: application/json header.
+// plexGet performs a GET request to path (relative to baseURL) with an
+// Accept: application/json header. The Plex token goes in a header, not the
+// URL, so transport errors (which print the URL) can't leak it.
 func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
 	u := c.baseURL + path
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	u += sep + "X-Plex-Token=" + url.QueryEscape(c.token)
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 	return doPlexRequest(c.httpClient, req, path)
 }
 
@@ -132,20 +128,16 @@ func (c *httpPlexClient) findArtistInSection(sectionKey, normTitle string) (stri
 	return "", nil
 }
 
-// plexPut performs a PUT request to path (relative to baseURL), appending the
-// Plex token.
+// plexPut performs a PUT request to path (relative to baseURL), sending the
+// Plex token in a header.
 func (c *httpPlexClient) plexPut(path string) (*http.Response, error) {
 	u := c.baseURL + path
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	u += sep + "X-Plex-Token=" + url.QueryEscape(c.token)
 	req, err := http.NewRequest(http.MethodPut, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 	return doPlexRequest(c.httpClient, req, path)
 }
 
