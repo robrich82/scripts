@@ -211,3 +211,39 @@ func TestInstallReportsStateSaveError(t *testing.T) {
 		t.Errorf("printed Marked although the state was not saved:\n%s", out)
 	}
 }
+
+// Answering yes at Run/open extracts the served zips, which are not valid
+// archives, so every run/extract fails without launching anything.
+const proceedRun = "y\ny\n"
+
+func TestInstallFailsWhenExtractFails(t *testing.T) {
+	newInstallEnv(t, "none", serveAssets(false))
+
+	out, err := runInstall(t, proceedRun+"\n")
+	if err == nil || !strings.Contains(err.Error(), "2 of 2 files failed to run or extract: a.zip, b.zip") {
+		t.Errorf("err = %v, want 2 of 2 files failed to run or extract: a.zip, b.zip", err)
+	}
+	if !strings.Contains(out, "Mark version as installed/seen? [y/N]") {
+		t.Errorf("mark prompt should default to No:\n%s", out)
+	}
+	if got := markedVersion(t); got != "" {
+		t.Errorf("marked version = %q, want unmarked", got)
+	}
+}
+
+func TestInstallReportsDownloadAndExtractFailures(t *testing.T) {
+	newInstallEnv(t, "exe", serveAssets(true))
+
+	_, err := runInstall(t, proceedRun)
+	if err == nil {
+		t.Fatal("cmdInstall succeeded, want download and extract errors")
+	}
+	for _, want := range []string{
+		"1 of 2 assets failed to download: b.zip",
+		"1 of 1 files failed to run or extract: a.zip",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to include %q", err, want)
+		}
+	}
+}

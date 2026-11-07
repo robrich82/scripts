@@ -103,12 +103,12 @@ func cmdInstall(args []string) error {
 	}
 	fmt.Print("\nRun/open downloaded file(s)? [Y/n]: ")
 	line, _ = reader.ReadString('\n')
-	openFailed := false
+	var openFailed []string
 	if !strings.EqualFold(strings.TrimSpace(line), "n") {
 		for _, path := range downloaded {
 			if err := runOrOpen(path, app.ArchivePassword); err != nil {
 				fmt.Fprintf(os.Stderr, "  Error opening %s: %v\n", filepath.Base(path), err)
-				openFailed = true
+				openFailed = append(openFailed, filepath.Base(path))
 			}
 		}
 	}
@@ -116,7 +116,7 @@ func cmdInstall(args []string) error {
 	var markErr error
 	if app.Local.Type == "" || app.Local.Type == "none" {
 		// After a failed download or run/extract, default to not marking it installed.
-		defaultNo := len(failed) > 0 || openFailed
+		defaultNo := len(failed) > 0 || len(openFailed) > 0
 		prompt := "[Y/n]"
 		if defaultNo {
 			prompt = "[y/N]"
@@ -142,7 +142,12 @@ func cmdInstall(args []string) error {
 		downloadErr = fmt.Errorf("%d of %d assets failed to download: %s",
 			len(failed), len(result.Assets), strings.Join(failed, ", "))
 	}
-	return errors.Join(downloadErr, markErr)
+	var openErr error
+	if len(openFailed) > 0 {
+		openErr = fmt.Errorf("%d of %d files failed to run or extract: %s",
+			len(openFailed), len(downloaded), strings.Join(openFailed, ", "))
+	}
+	return errors.Join(downloadErr, openErr, markErr)
 }
 
 // markInstalled records version as both the latest and the last seen version
