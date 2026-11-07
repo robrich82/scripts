@@ -152,7 +152,7 @@ func writeZipCrypto(t *testing.T, content []byte, method uint16, flags uint16, p
 		CRC32:              crc32.ChecksumIEEE(content),
 		UncompressedSize64: uint64(len(content)),
 	}
-	hdr.ModifiedTime = 0x7a3c //lint:ignore SA1019 the check byte reads this raw DOS field
+	hdr.ModifiedTime = 0x7a3c //nolint:staticcheck // SA1019: the check byte reads this raw DOS field
 	enc := zipCryptoEncrypt(payload, password, check)
 	hdr.CompressedSize64 = uint64(len(enc))
 

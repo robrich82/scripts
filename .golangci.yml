@@ -1,0 +1,13 @@
+version: "2"
+
+linters:
+  default: standard
+  # Off until its existing findings are fixed.
+  disable:
+    - errcheck
+  enable:
+    - unparam
+
+formatters:
+  enable:
+    - gofmt
