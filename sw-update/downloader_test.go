@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -13,7 +12,7 @@ import (
 
 func TestDownloadAssetSendsUserAgentAndReferer(t *testing.T) {
 	var gotUA, gotReferer string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.Header.Get("User-Agent")
 		gotReferer = r.Header.Get("Referer")
 		w.Write([]byte("payload"))
@@ -45,7 +44,7 @@ func TestDownloadAssetSendsUserAgentAndReferer(t *testing.T) {
 
 func TestDownloadAssetRetriesTransientStatus(t *testing.T) {
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
 			w.WriteHeader(http.StatusForbidden)
@@ -65,7 +64,7 @@ func TestDownloadAssetRetriesTransientStatus(t *testing.T) {
 
 func TestDownloadAssetGivesUpOnPermanentStatus(t *testing.T) {
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -99,7 +98,7 @@ func TestDownloadAssetFollowsMetaRefreshInterstitial(t *testing.T) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Write([]byte("PK"))
 	})
-	srv := httptest.NewServer(mux)
+	srv := newDownloadServer(t, mux)
 	defer srv.Close()
 
 	path, err := downloadAsset(Asset{Name: "a.zip", URL: srv.URL + "/files/a.zip/download"}, t.TempDir(), "")
@@ -116,7 +115,7 @@ func TestDownloadAssetFollowsMetaRefreshInterstitial(t *testing.T) {
 
 func TestDownloadAssetRejectsHTMLPageWithoutRefresh(t *testing.T) {
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<html>please log in</html>"))
@@ -138,7 +137,7 @@ func TestDownloadAssetRejectsHTMLPageWithoutRefresh(t *testing.T) {
 }
 
 func TestDownloadAssetSavesBinaryMislabelledAsHTML(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("PK\x03\x04binary"))
 	}))
@@ -155,7 +154,7 @@ func TestDownloadAssetSavesBinaryMislabelledAsHTML(t *testing.T) {
 
 func TestDownloadAssetGivesUpOnRefreshLoop(t *testing.T) {
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(`<html><meta http-equiv="refresh" content="0; url=/again"></html>`))
@@ -182,7 +181,7 @@ func TestDownloadAssetGivesUpOnRefreshLoop(t *testing.T) {
 func TestDownloadAssetSavesHTMLAssetVerbatim(t *testing.T) {
 	const page = `<html><meta http-equiv="refresh" content="0; url=/elsewhere"></html>`
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(page))
@@ -200,13 +199,13 @@ func TestDownloadAssetSavesHTMLAssetVerbatim(t *testing.T) {
 
 func TestDownloadAssetInterstitialRefererAcrossHosts(t *testing.T) {
 	var fileReferer string
-	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mirror := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fileReferer = r.Header.Get("Referer")
 		w.Header().Set("Content-Type", "application/zip")
 		w.Write([]byte("PK"))
 	}))
 	defer mirror.Close()
-	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	page := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(`<html><meta http-equiv="refresh" content="0; url=` + mirror.URL + `/a.zip"></html>`))
 	}))

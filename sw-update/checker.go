@@ -19,6 +19,8 @@ import (
 type Asset struct {
 	Name string
 	URL  string
+	// SHA256 is the expected hex digest, when the source publishes one.
+	SHA256 string
 }
 
 // CheckResult holds the outcome of a version check.
@@ -74,6 +76,15 @@ type ghRelease struct {
 type ghAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+	Digest             string `json:"digest"` // "sha256:<hex>"; absent on assets uploaded before mid-2025
+}
+
+func (a ghAsset) asset() Asset {
+	out := Asset{Name: filepath.Base(a.Name), URL: a.BrowserDownloadURL}
+	if sum, ok := strings.CutPrefix(a.Digest, "sha256:"); ok {
+		out.SHA256 = sum
+	}
+	return out
 }
 
 func (g *githubChecker) check(app App) (*CheckResult, error) {
@@ -191,7 +202,7 @@ func selectAssets(ghAssets []ghAsset, patterns []string) []Asset {
 		for _, pat := range patterns {
 			for _, a := range ghAssets {
 				if matchAssetPattern(pat, a.Name) {
-					out = append(out, Asset{Name: filepath.Base(a.Name), URL: a.BrowserDownloadURL})
+					out = append(out, a.asset())
 				}
 			}
 		}
@@ -251,7 +262,7 @@ func autoSelectWindows(ghAssets []ghAsset) []Asset {
 
 	var out []Asset
 	for _, a := range candidates {
-		out = append(out, Asset{Name: filepath.Base(a.Name), URL: a.BrowserDownloadURL})
+		out = append(out, a.asset())
 	}
 	return out
 }

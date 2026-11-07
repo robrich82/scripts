@@ -904,6 +904,9 @@ failures (403, 408, 429, 5xx, and connection errors); a 404 or 401 fails
 immediately. A web page served in place of the file (SourceForge `/download`
 links) is followed through its `<meta http-equiv="refresh">`, up to three
 times; a page without one fails immediately rather than being saved as the asset.
+Downloads are https only: an `http://` asset URL, redirect or refresh target
+fails. GitHub assets are checked against the release's published SHA-256, and
+a mismatching file is deleted.
 
 At the "Run/open downloaded file(s)?" prompt, `.exe`/`.msi` assets launch
 elevated; `.zip` and `.7z` assets are extracted next to the download and the
