@@ -34,9 +34,13 @@ type Checker interface {
 	Check(app App) (*CheckResult, error)
 }
 
-// NewChecker returns a Checker that dispatches based on app.Checker.Type.
+// NewChecker returns a Checker that dispatches based on app.Checker.Type. It
+// uses a copy of client that refuses redirects to http, since a page fetched in
+// the clear could name any asset URL.
 func NewChecker(client *http.Client) Checker {
-	return &checkerDispatch{client: client}
+	c := *client
+	c.CheckRedirect = httpsOnlyRedirect
+	return &checkerDispatch{client: &c}
 }
 
 type checkerDispatch struct {
@@ -44,20 +48,31 @@ type checkerDispatch struct {
 }
 
 func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
+	var result *CheckResult
+	var err error
 	switch app.Checker.Type {
 	case "github":
-		return (&githubChecker{client: d.client}).check(app)
+		result, err = (&githubChecker{client: d.client}).check(app)
 	case "html":
-		return (&htmlChecker{client: d.client}).check(app)
+		result, err = (&htmlChecker{client: d.client}).check(app)
 	case "http-header":
-		return (&headerChecker{client: d.client}).check(app)
+		result, err = (&headerChecker{client: d.client}).check(app)
 	case "sourceforge":
-		return (&sfChecker{client: d.client}).check(app)
+		result, err = (&sfChecker{client: d.client}).check(app)
 	case "":
 		return nil, fmt.Errorf("no checker type configured for %q", app.Name)
 	default:
 		return nil, fmt.Errorf("unknown checker type %q for %q", app.Checker.Type, app.Name)
 	}
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range result.Assets {
+		if u, err := url.Parse(a.URL); err != nil || u.Scheme != "https" {
+			return nil, &insecureURLError{URL: a.URL}
+		}
+	}
+	return result, nil
 }
 
 // ---- GitHub checker ----

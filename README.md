@@ -907,7 +907,8 @@ immediately. A web page served in place of the file (SourceForge `/download`
 links) is followed through its `<meta http-equiv="refresh">`, up to three
 times; a page without one fails immediately rather than being saved as the asset.
 Downloads are https only: an `http://` asset URL, redirect or refresh target
-fails. A GitHub asset with a published SHA-256 digest (assets uploaded since
+fails. Checks refuse a redirect to `http://` too, and an app whose checker
+returns an `http://` asset fails its check. A GitHub asset with a published SHA-256 digest (assets uploaded since
 mid-2025) is checked against it, and a mismatching download is discarded;
 other assets are not checked.
 
