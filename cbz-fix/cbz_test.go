@@ -24,10 +24,10 @@ func makePNG(w, h int) []byte {
 	return buf.Bytes()
 }
 
-// makePNGShade is like makePNG but fills the image with the given gray level so
+// makePNGShade makes a 100x200 PNG filled with the given gray level so
 // that distinct shades produce byte-distinct (and CRC-distinct) PNGs.
-func makePNGShade(w, h int, shade uint8) []byte {
-	img := image.NewGray(image.Rect(0, 0, w, h))
+func makePNGShade(shade uint8) []byte {
+	img := image.NewGray(image.Rect(0, 0, 100, 200))
 	for i := range img.Pix {
 		img.Pix[i] = shade
 	}
@@ -145,7 +145,7 @@ var (
 	landscape = makePNG(200, 100)
 	// blankPortrait matches what a previous run's blank page looks like: same
 	// shape as a content page, but white.
-	blankPortrait = makePNGShade(100, 200, 255)
+	blankPortrait = makePNGShade(255)
 )
 
 // TestProcessCBZ_BasicRename verifies the simplest case: three portrait pages,
@@ -756,12 +756,12 @@ func makeKFXCBZWithCover(t *testing.T, pages []string, linkedAtEnd bool) string 
 		}
 		entries = append(entries, zipEntry{filesDir + xhtmlName, []byte(xhtmlFor(img+".png", nextXHTML))})
 		// Distinct shade per page so the cover is not byte-identical to any page.
-		entries = append(entries, zipEntry{filesDir + img + ".png", makePNGShade(100, 200, uint8(i+1))})
+		entries = append(entries, zipEntry{filesDir + img + ".png", makePNGShade(uint8(i + 1))})
 	}
 
 	// cover.jpeg lives at *_files/ root, not inside OEBPS/. Use a distinct shade
 	// so it is a genuinely separate image from the interior pages.
-	entries = append(entries, zipEntry{"kfxtest_files/cover.jpeg", makePNGShade(100, 200, 200)})
+	entries = append(entries, zipEntry{"kfxtest_files/cover.jpeg", makePNGShade(200)})
 
 	return makeCBZ(t, entries)
 }
@@ -1044,7 +1044,7 @@ func TestKFXPageOrder_CoverDuplicatedAsFirstPage(t *testing.T) {
 		return `<html><body><img src="` + imgName + `" alt="page"/>` + next + `</body></html>`
 	}
 
-	coverBytes := makePNGShade(100, 200, 42)
+	coverBytes := makePNGShade(42)
 	pages := []string{"00001", "00002", "00003"}
 
 	var entries []zipEntry
@@ -1058,7 +1058,7 @@ func TestKFXPageOrder_CoverDuplicatedAsFirstPage(t *testing.T) {
 		}
 		entries = append(entries, zipEntry{filesDir + "page_" + img + ".xhtml", []byte(xhtmlFor(img+".jpeg", nextXHTML))})
 		// First page is byte-identical to the cover; the rest are distinct.
-		data := makePNGShade(100, 200, uint8(i+1))
+		data := makePNGShade(uint8(i + 1))
 		if i == 0 {
 			data = coverBytes
 		}

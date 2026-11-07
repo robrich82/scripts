@@ -81,12 +81,12 @@ func makeCache(t *testing.T) *MovieRatingCache {
 	return c
 }
 
-func testDetails(releaseDate string) MovieDetails {
+func testDetails() MovieDetails {
 	return MovieDetails{
 		TMDBID:      "12345",
 		Title:       "Avengers Endgame",
 		Overview:    "Heroes assemble.",
-		ReleaseDate: releaseDate,
+		ReleaseDate: "2019-04-26",
 		PosterPath:  "",
 	}
 }
@@ -164,7 +164,7 @@ func TestProcessFile_AlreadyApplied_MtimeCurrent_OK(t *testing.T) {
 	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, target, target)
 
-	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)
@@ -189,7 +189,7 @@ func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, past, past)
 
-	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)
@@ -225,7 +225,7 @@ func TestProcessFile_AppliedButMtimeWrong_FixesTimestamps(t *testing.T) {
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, past, past)
 
-	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)
@@ -250,7 +250,7 @@ func TestProcessFile_Overwrite_ReappliesEvenIfApplied(t *testing.T) {
 	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, target, target)
 
-	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)
@@ -274,7 +274,7 @@ func TestProcessFile_MkvpropeditRuns_AlwaysRestoresMtime(t *testing.T) {
 	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, target, target) // mtime already correct
 
-	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)
@@ -292,7 +292,7 @@ func TestProcessFile_WithRating_TagsPathSet(t *testing.T) {
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
 	os.Chtimes(path, past, past)
 
-	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)

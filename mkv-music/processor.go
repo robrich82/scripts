@@ -751,7 +751,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		newPath := filepath.Join(videoDir, targetName+ext)
 		if newPath != fullPath {
 			// A case-only rename finds the file itself here; let only that through.
-			if newInfo, statErr := os.Lstat(newPath); statErr == nil && !(strings.EqualFold(newPath, fullPath) && sameFile(newInfo, fullPath)) {
+			if newInfo, statErr := os.Lstat(newPath); statErr == nil && (!strings.EqualFold(newPath, fullPath) || !sameFile(newInfo, fullPath)) {
 				// os.Rename would silently clobber an existing file (e.g. two
 				// videos matching the same track). Refuse rather than destroy it.
 				fmt.Printf("    [SKIP] Target already exists, not overwriting: %s%s\n", targetName, ext)

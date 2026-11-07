@@ -612,7 +612,7 @@ func AnalyzeFile(info MKVInfo, opts AnalyzeOptions) AnalysisResult {
 			}
 		} else if len(forcedCands) > 1 && len(mainCands) > 0 {
 			// Multiple Signs/Songs + main tracks: keep one forced as default+forced.
-			var defaultForcedIdx int = -1
+			defaultForcedIdx := -1
 			for _, i := range forcedCands {
 				if tracks[i].Properties.DefaultTrack {
 					defaultForcedIdx = i

@@ -20,8 +20,8 @@ func subTrack(id int, lang, codec, name string, def, forced bool) Track {
 	}}
 }
 
-func videoTrack(id int, lang string) Track {
-	return Track{ID: id, Type: "video", Properties: TrackProperties{Language: lang}}
+func videoTrack(lang string) Track {
+	return Track{Type: "video", Properties: TrackProperties{Language: lang}}
 }
 
 func hasEdit(edits []string, needle string) bool {
@@ -98,7 +98,7 @@ func TestAnalyzeFile_NormalisedLang_MissingIETF_SetsIETFOnly(t *testing.T) {
 
 func TestAnalyzeFile_VideoInheritsAudioLanguage(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "und"),
+		videoTrack("und"),
 		audioTrack(1, "jpn", "A_FLAC", 2, true),
 	}}
 	res := AnalyzeFile(info, AnalyzeOptions{})
@@ -131,7 +131,7 @@ func TestAnalyzeFile_VideoInheritsAudioLanguage_SetsIETF(t *testing.T) {
 
 func TestAnalyzeFile_VideoAlreadyHasLanguage_NoInherit(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "jpn"),
+		videoTrack("jpn"),
 		audioTrack(1, "jpn", "A_FLAC", 2, true),
 	}}
 	res := AnalyzeFile(info, AnalyzeOptions{})
@@ -142,7 +142,7 @@ func TestAnalyzeFile_VideoAlreadyHasLanguage_NoInherit(t *testing.T) {
 
 func TestAnalyzeFile_VideoLanguageMismatch_Inherits(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "eng"),
+		videoTrack("eng"),
 		audioTrack(1, "jpn", "A_FLAC", 2, true),
 	}}
 	res := AnalyzeFile(info, AnalyzeOptions{})
@@ -383,7 +383,7 @@ func TestAnalyzeFile_TiedSubs_PreservesExistingDefault(t *testing.T) {
 
 func TestAnalyzeFile_NoEditsWhenAlreadyCorrect(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "eng"),
+		videoTrack("eng"),
 		audioTrack(1, "eng", "A_FLAC", 6, true),
 		subTrack(2, "eng", "S_TEXT/ASS", "English", true, false),
 	}}
@@ -492,7 +492,7 @@ func TestAnalyzeFile_SubNamedEnglish_MislabelledJpn_Corrected(t *testing.T) {
 	// A subtitle tagged jpn but named "English Subtitles" should be corrected
 	// to eng so the trim phase keeps it rather than removing it as Japanese.
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "jpn"),
+		videoTrack("jpn"),
 		audioTrack(1, "jpn", "A_FLAC", 5, true),
 		subTrack(2, "jpn", "S_TEXT/ASS", "English Subtitles", true, false),
 	}}
@@ -508,7 +508,7 @@ func TestAnalyzeFile_SubNamedEnglish_MislabelledJpn_Corrected(t *testing.T) {
 func TestAnalyzeFile_SubNamedEnglish_UpdatedTracksReflectsCorrection(t *testing.T) {
 	// UpdatedTracks must carry the corrected language so trim uses eng, not jpn.
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "jpn"),
+		videoTrack("jpn"),
 		audioTrack(1, "jpn", "A_FLAC", 5, true),
 		subTrack(2, "jpn", "S_TEXT/ASS", "English Subtitles", true, false),
 	}}

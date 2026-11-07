@@ -82,14 +82,14 @@ func (f *fakeRatingSource) FetchEpisodeRating(_, _ string, _, _ int) (NZRating, 
 
 // helpers
 
-func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tmdb TMDBClient, mkv MKVRunner, prompter Prompter) (*Processor, *captureFileTimer) {
+func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tmdb TMDBClient, mkv MKVRunner, prompter Prompter) *Processor {
 	t.Helper()
 	if cfg.MediaDir == "" {
 		cfg.MediaDir = dir
 	}
 	timer := &captureFileTimer{}
 	rc, _ := LoadRatingCache(filepath.Join(t.TempDir(), "rating_cache.json"))
-	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t), rc, nil, nil, nil), timer
+	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t), rc, nil, nil, nil)
 }
 
 func emptyRetryList(t *testing.T) *RetryList {
@@ -117,7 +117,7 @@ func cacheWith(t *testing.T, entries map[string]string) *ShowCache {
 
 func TestResolveShowID_AlreadyInCache_ProcessAll(t *testing.T) {
 	cache := cacheWith(t, map[string]string{"Show A": "111"})
-	p, _ := newTestProcessor(t, "", Config{ProcessAll: true}, cache,
+	p := newTestProcessor(t, "", Config{ProcessAll: true}, cache,
 		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{})
 
 	id := p.resolveShowID("Show A")
@@ -128,7 +128,7 @@ func TestResolveShowID_AlreadyInCache_ProcessAll(t *testing.T) {
 
 func TestResolveShowID_AlreadyInCache_PromptYes(t *testing.T) {
 	cache := cacheWith(t, map[string]string{"Show B": "222"})
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"y"}})
 
 	id := p.resolveShowID("Show B")
@@ -139,7 +139,7 @@ func TestResolveShowID_AlreadyInCache_PromptYes(t *testing.T) {
 
 func TestResolveShowID_AlreadyInCache_PromptNo(t *testing.T) {
 	cache := cacheWith(t, map[string]string{"Show C": "333"})
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"n"}})
 
 	id := p.resolveShowID("Show C")
@@ -154,7 +154,7 @@ func TestResolveShowID_AlreadyInCache_PromptNo(t *testing.T) {
 func TestResolveShowID_AlreadyInCache_TypoDefaultsToSkip(t *testing.T) {
 	// Anything other than "y" should skip, not process.
 	cache := cacheWith(t, map[string]string{"Show D": "444"})
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"nn"}})
 
 	id := p.resolveShowID("Show D")
@@ -166,7 +166,7 @@ func TestResolveShowID_AlreadyInCache_TypoDefaultsToSkip(t *testing.T) {
 func TestResolveShowID_NewShow_AcceptFirstResult(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 456, Name: "New Show", FirstAirDate: "2021-01-01"}}}
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		tmdb, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"y"}})
 
 	id := p.resolveShowID("New Show")
@@ -181,7 +181,7 @@ func TestResolveShowID_NewShow_AcceptFirstResult(t *testing.T) {
 func TestResolveShowID_NewShow_ManualID(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 1, Name: "Wrong Show"}}}
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		tmdb, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"99999"}})
 
 	id := p.resolveShowID("My Show")
@@ -193,7 +193,7 @@ func TestResolveShowID_NewShow_ManualID(t *testing.T) {
 func TestResolveShowID_NewShow_SkipAnswer(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 1, Name: "A Show"}}}
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		tmdb, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"s"}})
 
 	id := p.resolveShowID("My Show")
@@ -205,7 +205,7 @@ func TestResolveShowID_NewShow_SkipAnswer(t *testing.T) {
 func TestResolveShowID_NewShow_NoResults_ManualID(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: nil}
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		tmdb, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"77777"}})
 
 	id := p.resolveShowID("Obscure Show")
@@ -218,7 +218,7 @@ func TestResolveShowID_SessionSkipped_NoRePrompt(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 1}}}
 	prompter := &scriptedPrompter{answers: []string{"s"}} // only one answer queued
-	p, _ := newTestProcessor(t, "", Config{}, cache, tmdb, &fakeMKVRunner{}, prompter)
+	p := newTestProcessor(t, "", Config{}, cache, tmdb, &fakeMKVRunner{}, prompter)
 
 	p.resolveShowID("Skipped Show")       // consumes the one answer
 	id := p.resolveShowID("Skipped Show") // should not prompt again
@@ -798,7 +798,7 @@ func TestProcessorRun_SkipsOldFiles(t *testing.T) {
 
 	cache := cacheWith(t, map[string]string{"Test Show": "12345"})
 	runner := &fakeMKVRunner{avail: true}
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		CutoffDate: time.Now(),
 		ProcessAll: true,
@@ -822,7 +822,7 @@ func TestProcessorRun_SkipsNonMKV(t *testing.T) {
 
 	cache := cacheWith(t, map[string]string{"Test Show": "12345"})
 	runner := &fakeMKVRunner{avail: true}
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		CutoffDate: time.Time{},
 		ProcessAll: true,
@@ -843,7 +843,7 @@ func TestProcessorRun_SkipsShowOnSKIP(t *testing.T) {
 	cache := emptyCache(t)
 	runner := &fakeMKVRunner{avail: true}
 	// User skips the new show prompt
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		CutoffDate: time.Time{},
 	}, cache, &fakeTMDB{searchResults: []ShowResult{{ID: 1}}}, runner,
@@ -878,7 +878,7 @@ func TestProcessorRun_SuccessPath(t *testing.T) {
 		applyResult: mkvpropeditSuccessMsg,
 		tagsPath:    "t.xml",
 	}
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		CutoffDate: time.Time{},
 		ProcessAll: true,
@@ -1367,7 +1367,7 @@ func TestProcessorRun_ManualExtra_NoEntry_Skipped(t *testing.T) {
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	runner := &fakeMKVRunner{avail: true}
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		ProcessAll: true,
 	}, cache, &fakeTMDB{}, runner, &scriptedPrompter{})

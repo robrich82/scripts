@@ -150,7 +150,7 @@ func TestProcessFile_BadFilename_Skipped(t *testing.T) {
 	// A filename whose title portion is empty after stripping year should be skipped.
 	// "(2019).mkv" → year="2019", title="" after truncation.
 	path := makeTempMKVNamed(t, "(2019).mkv")
-	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped for empty-title filename", result)

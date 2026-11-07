@@ -42,11 +42,9 @@ func (f *fakePrompter) Ask(_ string) (string, error) {
 	return f.answer, nil
 }
 
-func makeMKVFile(t *testing.T, dir, name string) string {
+func makeMKVFile(t *testing.T, dir, name string) {
 	t.Helper()
-	path := filepath.Join(dir, name)
-	os.WriteFile(path, []byte{}, 0644)
-	return path
+	os.WriteFile(filepath.Join(dir, name), []byte{}, 0644)
 }
 
 func TestRunAll_NoEditsNeeded_OK(t *testing.T) {
