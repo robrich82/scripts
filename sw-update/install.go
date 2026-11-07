@@ -82,12 +82,12 @@ func cmdInstall(args []string) error {
 	}
 
 	var downloaded []string
-	var failed int
+	var failed []string
 	for _, asset := range result.Assets {
 		path, err := downloadAsset(asset, destDir, referer)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  Error downloading %s: %v\n", asset.Name, err)
-			failed++
+			failed = append(failed, asset.Name)
 			continue
 		}
 		downloaded = append(downloaded, path)
@@ -97,6 +97,9 @@ func cmdInstall(args []string) error {
 		return fmt.Errorf("all downloads failed")
 	}
 
+	if len(failed) > 0 {
+		fmt.Printf("\nNot downloaded: %s\n", strings.Join(failed, ", "))
+	}
 	fmt.Print("\nRun/open downloaded file(s)? [Y/n]: ")
 	line, _ = reader.ReadString('\n')
 	openFailed := false
@@ -111,7 +114,7 @@ func cmdInstall(args []string) error {
 
 	if app.Local.Type == "" || app.Local.Type == "none" {
 		// After a failed download or run/extract, default to not marking it installed.
-		defaultNo := failed > 0 || openFailed
+		defaultNo := len(failed) > 0 || openFailed
 		prompt := "[Y/n]"
 		if defaultNo {
 			prompt = "[y/N]"
@@ -135,8 +138,9 @@ func cmdInstall(args []string) error {
 		}
 	}
 
-	if failed > 0 {
-		return fmt.Errorf("%d of %d assets failed to download", failed, len(result.Assets))
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d assets failed to download: %s",
+			len(failed), len(result.Assets), strings.Join(failed, ", "))
 	}
 	return nil
 }

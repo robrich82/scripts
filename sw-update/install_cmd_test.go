@@ -11,13 +11,14 @@ import (
 )
 
 // newInstallEnv gives cmdInstall a temp config dir holding one html-checked
-// app, "app", whose page and assets h serves over TLS. The page offers a.zip
-// and b.zip at version 1.0.
-func newInstallEnv(t *testing.T, h http.HandlerFunc) {
+// app, "app", with the given local detector type, whose page and assets h
+// serves over TLS. The page offers a.zip and b.zip at version 1.0.
+func newInstallEnv(t *testing.T, localType string, h http.HandlerFunc) {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("APPDATA", root)         // os.UserConfigDir on Windows
-	t.Setenv("XDG_CONFIG_HOME", root) // and on Linux
+	t.Setenv("XDG_CONFIG_HOME", root) // on Linux
+	t.Setenv("HOME", root)            // and on macOS
 
 	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
@@ -41,7 +42,7 @@ func newInstallEnv(t *testing.T, h http.HandlerFunc) {
 				VersionRegex:  `version (\d+\.\d+)`,
 				AssetPatterns: []string{"*.zip"},
 			},
-			Local: LocalConfig{Type: "none"},
+			Local: LocalConfig{Type: localType},
 		}},
 	}
 	if err := SaveConfig(cfg); err != nil {
@@ -66,6 +67,7 @@ func runInstall(t *testing.T, answers string) (string, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
 	prevIn, prevOut := os.Stdin, os.Stdout
 	os.Stdin, os.Stdout = stdin, w
 	defer func() { os.Stdin, os.Stdout = prevIn, prevOut }()
@@ -108,7 +110,7 @@ func serveAssets(bMissing bool) http.HandlerFunc {
 const proceedNoRun = "y\nn\n"
 
 func TestInstallMarksVersionWhenAllAssetsDownload(t *testing.T) {
-	newInstallEnv(t, serveAssets(false))
+	newInstallEnv(t, "none", serveAssets(false))
 
 	out, err := runInstall(t, proceedNoRun+"\n")
 	if err != nil {
@@ -123,11 +125,14 @@ func TestInstallMarksVersionWhenAllAssetsDownload(t *testing.T) {
 }
 
 func TestInstallFailsWhenAnAssetFails(t *testing.T) {
-	newInstallEnv(t, serveAssets(true))
+	newInstallEnv(t, "none", serveAssets(true))
 
 	out, err := runInstall(t, proceedNoRun+"\n")
-	if err == nil || !strings.Contains(err.Error(), "1 of 2 assets failed") {
-		t.Errorf("err = %v, want 1 of 2 assets failed", err)
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 assets failed to download: b.zip") {
+		t.Errorf("err = %v, want 1 of 2 assets failed to download: b.zip", err)
+	}
+	if !strings.Contains(out, "Not downloaded: b.zip") {
+		t.Errorf("no note of the failed asset before the run prompt:\n%s", out)
 	}
 	if !strings.Contains(out, "Mark version as installed/seen? [y/N]") {
 		t.Errorf("mark prompt should default to No:\n%s", out)
@@ -138,13 +143,26 @@ func TestInstallFailsWhenAnAssetFails(t *testing.T) {
 }
 
 func TestInstallMarksOnExplicitYesButStillFailsAfterAssetFailure(t *testing.T) {
-	newInstallEnv(t, serveAssets(true))
+	newInstallEnv(t, "none", serveAssets(true))
 
 	_, err := runInstall(t, proceedNoRun+"y\n")
-	if err == nil {
-		t.Error("cmdInstall succeeded, want an error for the failed asset")
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 assets failed") {
+		t.Errorf("err = %v, want 1 of 2 assets failed", err)
 	}
 	if got := markedVersion(t); got != "1.0" {
 		t.Errorf("marked version = %q, want 1.0", got)
+	}
+}
+
+// An app with a local detector gets no mark prompt, but still fails.
+func TestInstallWithLocalDetectorFailsWhenAnAssetFails(t *testing.T) {
+	newInstallEnv(t, "exe", serveAssets(true))
+
+	out, err := runInstall(t, proceedNoRun)
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 assets failed") {
+		t.Errorf("err = %v, want 1 of 2 assets failed", err)
+	}
+	if strings.Contains(out, "Mark version") {
+		t.Errorf("asked to mark an app with a local detector:\n%s", out)
 	}
 }
