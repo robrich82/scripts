@@ -39,6 +39,13 @@
       "overridePackageName": "golang.org/x/vuln"
     },
     {
+      "description": "Renovate skips indirect Go deps by default, which left vulnerable ones (sw-update's brotli and compress via sevenzip) unbumped.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["indirect"],
+      "enabled": true,
+      "groupName": "Go indirect dependencies"
+    },
+    {
       "description": "Bump go.mod's go line with mise.toml's Go, in one PR; by default Renovate leaves the go line alone.",
       "matchManagers": ["gomod", "mise"],
       "matchDepNames": ["go"],
