@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -22,8 +24,16 @@ import (
 // browser UA on a non-browser connection (SourceForge), but accept this.
 const userAgent = "sw-update/1.0 (+https://github.com/)"
 
+// downloadTransport carries download requests; nil means http.DefaultTransport.
+// Tests set it to a TLS test server's transport.
+var downloadTransport http.RoundTripper
+
 // downloadAttempts is how many times a download is tried before giving up.
 const downloadAttempts = 3
+
+// retryBackoff is the wait before the second attempt; each later one waits
+// another retryBackoff longer. A variable so tests can shorten it.
+var retryBackoff = 3 * time.Second
 
 // downloadAsset downloads a single asset to destDir and returns the local path.
 // referer is the page the asset was found on; sites that only serve downloads
@@ -36,18 +46,34 @@ func downloadAsset(asset Asset, destDir, referer string) (string, error) {
 
 	fmt.Printf("  Downloading %s...\n", asset.Name)
 
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := &http.Client{
+		Timeout:   10 * time.Minute,
+		Transport: downloadTransport,
+		// Go follows an https -> http redirect by default.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return &insecureURLError{URL: req.URL.String()}
+			}
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
+		},
+	}
 
 	var lastErr error
 	for attempt := 1; attempt <= downloadAttempts; attempt++ {
 		if attempt > 1 {
-			delay := time.Duration(attempt-1) * 3 * time.Second
+			delay := time.Duration(attempt-1) * retryBackoff
 			fmt.Printf("  Attempt %d failed (%v); retrying in %s...\n", attempt-1, lastErr, delay)
 			time.Sleep(delay)
 		}
 
-		err := fetchToFile(client, asset.URL, referer, destPath)
+		err := fetchToFile(client, asset.URL, referer, destPath, asset.SHA256)
 		if err == nil {
+			if asset.SHA256 != "" {
+				fmt.Println("  SHA-256 verified")
+			}
 			fmt.Printf("  Saved to %s\n", destPath)
 			return destPath, nil
 		}
@@ -63,10 +89,11 @@ func downloadAsset(asset Asset, destDir, referer string) (string, error) {
 // pages fetchToFile follows before giving up.
 const maxInterstitialHops = 3
 
-// fetchToFile GETs rawURL and writes the response body to destPath. An HTML
-// page served in place of a non-HTML asset (SourceForge's /download links) is
-// followed through its meta refresh; one without a refresh is an htmlPageError.
-func fetchToFile(client *http.Client, rawURL, referer, destPath string) error {
+// fetchToFile GETs rawURL and writes the response body to destPath, checking it
+// against wantSHA256 when that is set. An HTML page served in place of a
+// non-HTML asset (SourceForge's /download links) is followed through its meta
+// refresh; one without a refresh is an htmlPageError.
+func fetchToFile(client *http.Client, rawURL, referer, destPath, wantSHA256 string) error {
 	pageURL := rawURL
 	for hop := 0; ; hop++ {
 		resp, err := getDownload(client, pageURL, referer)
@@ -75,7 +102,7 @@ func fetchToFile(client *http.Client, rawURL, referer, destPath string) error {
 		}
 		body := bufio.NewReader(resp.Body)
 		if isHTMLName(destPath) || !isHTMLPage(resp, body) {
-			err := writeBody(body, destPath)
+			err := writeBody(body, destPath, wantSHA256)
 			resp.Body.Close()
 			return err
 		}
@@ -103,6 +130,9 @@ func getDownload(client *http.Client, rawURL, referer string) (*http.Response, e
 	if err != nil {
 		return nil, err
 	}
+	if req.URL.Scheme != "https" {
+		return nil, &insecureURLError{URL: rawURL}
+	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
 	if ref := downloadReferer(rawURL, referer); ref != "" {
@@ -120,17 +150,55 @@ func getDownload(client *http.Client, rawURL, referer string) (*http.Response, e
 	return resp, nil
 }
 
-func writeBody(body io.Reader, destPath string) error {
-	f, err := os.Create(destPath)
+// writeBody saves body to destPath via destPath+".part", renamed into place only
+// once complete and matching wantSHA256 (unchecked when empty), so unverified
+// bytes never sit under the installer's name or replace an earlier download.
+func writeBody(body io.Reader, destPath, wantSHA256 string) (err error) {
+	partPath := destPath + ".part"
+	f, err := os.Create(partPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if err == nil {
+			return
+		}
+		if rmErr := os.Remove(partPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			err = errors.Join(err, fmt.Errorf("could not delete %s: %w", partPath, rmErr))
+		}
+	}()
 
-	if _, err := io.Copy(f, body); err != nil {
+	h := sha256.New()
+	_, copyErr := io.Copy(io.MultiWriter(f, h), body)
+	if err := errors.Join(copyErr, f.Close()); err != nil {
 		return err
 	}
-	return f.Close()
+	if wantSHA256 != "" {
+		if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, wantSHA256) {
+			return &sha256MismatchError{Want: wantSHA256, Got: got}
+		}
+	}
+	return os.Rename(partPath, destPath)
+}
+
+// insecureURLError is a download URL, redirect or refresh target that isn't
+// https: sw-update runs what it downloads, so it never fetches it in the clear.
+type insecureURLError struct {
+	URL string
+}
+
+func (e *insecureURLError) Error() string {
+	return fmt.Sprintf("refusing non-https download URL %s", e.URL)
+}
+
+// sha256MismatchError is a download whose content doesn't match the digest its
+// source published.
+type sha256MismatchError struct {
+	Want, Got string
+}
+
+func (e *sha256MismatchError) Error() string {
+	return fmt.Sprintf("SHA-256 mismatch, download discarded: got %s, want %s", e.Got, e.Want)
 }
 
 // isHTMLPage reports whether resp is a web page: labelled HTML and starting
@@ -227,7 +295,9 @@ func (e *httpStatusError) Error() string {
 // server errors). A 404 or a 401 will not fix itself.
 func isRetryable(err error) bool {
 	var page *htmlPageError
-	if errors.As(err, &page) {
+	var insecure *insecureURLError
+	var mismatch *sha256MismatchError
+	if errors.As(err, &page) || errors.As(err, &insecure) || errors.As(err, &mismatch) {
 		return false
 	}
 	var status *httpStatusError
