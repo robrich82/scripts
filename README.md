@@ -73,9 +73,10 @@ Normalises CBZ comic archives for consistent two-page-spread viewing:
    GIF, BMP, TIFF, AVIF, HEIC) is converted to a white-flattened PNG via
    ImageMagick and renamed with a `.png` extension. This requires the ImageMagick
    `magick` CLI on your `PATH`;
-   it is run as `magick <in> -background white -flatten <out>.png` (transparency
-   and layers are composited onto white). Pages already in JPEG/PNG are copied
-   through untouched.
+   it is run as `magick <format>:<in> -background white -flatten <out>.png`
+   (transparency and layers are composited onto white). A page in any other
+   format, such as SVG, fails the file instead of reaching ImageMagick. Pages
+   already in JPEG/PNG are copied through untouched.
 5. **Renames the cover** (first image in reading order) to `cover.<ext>`.
 6. **Inserts a blank page** — white, same dimensions as the first non-double-page
    after the cover — so that interior pages land on the correct side in a
