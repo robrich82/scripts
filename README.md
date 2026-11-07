@@ -485,7 +485,7 @@ A renamed MKV's title tag is built from its new name, so text the rename drops
 |------|-------------|
 | `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
 | `--all` | Process all files regardless of modification date |
-| `--clean` | Remove file-specific pattern entries from `ignore_patterns.json` for video files that no longer exist under the current directory, then exit |
+| `--clean` | Remove file-specific pattern entries from `ignore_patterns.json` for video files that no longer exist under the current directory, then exit. Entries on an offline drive, or that it can't check because a folder is unreadable, are kept |
 
 ### Configuration
 
