@@ -99,11 +99,28 @@ type httpPlexClient struct {
 	showKeyCache map[string]string
 }
 
+// newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
+// server's host: Go only strips Authorization and Cookie on its own.
+func newPlexHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: httpTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if req.URL.Host != via[0].URL.Host {
+				req.Header.Del("X-Plex-Token")
+			}
+			return nil
+		},
+	}
+}
+
 func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	return &httpPlexClient{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		token:        token,
-		httpClient:   &http.Client{Timeout: httpTimeout},
+		httpClient:   newPlexHTTPClient(),
 		showKeyCache: make(map[string]string),
 	}
 }

@@ -30,3 +30,21 @@ func TestTMDBOriginClient_TransportErrorOmitsAPIKey(t *testing.T) {
 		}
 	}
 }
+
+// IDs come from prompts and caches; one that breaks url.Parse or adds its own
+// query must not let the key through.
+func TestTMDBOriginClient_OddIDOmitsAPIKey(t *testing.T) {
+	for _, id := range []string{"12%zz", "1399?x=1", "1399#x"} {
+		c := &httpTMDBOriginClient{apiKey: "s3cret-key", client: &http.Client{Transport: failingTransport{}}}
+		_, _, err := c.GetTVOriginByID(id)
+		if err == nil {
+			t.Fatalf("id %q: expected an error", id)
+		}
+		if strings.Contains(err.Error(), "s3cret-key") {
+			t.Errorf("id %q: error leaks the API key: %v", id, err)
+		}
+		if !strings.Contains(err.Error(), "api_key=REDACTED") {
+			t.Errorf("id %q: error = %v, want the URL kept with api_key=REDACTED", id, err)
+		}
+	}
+}

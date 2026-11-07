@@ -326,18 +326,16 @@ func titleFromFilename(filename, year string) string {
 	return strings.TrimSpace(filename)
 }
 
-// redactAPIKey blanks the api_key in a *url.Error, whose message otherwise
-// prints the whole request URL, key included.
+// apiKeyParam matches the api_key value in a request URL. A regexp rather than
+// url.Parse, which fails or misplaces the query when an ID holds % ? or #.
+var apiKeyParam = regexp.MustCompile(`(?i)(api_key=)[^&#\s"]*`)
+
+// redactAPIKey replaces the api_key value in a *url.Error with REDACTED, since
+// its message otherwise prints the whole request URL, key included.
 func redactAPIKey(err error) error {
 	var ue *url.Error
-	if !errors.As(err, &ue) {
-		return err
-	}
-	if u, perr := url.Parse(ue.URL); perr == nil && u.Query().Has("api_key") {
-		q := u.Query()
-		q.Set("api_key", "REDACTED")
-		u.RawQuery = q.Encode()
-		ue.URL = u.String()
+	if errors.As(err, &ue) {
+		ue.URL = apiKeyParam.ReplaceAllString(ue.URL, "${1}REDACTED")
 	}
 	return err
 }
