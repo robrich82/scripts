@@ -109,7 +109,9 @@ func TestLoadManualData_ParsesOverridesAndMappings(t *testing.T) {
 	raw, _ := json.Marshal(input)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manual_data.json")
-	os.WriteFile(path, raw, 0644)
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	data, err := LoadManualData(path)
 	if err != nil {
@@ -140,7 +142,9 @@ func TestLoadManualData_ParsesExtras(t *testing.T) {
 	raw, _ := json.Marshal(input)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manual_data.json")
-	os.WriteFile(path, raw, 0644)
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	data, err := LoadManualData(path)
 	if err != nil {
@@ -174,7 +178,9 @@ func TestLoadManualData_ParsesDates(t *testing.T) {
 	raw, _ := json.Marshal(input)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manual_data.json")
-	os.WriteFile(path, raw, 0644)
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	data, err := LoadManualData(path)
 	if err != nil {
@@ -195,7 +201,9 @@ func TestLoadManualData_ParsesDates(t *testing.T) {
 func TestLoadManualData_InvalidJSON_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manual_data.json")
-	os.WriteFile(path, []byte("not json"), 0644)
+	if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	_, err := LoadManualData(path)
 	if err == nil {
 		t.Error("expected error for invalid JSON")
@@ -213,7 +221,9 @@ func TestLoadManualData_ParsesExtrasWithEpisodeRef(t *testing.T) {
 	raw, _ := json.Marshal(input)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manual_data.json")
-	os.WriteFile(path, raw, 0644)
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	data, err := LoadManualData(path)
 	if err != nil {

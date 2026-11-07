@@ -162,7 +162,9 @@ func TestProcessFile_NoReleaseDate_Skipped(t *testing.T) {
 func TestProcessFile_AlreadyApplied_MtimeCurrent_OK(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, target, target)
+	if err := os.Chtimes(path, target, target); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
@@ -187,7 +189,9 @@ func TestProcessFile_AlreadyApplied_MtimeCurrent_OK(t *testing.T) {
 func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, past, past)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
@@ -223,7 +227,9 @@ func TestProcessFile_AppliedButMtimeWrong_FixesTimestamps(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	// mtime is wrong even though metadata was already applied.
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, past, past)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
@@ -248,7 +254,9 @@ func TestProcessFile_AppliedButMtimeWrong_FixesTimestamps(t *testing.T) {
 func TestProcessFile_Overwrite_ReappliesEvenIfApplied(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, target, target)
+	if err := os.Chtimes(path, target, target); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
@@ -272,7 +280,10 @@ func TestProcessFile_Overwrite_ReappliesEvenIfApplied(t *testing.T) {
 func TestProcessFile_MkvpropeditRuns_AlwaysRestoresMtime(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, target, target) // mtime already correct
+	// mtime already correct
+	if err := os.Chtimes(path, target, target); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
@@ -290,7 +301,9 @@ func TestProcessFile_MkvpropeditRuns_AlwaysRestoresMtime(t *testing.T) {
 func TestProcessFile_WithRating_TagsPathSet(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, past, past)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
@@ -393,7 +406,9 @@ func TestResolveMovieRating_InvalidInput_RePrompts(t *testing.T) {
 
 func TestWalkAndProcess_SkipsNonMKV(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "subtitle.srt"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "subtitle.srt"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{}
 	cache := makeCache(t)
@@ -405,7 +420,9 @@ func TestWalkAndProcess_SkipsNonMKV(t *testing.T) {
 
 func TestWalkAndProcess_CountsSkipped(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "movie.mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "movie.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	// TMDB finds nothing → skipped.
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}

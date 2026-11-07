@@ -150,7 +150,9 @@ func TestLoadMovieManualData_ParsesDeband(t *testing.T) {
 	}
 	b, _ := json.Marshal(data)
 	path := filepath.Join(t.TempDir(), "manual_data.json")
-	os.WriteFile(path, b, 0644)
+	if err := os.WriteFile(path, b, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := LoadMovieManualData(path)
 	if err != nil {
@@ -220,7 +222,9 @@ func TestApplyDebandOnlyFile_ExtractError_ReturnsFalse(t *testing.T) {
 func TestApplyDebandOnlyFile_Success_CallsApplyAndRestoresTimestamp(t *testing.T) {
 	origTime := time.Date(2020, 6, 1, 0, 0, 0, 0, time.Local)
 	path := makeTempMKVNamed(t, "Movie.2020.mkv")
-	os.Chtimes(path, origTime, origTime)
+	if err := os.Chtimes(path, origTime, origTime); err != nil {
+		t.Fatal(err)
+	}
 
 	existingXML := `<Tags><Tag><Targets></Targets></Tag></Tags>`
 	tagger := &fakeMKVTagger{available: true, extractedXML: existingXML}
@@ -244,7 +248,9 @@ func TestApplyDebandOnlyFile_Success_CallsApplyAndRestoresTimestamp(t *testing.T
 
 func TestRunDebandOnly_SkipsFilesNotInManualData(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Coco.2017.mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Coco.2017.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	tagger := &fakeMKVTagger{available: true}
 	timer := &fakeFileTimer{}
@@ -260,7 +266,9 @@ func TestRunDebandOnly_SkipsFilesNotInManualData(t *testing.T) {
 
 func TestRunDebandOnly_SkipsFilesWithNilDeband(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Coco (2017).mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Coco (2017).mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	manualData := map[string]MovieManualEntry{
 		"Coco (2017)": {Deband: nil},
@@ -277,7 +285,9 @@ func TestRunDebandOnly_SkipsFilesWithNilDeband(t *testing.T) {
 
 func TestRunDebandOnly_UpdatesConfiguredFile(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Coco (2017).mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Coco (2017).mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	debandTrue := true
 	manualData := map[string]MovieManualEntry{

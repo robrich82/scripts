@@ -25,9 +25,9 @@ func TestHTTPPlexMovieClient_FindMovieByTMDBID_Found(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
-			w.Write([]byte(plexMovieSectionsJSON("2", "movie")))
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
 		} else {
-			w.Write([]byte(plexAllMoviesJSON("77", "tmdb://12345")))
+			fmt.Fprint(w, plexAllMoviesJSON("77", "tmdb://12345"))
 		}
 	}))
 	defer srv.Close()
@@ -46,9 +46,9 @@ func TestHTTPPlexMovieClient_FindMovieByTMDBID_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
-			w.Write([]byte(plexMovieSectionsJSON("2", "movie")))
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
 		} else {
-			w.Write([]byte(plexAllMoviesJSON("99", "tmdb://99999")))
+			fmt.Fprint(w, plexAllMoviesJSON("99", "tmdb://99999"))
 		}
 	}))
 	defer srv.Close()
@@ -65,7 +65,7 @@ func TestHTTPPlexMovieClient_FindMovieByTMDBID_SkipsShowSections(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
 			// Only a "show" section — should be skipped.
-			w.Write([]byte(plexMovieSectionsJSON("1", "show")))
+			fmt.Fprint(w, plexMovieSectionsJSON("1", "show"))
 		} else {
 			t.Error("should not scan non-movie section")
 			http.NotFound(w, r)
@@ -84,9 +84,9 @@ func TestHTTPPlexMovieClient_FindMovieByTMDBID_LegacyGuid(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
-			w.Write([]byte(plexMovieSectionsJSON("2", "movie")))
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
 		} else {
-			w.Write([]byte(plexAllMoviesJSONLegacyGuid("88", "tmdb://12345")))
+			fmt.Fprint(w, plexAllMoviesJSONLegacyGuid("88", "tmdb://12345"))
 		}
 	}))
 	defer srv.Close()
@@ -107,17 +107,21 @@ func TestHTTPPlexMovieClient_FindMovieByTMDBID_CachesResult(t *testing.T) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
-			w.Write([]byte(plexMovieSectionsJSON("2", "movie")))
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
 		} else {
-			w.Write([]byte(plexAllMoviesJSON("77", "tmdb://12345")))
+			fmt.Fprint(w, plexAllMoviesJSON("77", "tmdb://12345"))
 		}
 	}))
 	defer srv.Close()
 
 	c := newHTTPPlexMovieClient(srv.URL, "token")
-	c.FindMovieByTMDBID("12345")
+	if _, err := c.FindMovieByTMDBID("12345"); err != nil {
+		t.Fatal(err)
+	}
 	after := calls
-	c.FindMovieByTMDBID("12345") // should use cache
+	if _, err := c.FindMovieByTMDBID("12345"); err != nil { // should use cache
+		t.Fatal(err)
+	}
 	if calls != after {
 		t.Errorf("second FindMovieByTMDBID made HTTP requests")
 	}
@@ -227,7 +231,7 @@ func plexMetadataJSON(contentRating string) string {
 func TestHTTPPlexMovieClient_GetContentRating_Found(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(plexMetadataJSON("nz/R16")))
+		fmt.Fprint(w, plexMetadataJSON("nz/R16"))
 	}))
 	defer srv.Close()
 
@@ -244,7 +248,7 @@ func TestHTTPPlexMovieClient_GetContentRating_Found(t *testing.T) {
 func TestHTTPPlexMovieClient_GetContentRating_UnknownRating(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(plexMetadataJSON("TV-MA")))
+		fmt.Fprint(w, plexMetadataJSON("TV-MA"))
 	}))
 	defer srv.Close()
 
@@ -262,7 +266,7 @@ func TestHTTPPlexMovieClient_GetContentRating_Empty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// No Metadata entries at all.
-		w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
+		fmt.Fprint(w, `{"MediaContainer":{"Metadata":[]}}`)
 	}))
 	defer srv.Close()
 
@@ -497,9 +501,9 @@ func TestHTTPPlexMovieClient_FindMovieByTitle_Found(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
-			w.Write([]byte(plexMovieSectionsJSON("2", "movie")))
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
 		} else {
-			w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"55","title":"The Matrix","year":1999}]}}`))
+			fmt.Fprint(w, `{"MediaContainer":{"Metadata":[{"ratingKey":"55","title":"The Matrix","year":1999}]}}`)
 		}
 	}))
 	defer srv.Close()
@@ -519,9 +523,9 @@ func TestHTTPPlexMovieClient_FindMovieByTitle_NormalisedMatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
-			w.Write([]byte(plexMovieSectionsJSON("3", "movie")))
+			fmt.Fprint(w, plexMovieSectionsJSON("3", "movie"))
 		} else {
-			w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"66","title":"It's a Wonderful Life","year":1946}]}}`))
+			fmt.Fprint(w, `{"MediaContainer":{"Metadata":[{"ratingKey":"66","title":"It's a Wonderful Life","year":1946}]}}`)
 		}
 	}))
 	defer srv.Close()
@@ -542,7 +546,7 @@ func TestHTTPPlexMovieClient_RefreshLibraries_RefreshesMovieSections(t *testing.
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
 			// One movie section and one show section — only the movie section should be refreshed.
-			w.Write([]byte(`{"MediaContainer":{"Directory":[{"key":"1","type":"movie"},{"key":"2","type":"show"}]}}`))
+			fmt.Fprint(w, `{"MediaContainer":{"Directory":[{"key":"1","type":"movie"},{"key":"2","type":"show"}]}}`)
 		} else {
 			refreshPaths = append(refreshPaths, r.URL.Path)
 			w.WriteHeader(http.StatusOK)
@@ -563,9 +567,9 @@ func TestHTTPPlexMovieClient_FindMovieByTitle_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/library/sections" {
-			w.Write([]byte(plexMovieSectionsJSON("2", "movie")))
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
 		} else {
-			w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"77","title":"Other Film","year":2000}]}}`))
+			fmt.Fprint(w, `{"MediaContainer":{"Metadata":[{"ratingKey":"77","title":"Other Film","year":2000}]}}`)
 		}
 	}))
 	defer srv.Close()

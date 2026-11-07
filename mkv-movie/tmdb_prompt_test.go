@@ -98,7 +98,9 @@ func TestPromptTMDBID_RepromptsUntilValid(t *testing.T) {
 func TestProcessFile_TMDBNotFound_PromptedIDIsUsedAndCached(t *testing.T) {
 	path := makeTempMKVNamed(t, "Obscure.Film.2019.mkv")
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, past, past)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &idLookupTMDBClient{knownID: "12345", details: testDetails()}
 	applier := &fakeApplier{}

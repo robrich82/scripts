@@ -31,7 +31,9 @@ func TestScriptedPrompter_ReturnsAnswersInOrder(t *testing.T) {
 
 func TestScriptedPrompter_ExhaustedReturnsError(t *testing.T) {
 	p := &scriptedPrompter{answers: []string{"only"}}
-	p.Ask("q1")
+	if _, err := p.Ask("q1"); err != nil {
+		t.Fatal(err)
+	}
 	_, err := p.Ask("q2")
 	if err == nil {
 		t.Error("expected error when queue is exhausted")

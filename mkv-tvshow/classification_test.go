@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,7 +20,7 @@ func classificationHTMLWith(title, rating string) string {
 func TestClassificationSource_FetchShowRating_Found(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(classificationHTMLWith("Attack on Titan", "R16")))
+		fmt.Fprint(w, classificationHTMLWith("Attack on Titan", "R16"))
 	}))
 	defer srv.Close()
 
@@ -36,7 +37,7 @@ func TestClassificationSource_FetchShowRating_Found(t *testing.T) {
 func TestClassificationSource_FetchShowRating_CaseInsensitiveMatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(classificationHTMLWith("attack on titan", "PG")))
+		fmt.Fprint(w, classificationHTMLWith("attack on titan", "PG"))
 	}))
 	defer srv.Close()
 
@@ -54,7 +55,7 @@ func TestClassificationSource_FetchShowRating_NoMatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		// Result is for a completely different show.
-		w.Write([]byte(classificationHTMLWith("Some Other Show", "M")))
+		fmt.Fprint(w, classificationHTMLWith("Some Other Show", "M"))
 	}))
 	defer srv.Close()
 
@@ -71,7 +72,7 @@ func TestClassificationSource_FetchShowRating_NoMatch(t *testing.T) {
 func TestClassificationSource_FetchShowRating_EmptyPage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<html><body><p>No results found.</p></body></html>"))
+		fmt.Fprint(w, "<html><body><p>No results found.</p></body></html>")
 	}))
 	defer srv.Close()
 
@@ -114,7 +115,7 @@ func TestClassificationSource_MultipleResults_ReturnsHighest(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(body))
+		fmt.Fprint(w, body)
 	}))
 	defer srv.Close()
 

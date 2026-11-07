@@ -20,7 +20,9 @@ func TestLoadMovieRatingCache_MissingFile_EmptyCache(t *testing.T) {
 func TestLoadMovieRatingCache_ValidJSON_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
-	os.WriteFile(path, []byte(`{"movies":{"12345":"R16","title:2020":"PG"}}`), 0644)
+	if err := os.WriteFile(path, []byte(`{"movies":{"12345":"R16","title:2020":"PG"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := LoadMovieRatingCache(path)
 	if err != nil {
@@ -37,7 +39,9 @@ func TestLoadMovieRatingCache_ValidJSON_RoundTrip(t *testing.T) {
 func TestLoadMovieRatingCache_MalformedJSON_Error(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
-	os.WriteFile(path, []byte(`not json`), 0644)
+	if err := os.WriteFile(path, []byte(`not json`), 0644); err != nil {
+		t.Fatal(err)
+	}
 	_, err := LoadMovieRatingCache(path)
 	if err == nil {
 		t.Error("expected error for malformed JSON")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,9 +36,9 @@ func TestTMDBMovieSource_FetchRating_FoundNZCert(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/search/movie") {
-			w.Write([]byte(tmdbSearchJSON(12345, "2019-04-26")))
+			fmt.Fprint(w, tmdbSearchJSON(12345, "2019-04-26"))
 		} else {
-			w.Write([]byte(tmdbReleaseDatesJSON("NZ", "M", 3)))
+			fmt.Fprint(w, tmdbReleaseDatesJSON("NZ", "M", 3))
 		}
 	}))
 	defer srv.Close()
@@ -78,10 +79,10 @@ func TestTMDBMovieSource_FetchRating_NZAbsent_ReturnsNone(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/search/movie") {
-			w.Write([]byte(tmdbSearchJSON(99, "2020-01-01")))
+			fmt.Fprint(w, tmdbSearchJSON(99, "2020-01-01"))
 		} else {
 			// Only US, no NZ.
-			w.Write([]byte(tmdbReleaseDatesJSON("US", "PG-13", 3)))
+			fmt.Fprint(w, tmdbReleaseDatesJSON("US", "PG-13", 3))
 		}
 	}))
 	defer srv.Close()
@@ -105,7 +106,7 @@ func TestTMDBMovieSource_FetchRating_NumericKey_SkipsSearch(t *testing.T) {
 		if strings.Contains(r.URL.Path, "/search/movie") {
 			searchCalled = true
 		}
-		w.Write([]byte(tmdbReleaseDatesJSON("NZ", "R16", 3)))
+		fmt.Fprint(w, tmdbReleaseDatesJSON("NZ", "R16", 3))
 	}))
 	defer srv.Close()
 
@@ -158,7 +159,7 @@ func tmdbMovieDetailJSON(title, overview, releaseDate, posterPath string) string
 func TestTMDBMovieSource_GetMovieDetails_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(tmdbMovieDetailJSON("Avengers Endgame", "Heroes assemble.", "2019-04-26", "/poster.jpg")))
+		fmt.Fprint(w, tmdbMovieDetailJSON("Avengers Endgame", "Heroes assemble.", "2019-04-26", "/poster.jpg"))
 	}))
 	defer srv.Close()
 
@@ -187,9 +188,9 @@ func TestTMDBMovieSource_SearchAndFetch_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/search/movie") {
-			w.Write([]byte(tmdbSearchJSON(12345, "2019-04-26")))
+			fmt.Fprint(w, tmdbSearchJSON(12345, "2019-04-26"))
 		} else {
-			w.Write([]byte(tmdbMovieDetailJSON("Avengers Endgame", "Heroes assemble.", "2019-04-26", "/poster.jpg")))
+			fmt.Fprint(w, tmdbMovieDetailJSON("Avengers Endgame", "Heroes assemble.", "2019-04-26", "/poster.jpg"))
 		}
 	}))
 	defer srv.Close()
@@ -216,7 +217,7 @@ func TestTMDBMovieSource_SearchAndFetch_NoMatch_ReturnsEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// Empty results list.
-		w.Write([]byte(`{"results":[]}`))
+		fmt.Fprint(w, `{"results":[]}`)
 	}))
 	defer srv.Close()
 

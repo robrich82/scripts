@@ -20,7 +20,9 @@ func TestLoadRatingCache_ValidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rating_cache.json")
 	content := `{"shows":{"123":"R16"},"episodes":{"123/S01E03":"M"}}`
-	os.WriteFile(path, []byte(content), 0644)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := LoadRatingCache(path)
 	if err != nil {
@@ -41,7 +43,9 @@ func TestLoadRatingCache_ValidJSON(t *testing.T) {
 func TestLoadRatingCache_MalformedJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rating_cache.json")
-	os.WriteFile(path, []byte("{invalid"), 0644)
+	if err := os.WriteFile(path, []byte("{invalid"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := LoadRatingCache(path)
 	if err == nil {

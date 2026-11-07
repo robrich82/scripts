@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +17,7 @@ func TestHTTPTMDBClient_SearchTV_Results(t *testing.T) {
 	body := `{"results":[{"id":123,"name":"Test Show","first_air_date":"2020-01-01"}]}`
 	c, srv := newTestTMDB(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(body))
+		fmt.Fprint(w, body)
 	}))
 	defer srv.Close()
 
@@ -35,7 +36,7 @@ func TestHTTPTMDBClient_SearchTV_Results(t *testing.T) {
 func TestHTTPTMDBClient_SearchTV_Empty(t *testing.T) {
 	c, srv := newTestTMDB(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"results":[]}`))
+		fmt.Fprint(w, `{"results":[]}`)
 	}))
 	defer srv.Close()
 
@@ -63,7 +64,7 @@ func TestHTTPTMDBClient_GetShow(t *testing.T) {
 	body := `{"poster_path":"/abc.jpg"}`
 	c, srv := newTestTMDB(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(body))
+		fmt.Fprint(w, body)
 	}))
 	defer srv.Close()
 
@@ -86,7 +87,7 @@ func TestHTTPTMDBClient_GetSeason(t *testing.T) {
 	}`
 	c, srv := newTestTMDB(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(body))
+		fmt.Fprint(w, body)
 	}))
 	defer srv.Close()
 
