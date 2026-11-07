@@ -88,3 +88,83 @@ func TestNewCheckerLeavesCallerClientAlone(t *testing.T) {
 		t.Error("NewChecker set CheckRedirect on the caller's client")
 	}
 }
+
+func TestCheckerRefusesHTTPCheckerPage(t *testing.T) {
+	calls := 0
+	plain := plainServer(t, &calls)
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `version 2.5`)
+	})
+
+	pageApp := htmlApp(plain.URL + "/")
+	assetPageApp := htmlApp(srv.URL + "/")
+	assetPageApp.Checker.AssetPage = plain.URL + "/files/"
+	headerApp := App{Name: "testapp", Checker: CheckerConfig{Type: "http-header", URL: plain.URL + "/app.exe"}}
+
+	for name, app := range map[string]App{"url": pageApp, "asset_page": assetPageApp, "http-header": headerApp} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewChecker(srv.Client()).Check(app)
+			var insecure *insecureURLError
+			if !errors.As(err, &insecure) {
+				t.Errorf("err = %v, want an insecureURLError", err)
+			}
+		})
+	}
+	if calls != 0 {
+		t.Errorf("plain-http server got %d requests, want none", calls)
+	}
+}
+
+func TestHeaderCheckerRefusesRedirectToHTTP(t *testing.T) {
+	calls := 0
+	plain := plainServer(t, &calls)
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+"/app.exe", http.StatusFound)
+	})
+
+	app := App{Name: "testapp", Checker: CheckerConfig{Type: "http-header", URL: srv.URL + "/app.exe"}}
+	_, err := NewChecker(srv.Client()).Check(app)
+	var insecure *insecureURLError
+	if !errors.As(err, &insecure) {
+		t.Errorf("err = %v, want an insecureURLError", err)
+	}
+	if calls != 0 {
+		t.Errorf("plain-http server got %d requests, want none", calls)
+	}
+}
+
+// hostTransport sends every request to srv, keeping its https scheme and path.
+type hostTransport struct {
+	srv *httptest.Server
+}
+
+func (h hostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.URL.Host = h.srv.Listener.Addr().String()
+	return h.srv.Client().Transport.RoundTrip(clone)
+}
+
+// The asset check sits in dispatch, so it covers checkers other than html.
+func TestCheckerRejectsHTTPAssetFromSourceForge(t *testing.T) {
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, sfRSSBody([]struct{ title, link string }{
+			{"/myproject/2.0.0/app-2.0.0.exe", "https://sf.net/app.exe"},
+			{"/myproject/2.0.0/app-2.0.0.zip", "http://sf.net/app.zip"},
+		}))
+	})
+	app := App{
+		Name: "testapp",
+		Checker: CheckerConfig{
+			Type:          "sourceforge",
+			Project:       "myproject",
+			VersionRegex:  `(\d+\.\d+\.\d+)`,
+			AssetPatterns: []string{"*.exe", "*.zip"},
+		},
+	}
+
+	result, err := NewChecker(&http.Client{Transport: hostTransport{srv}}).Check(app)
+	var insecure *insecureURLError
+	if !errors.As(err, &insecure) || insecure.URL != "http://sf.net/app.zip" {
+		t.Errorf("err = %v, result = %v, want an insecureURLError for the zip", err, result)
+	}
+}

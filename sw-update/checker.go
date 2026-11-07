@@ -34,9 +34,9 @@ type Checker interface {
 	Check(app App) (*CheckResult, error)
 }
 
-// NewChecker returns a Checker that dispatches based on app.Checker.Type. It
-// uses a copy of client that refuses redirects to http, since a page fetched in
-// the clear could name any asset URL.
+// NewChecker returns a Checker that dispatches based on app.Checker.Type.
+// Checker pages are https only, redirects included, and so are the asset URLs
+// they return: a page fetched in the clear could name any asset URL.
 func NewChecker(client *http.Client) Checker {
 	c := *client
 	c.CheckRedirect = httpsOnlyRedirect
@@ -54,8 +54,14 @@ func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
 	case "github":
 		result, err = (&githubChecker{client: d.client}).check(app)
 	case "html":
+		if err := requireHTTPS(app.Checker.URL, app.Checker.AssetPage); err != nil {
+			return nil, err
+		}
 		result, err = (&htmlChecker{client: d.client}).check(app)
 	case "http-header":
+		if err := requireHTTPS(app.Checker.URL); err != nil {
+			return nil, err
+		}
 		result, err = (&headerChecker{client: d.client}).check(app)
 	case "sourceforge":
 		result, err = (&sfChecker{client: d.client}).check(app)
@@ -64,15 +70,33 @@ func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
 	default:
 		return nil, fmt.Errorf("unknown checker type %q for %q", app.Checker.Type, app.Name)
 	}
-	if err != nil {
-		return nil, err
+	if err != nil || result == nil {
+		return result, err
 	}
 	for _, a := range result.Assets {
-		if u, err := url.Parse(a.URL); err != nil || u.Scheme != "https" {
-			return nil, &insecureURLError{URL: a.URL}
+		if err := requireHTTPS(a.URL); err != nil {
+			return nil, fmt.Errorf("asset %s: %w", a.Name, err)
 		}
 	}
 	return result, nil
+}
+
+// requireHTTPS returns an insecureURLError for the first non-empty rawURL that
+// isn't https.
+func requireHTTPS(rawURLs ...string) error {
+	for _, raw := range rawURLs {
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			return err
+		}
+		if u.Scheme != "https" {
+			return &insecureURLError{URL: raw}
+		}
+	}
+	return nil
 }
 
 // ---- GitHub checker ----
