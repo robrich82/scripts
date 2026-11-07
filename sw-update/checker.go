@@ -76,7 +76,7 @@ type ghRelease struct {
 type ghAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
-	Digest             string `json:"digest"` // "sha256:<hex>"; absent on assets uploaded before mid-2025
+	Digest             string `json:"digest"` // "sha256:<hex>"; absent on older assets
 }
 
 func (a ghAsset) asset() Asset {

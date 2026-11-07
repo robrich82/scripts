@@ -31,6 +31,10 @@ var downloadTransport http.RoundTripper
 // downloadAttempts is how many times a download is tried before giving up.
 const downloadAttempts = 3
 
+// retryBackoff is the wait before the second attempt; each later one waits
+// another retryBackoff longer. A variable so tests can shorten it.
+var retryBackoff = 3 * time.Second
+
 // downloadAsset downloads a single asset to destDir and returns the local path.
 // referer is the page the asset was found on; sites that only serve downloads
 // to visitors of their own pages need it.
@@ -60,7 +64,7 @@ func downloadAsset(asset Asset, destDir, referer string) (string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= downloadAttempts; attempt++ {
 		if attempt > 1 {
-			delay := time.Duration(attempt-1) * 3 * time.Second
+			delay := time.Duration(attempt-1) * retryBackoff
 			fmt.Printf("  Attempt %d failed (%v); retrying in %s...\n", attempt-1, lastErr, delay)
 			time.Sleep(delay)
 		}
@@ -146,16 +150,21 @@ func getDownload(client *http.Client, rawURL, referer string) (*http.Response, e
 	return resp, nil
 }
 
-// writeBody saves body to destPath, removing the file if the copy fails or its
-// SHA-256 doesn't match wantSHA256 (unchecked when empty).
+// writeBody saves body to destPath via destPath+".part", renamed into place only
+// once complete and matching wantSHA256 (unchecked when empty), so unverified
+// bytes never sit under the installer's name or replace an earlier download.
 func writeBody(body io.Reader, destPath, wantSHA256 string) (err error) {
-	f, err := os.Create(destPath)
+	partPath := destPath + ".part"
+	f, err := os.Create(partPath)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if err != nil {
-			_ = os.Remove(destPath)
+		if err == nil {
+			return
+		}
+		if rmErr := os.Remove(partPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			err = errors.Join(err, fmt.Errorf("could not delete %s: %w", partPath, rmErr))
 		}
 	}()
 
@@ -169,7 +178,7 @@ func writeBody(body io.Reader, destPath, wantSHA256 string) (err error) {
 			return &sha256MismatchError{Want: wantSHA256, Got: got}
 		}
 	}
-	return nil
+	return os.Rename(partPath, destPath)
 }
 
 // insecureURLError is a download URL, redirect or refresh target that isn't
@@ -189,7 +198,7 @@ type sha256MismatchError struct {
 }
 
 func (e *sha256MismatchError) Error() string {
-	return fmt.Sprintf("SHA-256 mismatch: got %s, want %s", e.Got, e.Want)
+	return fmt.Sprintf("SHA-256 mismatch, download discarded: got %s, want %s", e.Got, e.Want)
 }
 
 // isHTMLPage reports whether resp is a web page: labelled HTML and starting

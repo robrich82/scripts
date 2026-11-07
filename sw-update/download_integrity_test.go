@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // newDownloadServer starts a TLS test server and points downloadAsset at a
@@ -144,6 +146,9 @@ func TestDownloadAssetVerifiesGitHubDigest(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, assets[0].Name)); !os.IsNotExist(err) {
 			t.Errorf("tampered file left on disk (stat err %v)", err)
 		}
+		if _, err := os.Stat(filepath.Join(dir, assets[0].Name+".part")); !os.IsNotExist(err) {
+			t.Errorf("tampered .part left on disk (stat err %v)", err)
+		}
 	})
 
 	t.Run("assets without a digest are not checked", func(t *testing.T) {
@@ -151,4 +156,59 @@ func TestDownloadAssetVerifiesGitHubDigest(t *testing.T) {
 			t.Fatalf("downloadAsset: %v", err)
 		}
 	})
+}
+
+// The default path (no asset patterns) keeps the release digest too.
+func TestAutoSelectWindowsCarriesDigest(t *testing.T) {
+	got := autoSelectWindows([]ghAsset{
+		{Name: "app-linux.tar.gz", BrowserDownloadURL: "u1", Digest: "sha256:aaa"},
+		{Name: "app-windows-x64.exe", BrowserDownloadURL: "u2", Digest: "sha256:bbb"},
+	})
+	if len(got) != 1 || got[0].SHA256 != "bbb" {
+		t.Errorf("autoSelectWindows = %+v, want app-windows-x64.exe with SHA256 bbb", got)
+	}
+}
+
+func TestDownloadAssetAcceptsUppercaseDigest(t *testing.T) {
+	const payload = "MZ real installer"
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(payload))
+	}))
+	want := strings.ToUpper(sha256Hex([]byte(payload)))
+	if _, err := downloadAsset(Asset{Name: "a.exe", URL: srv.URL + "/a.exe", SHA256: want}, t.TempDir(), ""); err != nil {
+		t.Fatalf("downloadAsset: %v", err)
+	}
+}
+
+// A body cut short leaves neither a partial file nor a .part behind, and an
+// earlier good download under the same name survives every retry.
+func TestDownloadAssetInterruptedKeepsEarlierCopy(t *testing.T) {
+	prev := retryBackoff
+	retryBackoff = time.Millisecond
+	t.Cleanup(func() { retryBackoff = prev })
+
+	calls := 0
+	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Length", "1000")
+		w.Write([]byte("MZ trunc"))
+	}))
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "a.exe")
+	if err := os.WriteFile(dest, []byte("MZ good"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := downloadAsset(Asset{Name: "a.exe", URL: srv.URL + "/a.exe"}, dir, ""); err == nil {
+		t.Fatal("downloadAsset succeeded on a truncated body")
+	}
+	if calls != downloadAttempts {
+		t.Errorf("server calls = %d, want %d (retried)", calls, downloadAttempts)
+	}
+	if body, _ := os.ReadFile(dest); string(body) != "MZ good" {
+		t.Errorf("earlier download = %q, want it untouched", body)
+	}
+	if _, err := os.Stat(dest + ".part"); !os.IsNotExist(err) {
+		t.Errorf(".part left on disk (stat err %v)", err)
+	}
 }

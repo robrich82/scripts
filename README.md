@@ -905,8 +905,9 @@ immediately. A web page served in place of the file (SourceForge `/download`
 links) is followed through its `<meta http-equiv="refresh">`, up to three
 times; a page without one fails immediately rather than being saved as the asset.
 Downloads are https only: an `http://` asset URL, redirect or refresh target
-fails. GitHub assets are checked against the release's published SHA-256, and
-a mismatching file is deleted.
+fails. A GitHub asset with a published SHA-256 digest (assets uploaded since
+mid-2025) is checked against it, and a mismatching download is discarded;
+other assets are not checked.
 
 At the "Run/open downloaded file(s)?" prompt, `.exe`/`.msi` assets launch
 elevated; `.zip` and `.7z` assets are extracted next to the download and the
