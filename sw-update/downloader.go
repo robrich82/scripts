@@ -50,18 +50,9 @@ func downloadAsset(asset Asset, destDir, referer string) (string, error) {
 	fmt.Printf("  Downloading %s...\n", asset.Name)
 
 	client := &http.Client{
-		Timeout:   10 * time.Minute,
-		Transport: downloadTransport,
-		// Go follows an https -> http redirect by default.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if req.URL.Scheme != "https" {
-				return &insecureURLError{URL: req.URL.String()}
-			}
-			if len(via) >= 10 {
-				return errors.New("stopped after 10 redirects")
-			}
-			return nil
-		},
+		Timeout:       10 * time.Minute,
+		Transport:     downloadTransport,
+		CheckRedirect: httpsOnlyRedirect,
 	}
 
 	var lastErr error
@@ -86,6 +77,18 @@ func downloadAsset(asset Asset, destDir, referer string) (string, error) {
 		}
 	}
 	return "", lastErr
+}
+
+// httpsOnlyRedirect is an http.Client CheckRedirect that refuses any redirect
+// to a non-https URL; Go follows an https -> http redirect by default.
+func httpsOnlyRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return &insecureURLError{URL: req.URL.String()}
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
 }
 
 // checkAssetName rejects anything but a plain file name. Names scraped from
@@ -194,14 +197,15 @@ func writeBody(body io.Reader, destPath, wantSHA256 string) (err error) {
 	return os.Rename(partPath, destPath)
 }
 
-// insecureURLError is a download URL, redirect or refresh target that isn't
-// https: sw-update runs what it downloads, so it never fetches it in the clear.
+// insecureURLError is a download URL, asset URL, redirect or refresh target
+// that isn't https: sw-update runs what it downloads, so neither the file nor
+// the page naming it is fetched in the clear.
 type insecureURLError struct {
 	URL string
 }
 
 func (e *insecureURLError) Error() string {
-	return fmt.Sprintf("refusing non-https download URL %s", e.URL)
+	return fmt.Sprintf("refusing non-https URL %s", e.URL)
 }
 
 // sha256MismatchError is a download whose content doesn't match the digest its
