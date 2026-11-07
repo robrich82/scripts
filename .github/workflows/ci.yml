@@ -75,7 +75,7 @@ jobs:
 
       # Linters at the versions mise.toml pins. Go stays with setup-go (go.mod's
       # version, build cache); without MISE_DISABLE_TOOLS mise refuses to build
-      # the linters until its own Go is installed.
+      # govulncheck until its own Go is installed.
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         env:
           MISE_DISABLE_TOOLS: go
@@ -96,6 +96,10 @@ jobs:
 
       - name: golangci-lint
         run: golangci-lint run ./...
+
+      # run only sees files in the Windows build; this also covers the stubs.
+      - name: golangci-lint fmt
+        run: golangci-lint fmt --diff ./...
 
       - name: go test
         run: go test ./...

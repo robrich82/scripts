@@ -1,5 +1,9 @@
 version: "2"
 
+run:
+  # Queue behind a concurrent run (another worktree) instead of failing.
+  allow-serial-runners: true
+
 linters:
   default: standard
   # Off until its existing findings are fixed.
@@ -11,3 +15,7 @@ linters:
 formatters:
   enable:
     - gofmt
+  settings:
+    gofmt:
+      # Plain gofmt, so the gofmt -w edit hook clears every finding.
+      simplify: false

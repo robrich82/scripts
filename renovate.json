@@ -29,7 +29,7 @@
       "schedule": ["before 6am on monday"]
     },
     {
-      "description": "mise names linters by package path; the Go proxy only knows the module, and without it there's no release time for minimumReleaseAge.",
+      "description": "mise names Go tools by package path; the Go proxy only knows the module, and without it there's no release time for minimumReleaseAge.",
       "matchDepNames": ["go:golang.org/x/vuln/cmd/govulncheck"],
       "overridePackageName": "golang.org/x/vuln"
     },
