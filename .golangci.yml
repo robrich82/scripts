@@ -6,11 +6,12 @@ run:
 
 linters:
   default: standard
-  # Off until its existing findings are fixed.
-  disable:
-    - errcheck
   enable:
     - unparam
+  exclusions:
+    # Unchecked Close, os.Remove, fmt.Print and the like.
+    presets:
+      - std-error-handling
 
 formatters:
   enable:
