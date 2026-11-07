@@ -998,4 +998,4 @@ Each subdirectory is an independent Go module.
 
 ## License
 
-[GPL-3.0](LICENSE)
+[GPL-3.0-or-later](LICENSE)
