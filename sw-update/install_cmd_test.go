@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -164,5 +165,49 @@ func TestInstallWithLocalDetectorFailsWhenAnAssetFails(t *testing.T) {
 	}
 	if strings.Contains(out, "Mark version") {
 		t.Errorf("asked to mark an app with a local detector:\n%s", out)
+	}
+}
+
+// writeStateFile replaces the state file's contents with data.
+func writeStateFile(t *testing.T, data string, perm os.FileMode) string {
+	t.Helper()
+	dir, err := configDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "sw-update-state.json")
+	if err := os.WriteFile(path, []byte(data), perm); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestInstallReportsStateLoadError(t *testing.T) {
+	newInstallEnv(t, "none", serveAssets(false))
+	writeStateFile(t, "{not json", 0644)
+
+	out, err := runInstall(t, proceedNoRun+"\n")
+	if err == nil || !strings.Contains(err.Error(), "load state") {
+		t.Errorf("err = %v, want a load state error", err)
+	}
+	if strings.Contains(out, "Marked") {
+		t.Errorf("printed Marked although the state could not be loaded:\n%s", out)
+	}
+}
+
+func TestInstallReportsStateSaveError(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("relies on Windows refusing to replace a read-only file")
+	}
+	newInstallEnv(t, "none", serveAssets(false))
+	path := writeStateFile(t, "{}", 0444)
+	t.Cleanup(func() { os.Chmod(path, 0644) })
+
+	out, err := runInstall(t, proceedNoRun+"\n")
+	if err == nil || !strings.Contains(err.Error(), "save state") {
+		t.Errorf("err = %v, want a save state error", err)
+	}
+	if strings.Contains(out, "Marked") {
+		t.Errorf("printed Marked although the state was not saved:\n%s", out)
 	}
 }

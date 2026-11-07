@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -112,6 +113,7 @@ func cmdInstall(args []string) error {
 		}
 	}
 
+	var markErr error
 	if app.Local.Type == "" || app.Local.Type == "none" {
 		// After a failed download or run/extract, default to not marking it installed.
 		defaultNo := len(failed) > 0 || openFailed
@@ -127,20 +129,34 @@ func cmdInstall(args []string) error {
 			accept = strings.EqualFold(answer, "y")
 		}
 		if accept {
-			state, err := LoadState()
-			if err == nil {
-				st := state.Get(name)
-				st.LastSeenVersion = result.Version
-				st.LatestVersion = result.Version
-				_ = SaveState(state)
+			if err := markInstalled(name, result.Version); err != nil {
+				markErr = fmt.Errorf("could not mark %q as version %s: %w", name, result.Version, err)
+			} else {
 				fmt.Printf("Marked %q as version %s\n", name, result.Version)
 			}
 		}
 	}
 
+	var downloadErr error
 	if len(failed) > 0 {
-		return fmt.Errorf("%d of %d assets failed to download: %s",
+		downloadErr = fmt.Errorf("%d of %d assets failed to download: %s",
 			len(failed), len(result.Assets), strings.Join(failed, ", "))
+	}
+	return errors.Join(downloadErr, markErr)
+}
+
+// markInstalled records version as both the latest and the last seen version
+// of app name in the state file.
+func markInstalled(name, version string) error {
+	state, err := LoadState()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	st := state.Get(name)
+	st.LastSeenVersion = version
+	st.LatestVersion = version
+	if err := SaveState(state); err != nil {
+		return fmt.Errorf("save state: %w", err)
 	}
 	return nil
 }
