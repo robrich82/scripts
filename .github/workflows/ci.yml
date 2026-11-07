@@ -75,7 +75,7 @@ jobs:
       # Linters at the versions mise.toml pins. Go stays with setup-go (go.mod's
       # version, build cache); without MISE_DISABLE_TOOLS mise refuses to build
       # the linters until its own Go is installed.
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         env:
           MISE_DISABLE_TOOLS: go
         with:
