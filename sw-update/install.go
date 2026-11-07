@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -33,7 +34,7 @@ func cmdInstall(args []string) error {
 		return runUpdate(name, app)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: checkTransport}
 	checker := NewChecker(client)
 
 	fmt.Printf("Checking latest version of %s...\n", name)
@@ -69,9 +70,7 @@ func cmdInstall(args []string) error {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\nProceed with download? [y/N]: ")
-	line, _ := reader.ReadString('\n')
-	if !strings.EqualFold(strings.TrimSpace(line), "y") {
+	if !confirm(reader, "Proceed with download?", false) {
 		fmt.Println("Cancelled.")
 		return nil
 	}
@@ -82,10 +81,12 @@ func cmdInstall(args []string) error {
 	}
 
 	var downloaded []string
+	var failed []string
 	for _, asset := range result.Assets {
 		path, err := downloadAsset(asset, destDir, referer)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  Error downloading %s: %v\n", asset.Name, err)
+			failed = append(failed, asset.Name)
 			continue
 		}
 		downloaded = append(downloaded, path)
@@ -95,43 +96,79 @@ func cmdInstall(args []string) error {
 		return fmt.Errorf("all downloads failed")
 	}
 
-	fmt.Print("\nRun/open downloaded file(s)? [Y/n]: ")
-	line, _ = reader.ReadString('\n')
-	openFailed := false
-	if !strings.EqualFold(strings.TrimSpace(line), "n") {
+	if len(failed) > 0 {
+		fmt.Printf("\nNot downloaded: %s\n", strings.Join(failed, ", "))
+	}
+	var openFailed []string
+	if confirm(reader, "Run/open downloaded file(s)?", true) {
 		for _, path := range downloaded {
 			if err := runOrOpen(path, app.ArchivePassword); err != nil {
 				fmt.Fprintf(os.Stderr, "  Error opening %s: %v\n", filepath.Base(path), err)
-				openFailed = true
+				openFailed = append(openFailed, filepath.Base(path))
 			}
 		}
 	}
 
+	var markErr error
 	if app.Local.Type == "" || app.Local.Type == "none" {
-		// After a failed run/extract, default to not marking it installed.
-		prompt := "[Y/n]"
-		if openFailed {
-			prompt = "[y/N]"
-		}
-		fmt.Printf("\nMark version as installed/seen? %s: ", prompt)
-		line, _ = reader.ReadString('\n')
-		answer := strings.TrimSpace(line)
-		accept := !strings.EqualFold(answer, "n")
-		if openFailed {
-			accept = strings.EqualFold(answer, "y")
-		}
-		if accept {
-			state, err := LoadState()
-			if err == nil {
-				st := state.Get(name)
-				st.LastSeenVersion = result.Version
-				st.LatestVersion = result.Version
-				_ = SaveState(state)
+		// After a failed download or run/extract, default to not marking it installed.
+		ok := len(failed) == 0 && len(openFailed) == 0
+		if confirm(reader, "Mark version as installed/seen?", ok) {
+			if err := markInstalled(name, result.Version); err != nil {
+				markErr = fmt.Errorf("could not mark %q as version %s: %w", name, result.Version, err)
+			} else {
 				fmt.Printf("Marked %q as version %s\n", name, result.Version)
 			}
 		}
 	}
 
+	var downloadErr error
+	if len(failed) > 0 {
+		downloadErr = fmt.Errorf("%d of %d assets failed to download: %s",
+			len(failed), len(result.Assets), strings.Join(failed, ", "))
+	}
+	var openErr error
+	if len(openFailed) > 0 {
+		openErr = fmt.Errorf("%d of %d files failed to run or extract: %s",
+			len(openFailed), len(downloaded), strings.Join(openFailed, ", "))
+	}
+	return errors.Join(downloadErr, openErr, markErr)
+}
+
+// confirm asks a yes/no question and reads one line from reader. It accepts
+// y/yes and n/no in any case, and an empty line gives def. Anything else, or
+// end of input with no answer, is no: a closed stdin must not launch files.
+func confirm(reader *bufio.Reader, question string, def bool) bool {
+	hint := "[y/N]"
+	if def {
+		hint = "[Y/n]"
+	}
+	fmt.Printf("\n%s %s: ", question, hint)
+	line, err := reader.ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	switch {
+	case answer == "y" || answer == "yes":
+		return true
+	case answer == "" && err == nil:
+		return def
+	default:
+		return false
+	}
+}
+
+// markInstalled records version as both the latest and the last seen version
+// of app name in the state file.
+func markInstalled(name, version string) error {
+	state, err := LoadState()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	st := state.Get(name)
+	st.LastSeenVersion = version
+	st.LatestVersion = version
+	if err := SaveState(state); err != nil {
+		return fmt.Errorf("save state: %w", err)
+	}
 	return nil
 }
 
@@ -147,10 +184,7 @@ func runUpdate(name string, app *App) error {
 		fmt.Println("  (will prompt for administrator elevation)")
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\nRun update command? [y/N]: ")
-	line, _ := reader.ReadString('\n')
-	if !strings.EqualFold(strings.TrimSpace(line), "y") {
+	if !confirm(bufio.NewReader(os.Stdin), "Run update command?", false) {
 		fmt.Println("Cancelled.")
 		return nil
 	}
