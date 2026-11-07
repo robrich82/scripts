@@ -99,7 +99,9 @@ func readCBZEntry(t *testing.T, path, name string) []byte {
 			}
 			defer rc.Close()
 			var buf bytes.Buffer
-			buf.ReadFrom(rc)
+			if _, err := buf.ReadFrom(rc); err != nil {
+				t.Fatal(err)
+			}
 			return buf.Bytes()
 		}
 	}

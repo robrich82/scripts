@@ -30,7 +30,9 @@ const mkvExtractXML = `<?xml version="1.0" encoding="UTF-8"?>
 func TestParseMKVTagsXML_TwoLevels(t *testing.T) {
 	dir := t.TempDir()
 	xmlPath := filepath.Join(dir, "tags.xml")
-	os.WriteFile(xmlPath, []byte(mkvExtractXML), 0644)
+	if err := os.WriteFile(xmlPath, []byte(mkvExtractXML), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	lvl50, lvl30 := parseMKVTagsXML(xmlPath)
 
@@ -68,7 +70,9 @@ func TestParseMKVTagsXML_DefaultsToLevel50(t *testing.T) {
     <Simple><Name>TITLE</Name><String>Some Album</String></Simple>
   </Tag>
 </Tags>`
-	os.WriteFile(xmlPath, []byte(content), 0644)
+	if err := os.WriteFile(xmlPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	lvl50, _ := parseMKVTagsXML(xmlPath)
 	if lvl50["TITLE"] != "Some Album" {
@@ -86,7 +90,9 @@ func TestParseMKVTagsXML_MissingFile(t *testing.T) {
 func TestParseMKVTagsXML_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	xmlPath := filepath.Join(dir, "empty.xml")
-	os.WriteFile(xmlPath, []byte{}, 0644)
+	if err := os.WriteFile(xmlPath, []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	lvl50, lvl30 := parseMKVTagsXML(xmlPath)
 	if len(lvl50) != 0 || len(lvl30) != 0 {
@@ -194,7 +200,9 @@ func TestParseMKVTagsXML_ReplayGainRoundTrip(t *testing.T) {
     <Simple><Name>R128_TRACK_GAIN</Name><String>-720</String></Simple>
   </Tag>
 </Tags>`
-	os.WriteFile(xmlPath, []byte(content), 0644)
+	if err := os.WriteFile(xmlPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	lvl50, lvl30 := parseMKVTagsXML(xmlPath)
 
@@ -223,7 +231,9 @@ func TestBuildTagsXML_PreservesUnqualifiedReplayGain(t *testing.T) {
 
 	dir := t.TempDir()
 	xmlPath := filepath.Join(dir, "tags.xml")
-	os.WriteFile(xmlPath, []byte(xml), 0644)
+	if err := os.WriteFile(xmlPath, []byte(xml), 0644); err != nil {
+		t.Fatal(err)
+	}
 	lvl50, lvl30 := parseMKVTagsXML(xmlPath)
 
 	if got := lvl50["REPLAYGAIN_GAIN"]; got != "-5.00 dB" {
@@ -254,7 +264,9 @@ func TestParseMKVTagsXML_FirstValueWins(t *testing.T) {
     <Simple><Name>TITLE</Name><String>Second</String></Simple>
   </Tag>
 </Tags>`
-	os.WriteFile(xmlPath, []byte(content), 0644)
+	if err := os.WriteFile(xmlPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	lvl50, _ := parseMKVTagsXML(xmlPath)
 	if lvl50["TITLE"] != "First" {

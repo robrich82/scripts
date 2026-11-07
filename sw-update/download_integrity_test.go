@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -31,7 +32,7 @@ func plainServer(t *testing.T, calls *int) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*calls++
-		w.Write([]byte("MZ payload"))
+		fmt.Fprint(w, "MZ payload")
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -79,7 +80,7 @@ func TestDownloadAssetRejectsRefreshToHTTP(t *testing.T) {
 	plain := plainServer(t, &plainCalls)
 	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`<html><meta http-equiv="refresh" content="0; url=` + plain.URL + `/a.exe"></html>`))
+		fmt.Fprint(w, `<html><meta http-equiv="refresh" content="0; url=`+plain.URL+`/a.exe"></html>`)
 	}))
 	dir := t.TempDir()
 	_, err := downloadAsset(Asset{Name: "a.exe", URL: srv.URL + "/download"}, dir, "")
@@ -100,7 +101,7 @@ func TestDownloadAssetVerifiesGitHubDigest(t *testing.T) {
 	calls := 0
 	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		w.Write([]byte(served))
+		fmt.Fprint(w, served)
 	}))
 
 	release := `{"tag_name":"v1.0","assets":[
@@ -172,7 +173,7 @@ func TestAutoSelectWindowsCarriesDigest(t *testing.T) {
 func TestDownloadAssetAcceptsUppercaseDigest(t *testing.T) {
 	const payload = "MZ real installer"
 	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(payload))
+		fmt.Fprint(w, payload)
 	}))
 	want := strings.ToUpper(sha256Hex([]byte(payload)))
 	if _, err := downloadAsset(Asset{Name: "a.exe", URL: srv.URL + "/a.exe", SHA256: want}, t.TempDir(), ""); err != nil {
@@ -191,7 +192,7 @@ func TestDownloadAssetInterruptedKeepsEarlierCopy(t *testing.T) {
 	srv := newDownloadServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Length", "1000")
-		w.Write([]byte("MZ trunc"))
+		fmt.Fprint(w, "MZ trunc")
 	}))
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "a.exe")

@@ -46,7 +46,9 @@ func (f *fakePrompter) Ask(_ string) (string, error) {
 
 func makeMKVFile(t *testing.T, dir, name string) {
 	t.Helper()
-	os.WriteFile(filepath.Join(dir, name), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, name), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRunAll_NoEditsNeeded_OK(t *testing.T) {
@@ -112,7 +114,9 @@ func TestRunAll_EditsApplied_CountsFixed(t *testing.T) {
 
 func TestRunAll_SkipsNonMKV(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "subtitle.srt"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "subtitle.srt"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
 	if stats.Scanned != 0 {
