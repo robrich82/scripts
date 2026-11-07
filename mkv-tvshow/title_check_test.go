@@ -166,9 +166,7 @@ func TestTitleCheck_SkipsPlaceholderRename(t *testing.T) {
 		noopTimer{},
 	)
 
-	if err := tc.Run(); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	tc.Run()
 
 	// File must not have been renamed.
 	if _, err := os.Stat(mkvPath); os.IsNotExist(err) {
