@@ -70,9 +70,7 @@ func cmdInstall(args []string) error {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\nProceed with download? [y/N]: ")
-	line, _ := reader.ReadString('\n')
-	if !strings.EqualFold(strings.TrimSpace(line), "y") {
+	if !confirm(reader, "Proceed with download?", false) {
 		fmt.Println("Cancelled.")
 		return nil
 	}
@@ -101,10 +99,8 @@ func cmdInstall(args []string) error {
 	if len(failed) > 0 {
 		fmt.Printf("\nNot downloaded: %s\n", strings.Join(failed, ", "))
 	}
-	fmt.Print("\nRun/open downloaded file(s)? [Y/n]: ")
-	line, _ = reader.ReadString('\n')
 	var openFailed []string
-	if !strings.EqualFold(strings.TrimSpace(line), "n") {
+	if confirm(reader, "Run/open downloaded file(s)?", true) {
 		for _, path := range downloaded {
 			if err := runOrOpen(path, app.ArchivePassword); err != nil {
 				fmt.Fprintf(os.Stderr, "  Error opening %s: %v\n", filepath.Base(path), err)
@@ -116,19 +112,8 @@ func cmdInstall(args []string) error {
 	var markErr error
 	if app.Local.Type == "" || app.Local.Type == "none" {
 		// After a failed download or run/extract, default to not marking it installed.
-		defaultNo := len(failed) > 0 || len(openFailed) > 0
-		prompt := "[Y/n]"
-		if defaultNo {
-			prompt = "[y/N]"
-		}
-		fmt.Printf("\nMark version as installed/seen? %s: ", prompt)
-		line, _ = reader.ReadString('\n')
-		answer := strings.TrimSpace(line)
-		accept := !strings.EqualFold(answer, "n")
-		if defaultNo {
-			accept = strings.EqualFold(answer, "y")
-		}
-		if accept {
+		ok := len(failed) == 0 && len(openFailed) == 0
+		if confirm(reader, "Mark version as installed/seen?", ok) {
 			if err := markInstalled(name, result.Version); err != nil {
 				markErr = fmt.Errorf("could not mark %q as version %s: %w", name, result.Version, err)
 			} else {
@@ -148,6 +133,27 @@ func cmdInstall(args []string) error {
 			len(openFailed), len(downloaded), strings.Join(openFailed, ", "))
 	}
 	return errors.Join(downloadErr, openErr, markErr)
+}
+
+// confirm asks a yes/no question and reads one line from reader. It accepts
+// y/yes and n/no in any case, and an empty line gives def. Anything else, or
+// end of input with no answer, is no: a closed stdin must not launch files.
+func confirm(reader *bufio.Reader, question string, def bool) bool {
+	hint := "[y/N]"
+	if def {
+		hint = "[Y/n]"
+	}
+	fmt.Printf("\n%s %s: ", question, hint)
+	line, err := reader.ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	switch {
+	case answer == "y" || answer == "yes":
+		return true
+	case answer == "" && err == nil:
+		return def
+	default:
+		return false
+	}
 }
 
 // markInstalled records version as both the latest and the last seen version
@@ -178,10 +184,7 @@ func runUpdate(name string, app *App) error {
 		fmt.Println("  (will prompt for administrator elevation)")
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\nRun update command? [y/N]: ")
-	line, _ := reader.ReadString('\n')
-	if !strings.EqualFold(strings.TrimSpace(line), "y") {
+	if !confirm(bufio.NewReader(os.Stdin), "Run update command?", false) {
 		fmt.Println("Cancelled.")
 		return nil
 	}

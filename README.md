@@ -917,7 +917,8 @@ folder opened. A password-protected archive needs an app-level
 `archive_password` (ZipCrypto zips and AES 7z; AES-encrypted zips are not
 supported). If an asset fails to download, or running or extracting fails, the
 "Mark version as installed/seen?" prompt defaults to No, and `install` exits
-non-zero once the prompts are done.
+non-zero once the prompts are done. Prompts take `y`/`yes` or `n`/`no`; any
+other answer, or the end of input, counts as No.
 
 ```json
 {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net/http"
@@ -244,6 +245,80 @@ func TestInstallReportsDownloadAndExtractFailures(t *testing.T) {
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %v, want it to include %q", err, want)
+		}
+	}
+}
+
+// Input that ends after confirming the download must not run anything: the
+// served zips aren't valid archives, so an attempt would fail the install.
+func TestInstallEOFAtRunPromptDoesNotRun(t *testing.T) {
+	newInstallEnv(t, "none", serveAssets(false))
+
+	out, err := runInstall(t, "y\n")
+	if err != nil {
+		t.Fatalf("cmdInstall: %v\n%s", err, out)
+	}
+	if got := markedVersion(t); got != "" {
+		t.Errorf("marked version = %q, want unmarked at end of input", got)
+	}
+}
+
+func TestInstallNoAtRunPromptDoesNotRun(t *testing.T) {
+	newInstallEnv(t, "none", serveAssets(false))
+
+	out, err := runInstall(t, "y\nNo\n\n")
+	if err != nil {
+		t.Fatalf("cmdInstall: %v\n%s", err, out)
+	}
+	if got := markedVersion(t); got != "1.0" {
+		t.Errorf("marked version = %q, want 1.0 from the default", got)
+	}
+}
+
+func TestInstallNoAtMarkPromptDoesNotMark(t *testing.T) {
+	newInstallEnv(t, "none", serveAssets(false))
+
+	if _, err := runInstall(t, proceedNoRun+"no\n"); err != nil {
+		t.Fatalf("cmdInstall: %v", err)
+	}
+	if got := markedVersion(t); got != "" {
+		t.Errorf("marked version = %q, want unmarked", got)
+	}
+}
+
+func TestInstallAcceptsYesAtDefaultNoPrompts(t *testing.T) {
+	newInstallEnv(t, "none", serveAssets(true))
+
+	_, err := runInstall(t, "yes\nn\nYES\n")
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 assets failed") {
+		t.Errorf("err = %v, want 1 of 2 assets failed", err)
+	}
+	if got := markedVersion(t); got != "1.0" {
+		t.Errorf("marked version = %q, want 1.0", got)
+	}
+}
+
+func TestConfirm(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		def   bool
+		want  bool
+	}{
+		{"y\n", false, true},
+		{"Yes\r\n", false, true},
+		{" YES \n", false, true},
+		{"n\n", true, false},
+		{"no\n", true, false},
+		{"NO\n", true, false},
+		{"\n", true, true},
+		{"\r\n", false, false},
+		{"maybe\n", true, false},
+		{"", true, false},  // end of input
+		{"y", false, true}, // last line without a newline
+	} {
+		got := confirm(bufio.NewReader(strings.NewReader(tc.input)), "Q?", tc.def)
+		if got != tc.want {
+			t.Errorf("confirm(%q, def %v) = %v, want %v", tc.input, tc.def, got, tc.want)
 		}
 	}
 }
