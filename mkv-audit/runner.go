@@ -100,14 +100,29 @@ func loadFailedCache(stateDir string) []string {
 		return nil
 	}
 	var paths []string
-	json.Unmarshal(data, &paths)
+	if err := json.Unmarshal(data, &paths); err != nil {
+		fmt.Printf("[WARN]   ignoring unreadable %s: %v\n", failedCacheFile, err)
+		return nil
+	}
 	return paths
 }
 
 // saveFailedCache writes the list of failed paths to stateDir.
-func saveFailedCache(stateDir string, paths []string) {
-	data, _ := json.MarshalIndent(paths, "", "    ")
-	os.WriteFile(filepath.Join(stateDir, failedCacheFile), data, 0644)
+func saveFailedCache(stateDir string, paths []string) error {
+	return writeStateJSON(stateDir, failedCacheFile, paths)
+}
+
+// writeStateJSON writes v as indented JSON to name in stateDir, creating the
+// directory if needed.
+func writeStateJSON(stateDir, name string, v any) error {
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(v, "", "    ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(stateDir, name), data, 0644)
 }
 
 // fetchOrigins pre-computes OriginInfo for every unique content-root directory
@@ -338,8 +353,13 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 	}
 
 	if len(filesToScan) == 0 {
-		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
+		// The callback never returns an error, so neither does WalkDir.
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				fmt.Printf("[WARN]   skipping unreadable %s: %v\n", path, err)
+				return nil
+			}
+			if d.IsDir() {
 				return nil
 			}
 			lower := strings.ToLower(d.Name())
@@ -704,8 +724,9 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 
 	// Persist failure list and unknown codecs.
 	if len(stats.FailedPaths) > 0 {
-		os.MkdirAll(stateDir, 0755)
-		saveFailedCache(stateDir, stats.FailedPaths)
+		if err := saveFailedCache(stateDir, stats.FailedPaths); err != nil {
+			fmt.Printf("[WARN]   could not save %s: %v\n", failedCacheFile, err)
+		}
 	} else {
 		os.Remove(filepath.Join(stateDir, failedCacheFile))
 	}
@@ -715,11 +736,11 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 		for c := range unknownCodecs {
 			list = append(list, c)
 		}
-		os.MkdirAll(stateDir, 0755)
-		outPath := filepath.Join(stateDir, unknownCodecsFile)
-		data, _ := json.MarshalIndent(list, "", "    ")
-		os.WriteFile(outPath, data, 0644)
-		fmt.Printf("New formats found: %s\n", outPath)
+		if err := writeStateJSON(stateDir, unknownCodecsFile, list); err != nil {
+			fmt.Printf("[WARN]   could not save new formats %v: %v\n", list, err)
+		} else {
+			fmt.Printf("New formats found: %s\n", filepath.Join(stateDir, unknownCodecsFile))
+		}
 	}
 
 	return stats

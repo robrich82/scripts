@@ -30,8 +30,13 @@ type AudioTimestampStats struct {
 // sets OS file timestamps. Files older than cutoffDate are skipped.
 func SetAudioTimestamps(root string, cutoffDate time.Time, timer FileTimer, exiftoolPath string) AudioTimestampStats {
 	var stats AudioTimestampStats
-	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[AUDIO] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(d.Name()))

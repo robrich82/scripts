@@ -1357,3 +1357,61 @@ func TestFindMatch_ArtistPrefixKeepsCutoff(t *testing.T) {
 		t.Errorf("got %q, want no match", m)
 	}
 }
+
+func TestDefaultPatternAppender_AddsToExistingFile(t *testing.T) {
+	ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
+	writeIgnoreJSON(t, ignoreFile, IgnoreData{FilePatterns: map[string][]string{"a.mkv": {"x"}}})
+
+	if err := defaultPatternAppender(ignoreFile, "b.mkv", "y"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got IgnoreData
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.FilePatterns["a.mkv"], []string{"x"}) || !slices.Equal(got.FilePatterns["b.mkv"], []string{"y"}) {
+		t.Errorf("FilePatterns = %v, want a.mkv:[x] b.mkv:[y]", got.FilePatterns)
+	}
+}
+
+func TestDefaultPatternAppender_CorruptFileLeftAlone(t *testing.T) {
+	ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
+	corrupt := []byte(`{"file_patterns": {"a.mkv": ["x"]`)
+	if err := os.WriteFile(ignoreFile, corrupt, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := defaultPatternAppender(ignoreFile, "b.mkv", "y"); err == nil {
+		t.Error("err = nil, want a parse error")
+	}
+	if got, _ := os.ReadFile(ignoreFile); string(got) != string(corrupt) {
+		t.Errorf("ignore file rewritten to %s", got)
+	}
+}
+
+func TestRun_UnreadableRootWarns(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	p := NewProcessor(root, filepath.Join(t.TempDir(), "ignore.json"), &fakePrompter{})
+
+	out := captureStdout(t, func() { p.Run() })
+	if want := "[WARN] Skipping unreadable " + root; !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
+}
+
+func TestSetAudioTimestamps_UnreadableRootWarns(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+
+	var stats AudioTimestampStats
+	out := captureStdout(t, func() { stats = SetAudioTimestamps(root, time.Time{}, nil, "") })
+	if stats != (AudioTimestampStats{}) {
+		t.Errorf("stats = %+v, want zero", stats)
+	}
+	if want := "[AUDIO] Skipping unreadable " + root; !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
+}

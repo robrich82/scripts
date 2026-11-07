@@ -37,41 +37,11 @@ func runClean(root string) {
 		return
 	}
 
-	// For legacy base-name keys, walk root to collect existing .mkv file names.
-	// Newer entries store absolute paths and are checked directly via os.Stat.
-	mkvFiles := make(map[string]bool)
-	hasLegacyKeys := false
-	for name := range data.FilePatterns {
-		if !filepath.IsAbs(name) {
-			hasLegacyKeys = true
-			break
-		}
+	removed, err := removeStalePatterns(&data, root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error scanning %s: %v\n", root, err)
+		os.Exit(1)
 	}
-	if hasLegacyKeys {
-		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err == nil && !d.IsDir() && filepath.Ext(d.Name()) == ".mkv" {
-				mkvFiles[d.Name()] = true
-			}
-			return nil
-		})
-	}
-
-	removed := 0
-	for name := range data.FilePatterns {
-		var stale bool
-		if filepath.IsAbs(name) {
-			_, err := os.Stat(name)
-			stale = os.IsNotExist(err)
-		} else {
-			stale = !mkvFiles[name]
-		}
-		if stale {
-			fmt.Printf("Removing stale file-pattern entry: %s\n", name)
-			delete(data.FilePatterns, name)
-			removed++
-		}
-	}
-
 	if removed == 0 {
 		fmt.Println("File patterns are clean; nothing to remove.")
 		return
@@ -92,4 +62,51 @@ func runClean(root string) {
 		suffix = "y"
 	}
 	fmt.Printf("\nRemoved %d stale file-pattern entr%s.\n", removed, suffix)
+}
+
+// removeStalePatterns deletes the file-pattern entries in data whose video no
+// longer exists and returns how many it removed. It removes nothing if root
+// can't be fully scanned, since a file it missed would look stale.
+func removeStalePatterns(data *IgnoreData, root string) (int, error) {
+	// For legacy base-name keys, walk root to collect existing .mkv file names.
+	// Newer entries store absolute paths and are checked directly via os.Stat.
+	mkvFiles := make(map[string]bool)
+	hasLegacyKeys := false
+	for name := range data.FilePatterns {
+		if !filepath.IsAbs(name) {
+			hasLegacyKeys = true
+			break
+		}
+	}
+	if hasLegacyKeys {
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && filepath.Ext(d.Name()) == ".mkv" {
+				mkvFiles[d.Name()] = true
+			}
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	removed := 0
+	for name := range data.FilePatterns {
+		var stale bool
+		if filepath.IsAbs(name) {
+			_, err := os.Stat(name)
+			stale = os.IsNotExist(err)
+		} else {
+			stale = !mkvFiles[name]
+		}
+		if stale {
+			fmt.Printf("Removing stale file-pattern entry: %s\n", name)
+			delete(data.FilePatterns, name)
+			removed++
+		}
+	}
+	return removed, nil
 }
