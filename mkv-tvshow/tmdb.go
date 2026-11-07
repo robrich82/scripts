@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 )
 
@@ -103,7 +105,7 @@ func newHTTPTMDBClient(apiKey, baseURL string) *httpTMDBClient {
 func (c *httpTMDBClient) getTMDB(u string) (*http.Response, error) {
 	resp, err := c.client.Get(u)
 	if err != nil {
-		return nil, err
+		return nil, redactAPIKey(err)
 	}
 	if resp.StatusCode/100 != 2 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
@@ -218,4 +220,18 @@ func (c *httpTMDBClient) GetSeason(showID string, season int) (SeasonResult, err
 		return SeasonResult{}, err
 	}
 	return sr, nil
+}
+
+// apiKeyParam matches the api_key value in a request URL. A regexp rather than
+// url.Parse, which fails or misplaces the query when an ID holds % ? or #.
+var apiKeyParam = regexp.MustCompile(`(?i)(api_key=)[^&#\s"]*`)
+
+// redactAPIKey replaces the api_key value in a *url.Error with REDACTED, since
+// its message otherwise prints the whole request URL, key included.
+func redactAPIKey(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		ue.URL = apiKeyParam.ReplaceAllString(ue.URL, "${1}REDACTED")
+	}
+	return err
 }

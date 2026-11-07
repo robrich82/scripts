@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -43,28 +42,42 @@ type httpPlexClient struct {
 	httpClient *http.Client
 }
 
+// newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
+// server's host: Go only strips Authorization and Cookie on its own.
+func newPlexHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: httpTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if req.URL.Host != via[0].URL.Host {
+				req.Header.Del("X-Plex-Token")
+			}
+			return nil
+		},
+	}
+}
+
 func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	return &httpPlexClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		token:      token,
-		httpClient: &http.Client{Timeout: httpTimeout},
+		httpClient: newPlexHTTPClient(),
 	}
 }
 
-// plexGet performs a GET request to path (relative to baseURL), appending the
-// Plex token and an Accept: application/json header.
+// plexGet performs a GET request to path (relative to baseURL) with an
+// Accept: application/json header. The Plex token goes in a header, not the
+// URL, so transport errors (which print the URL) can't leak it.
 func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
 	u := c.baseURL + path
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	u += sep + "X-Plex-Token=" + url.QueryEscape(c.token)
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 	return doPlexRequest(c.httpClient, req, path)
 }
 
@@ -132,20 +145,16 @@ func (c *httpPlexClient) findArtistInSection(sectionKey, normTitle string) (stri
 	return "", nil
 }
 
-// plexPut performs a PUT request to path (relative to baseURL), appending the
-// Plex token.
+// plexPut performs a PUT request to path (relative to baseURL), sending the
+// Plex token in a header.
 func (c *httpPlexClient) plexPut(path string) (*http.Response, error) {
 	u := c.baseURL + path
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	u += sep + "X-Plex-Token=" + url.QueryEscape(c.token)
 	req, err := http.NewRequest(http.MethodPut, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 	return doPlexRequest(c.httpClient, req, path)
 }
 

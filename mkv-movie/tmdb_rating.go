@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -99,7 +100,7 @@ func (t *tmdbMovieSource) searchMovie(title, year string) (string, error) {
 
 	resp, err := t.httpClient.Get(u)
 	if err != nil {
-		return "", err
+		return "", redactAPIKey(err)
 	}
 	defer resp.Body.Close()
 
@@ -129,7 +130,7 @@ func (t *tmdbMovieSource) nzCertification(tmdbID string) (NZRating, error) {
 
 	resp, err := t.httpClient.Get(u)
 	if err != nil {
-		return RatingNone, err
+		return RatingNone, redactAPIKey(err)
 	}
 	defer resp.Body.Close()
 
@@ -181,7 +182,7 @@ func (t *tmdbMovieSource) GetMovieDetails(tmdbID string) (MovieDetails, error) {
 
 	resp, err := t.httpClient.Get(u)
 	if err != nil {
-		return MovieDetails{}, err
+		return MovieDetails{}, redactAPIKey(err)
 	}
 	defer resp.Body.Close()
 
@@ -323,4 +324,18 @@ func titleFromFilename(filename, year string) string {
 		filename = strings.ReplaceAll(filename, r.from, r.to)
 	}
 	return strings.TrimSpace(filename)
+}
+
+// apiKeyParam matches the api_key value in a request URL. A regexp rather than
+// url.Parse, which fails or misplaces the query when an ID holds % ? or #.
+var apiKeyParam = regexp.MustCompile(`(?i)(api_key=)[^&#\s"]*`)
+
+// redactAPIKey replaces the api_key value in a *url.Error with REDACTED, since
+// its message otherwise prints the whole request URL, key included.
+func redactAPIKey(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		ue.URL = apiKeyParam.ReplaceAllString(ue.URL, "${1}REDACTED")
+	}
+	return err
 }

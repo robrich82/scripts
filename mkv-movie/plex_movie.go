@@ -72,27 +72,40 @@ type httpPlexMovieClient struct {
 	movieKeyCache map[string]string // tmdbID → Plex ratingKey
 }
 
+// newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
+// server's host: Go only strips Authorization and Cookie on its own.
+func newPlexHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: httpTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if req.URL.Host != via[0].URL.Host {
+				req.Header.Del("X-Plex-Token")
+			}
+			return nil
+		},
+	}
+}
+
 func newHTTPPlexMovieClient(baseURL, token string) *httpPlexMovieClient {
 	return &httpPlexMovieClient{
 		baseURL:       strings.TrimRight(baseURL, "/"),
 		token:         token,
-		httpClient:    &http.Client{Timeout: httpTimeout},
+		httpClient:    newPlexHTTPClient(),
 		movieKeyCache: make(map[string]string),
 	}
 }
 
 func (c *httpPlexMovieClient) plexGet(path string) (*http.Response, error) {
 	u := c.baseURL + path
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	u += sep + "X-Plex-Token=" + url.QueryEscape(c.token)
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -472,13 +485,14 @@ func streamLangMatches(languageTag, languageCode, want string) bool {
 }
 
 func (c *httpPlexMovieClient) plexSetStream(partID int, param string, streamID int) error {
-	u := fmt.Sprintf("%s/library/parts/%d?%s=%d&X-Plex-Token=%s",
-		c.baseURL, partID, param, streamID, url.QueryEscape(c.token))
+	u := fmt.Sprintf("%s/library/parts/%d?%s=%d",
+		c.baseURL, partID, param, streamID)
 	req, err := http.NewRequest(http.MethodPut, u, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
@@ -649,14 +663,15 @@ func (m *multiPlexMovieClient) RefreshLibraries() error { return m.primary.Refre
 // SetContentRating implements PlexMovieClient.
 func (c *httpPlexMovieClient) SetContentRating(ratingKey string, rating NZRating) error {
 	plexRating := "nz/" + string(rating)
-	path := fmt.Sprintf("/library/metadata/%s?type=1&id=%s&contentRating.value=%s&contentRating.locked=1&X-Plex-Token=%s",
-		ratingKey, ratingKey, url.QueryEscape(plexRating), url.QueryEscape(c.token))
+	path := fmt.Sprintf("/library/metadata/%s?type=1&id=%s&contentRating.value=%s&contentRating.locked=1",
+		ratingKey, ratingKey, url.QueryEscape(plexRating))
 
 	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("plex: build put request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
