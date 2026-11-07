@@ -45,6 +45,7 @@ type Processor struct {
 	prompter        Prompter
 	renamer         func(oldPath, newPath string) error
 	patternAppender func(ignoreFile, videoFile, pattern string) error
+	patternMover    func(ignoreFile, oldPath, newPath string) error
 	tagger          MusicVideoTagger // nil = tag copying disabled
 	timer           FileTimer        // nil = timestamp syncing disabled
 	cutoffDate      time.Time
@@ -62,6 +63,7 @@ func NewProcessor(root, ignoreFile string, prompter Prompter) *Processor {
 		prompter:        prompter,
 		renamer:         os.Rename,
 		patternAppender: defaultPatternAppender,
+		patternMover:    defaultPatternMover,
 		touchedArtists:  make(map[string]struct{}),
 	}
 }
@@ -121,11 +123,125 @@ func defaultPatternAppender(ignoreFile, videoFile, pattern string) error {
 		data.FilePatterns = make(map[string][]string)
 	}
 	data.FilePatterns[videoFile] = append(data.FilePatterns[videoFile], pattern)
+	return writeIgnoreFile(ignoreFile, data)
+}
+
+// writeIgnoreFile replaces ignoreFile with data via a temp file and rename, so
+// a failed write leaves the old file intact rather than truncated.
+func writeIgnoreFile(ignoreFile string, data IgnoreData) error {
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ignoreFile, b, 0644)
+	tmp, err := os.CreateTemp(filepath.Dir(ignoreFile), filepath.Base(ignoreFile)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(b)
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr == nil { // CreateTemp makes it 0600: keep the old file's mode
+		mode := fs.FileMode(0644)
+		if info, err := os.Stat(ignoreFile); err == nil {
+			mode = info.Mode().Perm()
+		}
+		werr = os.Chmod(tmp.Name(), mode)
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), ignoreFile)
+	}
+	if werr != nil {
+		os.Remove(tmp.Name())
+	}
+	return werr
+}
+
+// defaultPatternMover moves oldPath's file-specific patterns (and any legacy
+// entry keyed by its bare filename) to newPath in ignoreFile.
+func defaultPatternMover(ignoreFile, oldPath, newPath string) error {
+	if oldPath == newPath {
+		return nil
+	}
+	existing, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		return err
+	}
+	var data IgnoreData
+	if err := json.Unmarshal(existing, &data); err != nil {
+		return err
+	}
+	moved := slices.Concat(data.FilePatterns[oldPath], data.FilePatterns[filepath.Base(oldPath)])
+	if len(moved) == 0 {
+		return nil
+	}
+	for _, pat := range moved {
+		if !slices.Contains(data.FilePatterns[newPath], pat) {
+			data.FilePatterns[newPath] = append(data.FilePatterns[newPath], pat)
+		}
+	}
+	delete(data.FilePatterns, oldPath)
+	return writeIgnoreFile(ignoreFile, data)
+}
+
+// moveFilePatterns carries oldPath's file-specific patterns over to newPath
+// after a rename, so they keep applying. A legacy bare-filename entry is copied
+// and left in place, since it may apply to other files of that name.
+func (p *Processor) moveFilePatterns(oldPath, newPath string) {
+	moved := p.filePatterns(oldPath)
+	if len(moved) == 0 || oldPath == newPath {
+		return
+	}
+	for _, pat := range moved {
+		if !slices.Contains(p.ignoreData.FilePatterns[newPath], pat) {
+			p.ignoreData.FilePatterns[newPath] = append(p.ignoreData.FilePatterns[newPath], pat)
+		}
+	}
+	delete(p.ignoreData.FilePatterns, oldPath)
+	if p.ignoreFile == "" {
+		return
+	}
+	if err := p.patternMover(p.ignoreFile, oldPath, newPath); err != nil {
+		fmt.Printf("    [ERROR] Could not move ignore patterns in %s from %q to %q: %v\n", p.ignoreFile, oldPath, newPath, err)
+	}
+}
+
+// filePatterns returns videoPath's file-specific patterns, including any
+// legacy entry keyed by its bare filename.
+func (p *Processor) filePatterns(videoPath string) []string {
+	pats := append([]string{}, p.ignoreData.FilePatterns[videoPath]...)
+	if base := filepath.Base(videoPath); base != videoPath {
+		pats = append(pats, p.ignoreData.FilePatterns[base]...)
+	}
+	return pats
+}
+
+// keptText returns, space-separated and in name order, the trimmed
+// file-specific patterns found in s. The user ignored them for this file to
+// keep its name, so a rename keeps them too; global patterns ("[HD]") are
+// dropped as before. Text the new title already has, or that sits inside other
+// kept text, is skipped, as is a pattern that wouldn't match once re-placed as
+// " "+text ("[Fan] "), since the next run would then strip it again.
+func (p *Processor) keptText(s, videoPath, matchedBase string) string {
+	var kept []string
+	for _, pat := range p.filePatterns(videoPath) {
+		t := strings.TrimSpace(pat)
+		if t != "" && strings.Contains(s, pat) && strings.Contains(" "+t, pat) &&
+			!strings.Contains(matchedBase, pat) && !containsWord(matchedBase, t) && !slices.Contains(kept, t) {
+			kept = append(kept, t)
+		}
+	}
+	kept = dropContained(kept)
+	slices.SortStableFunc(kept, func(a, b string) int { return strings.Index(s, a) - strings.Index(s, b) })
+	return strings.Join(kept, " ")
+}
+
+// withSpace returns " "+s, or "" when s is empty.
+func withSpace(s string) string {
+	if s == "" {
+		return ""
+	}
+	return " " + s
 }
 
 // LoadIgnorePatterns reads ignore patterns from the JSON ignore file.
@@ -229,6 +345,32 @@ func (p *Processor) videoRank(dir, f string) int {
 		rank++
 	}
 	return rank
+}
+
+// plainerVideoClaims reports whether another video in dir with no extra text
+// matches matchKey. That video owns the standard name even while it still has
+// its old name (it was skipped), so videoFile, which has extra text, must not
+// take the name from it.
+func (p *Processor) plainerVideoClaims(dir, videoFile, matchKey string, audioData map[string]string) bool {
+	if p.videoRank(dir, videoFile) < 2 {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		f := e.Name()
+		if e.IsDir() || strings.EqualFold(f, videoFile) || !containsStr(videoExts, strings.ToLower(filepath.Ext(f))) ||
+			p.videoRank(dir, f) >= 2 {
+			continue
+		}
+		clean, _, _ := cleanVideoBase(strings.TrimSuffix(f, filepath.Ext(f)))
+		if k, ok := findMatch(removeIgnoredParts(clean, p.effectivePatterns(filepath.Join(dir, f))), audioData); ok && k == matchKey {
+			return true
+		}
+	}
+	return false
 }
 
 // videoNameTaken reports whether a video other than self is named base with
@@ -393,12 +535,26 @@ func (p *Processor) ignoredPatternList(cleanVideo, videoPath string) []string {
 	var found []string
 	for _, pat := range p.effectivePatterns(videoPath) {
 		if strings.Contains(cleanVideo, pat) {
-			if t := strings.TrimSpace(pat); t != "" {
+			if t := strings.TrimSpace(pat); t != "" && !slices.Contains(found, t) {
 				found = append(found, t)
 			}
 		}
 	}
-	return found
+	return dropContained(found)
+}
+
+// containsWord reports whether s has word, case-insensitively and bounded by
+// spaces or the ends of s ("Live" is in "Song Live", not in "Alive").
+func containsWord(s, word string) bool {
+	return strings.Contains(" "+strings.ToLower(s)+" ", " "+strings.ToLower(word)+" ")
+}
+
+// dropContained removes each text that sits inside another one in ts, so
+// overlapping patterns (" (Alt)" and " (Alt) (Take 2)") add their text once.
+func dropContained(ts []string) []string {
+	return slices.DeleteFunc(slices.Clone(ts), func(t string) bool {
+		return slices.ContainsFunc(ts, func(o string) bool { return o != t && strings.Contains(o, t) })
+	})
 }
 
 // copyTagsIfConfigured copies tags from the matched audio file to mkvPath when
@@ -424,7 +580,9 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 			parts = append(parts, pat)
 		}
 	}
-	if t != "" {
+	// ...and skip postSuffix when a pattern already carries it ("(Live)" in a
+	// kept "(Live) [HD]").
+	if t != "" && !slices.ContainsFunc(parts, func(part string) bool { return containsWord(part, t) }) {
 		parts = append(parts, t)
 	}
 	titleSuffix := strings.Join(parts, " ")
@@ -503,11 +661,14 @@ func (p *Processor) planVideo(videoDir, videoFile string, audioData map[string]s
 	}
 
 	// Another video already has the standard name (an unsuffixed one counts as
-	// "-video"): if this one has extra text ("(Special Music Video)",
-	// " (Second Version)"), keep it in the name and title tag. Without any, the
-	// standard name is offered and "r" refuses if that exact file exists.
+	// "-video"), or a plainer one will claim it: if this one has extra text
+	// ("(Special Music Video)", " (Second Version)"), keep it in the name and
+	// title tag. Without any, the standard name is offered and "r" refuses if
+	// that exact file exists.
+	keepClean, keepPost := p.keptText(cleanVideo, videoPath, matchedBase), p.keptText(postSuffix, videoPath, matchedBase)
 	if videoNameTaken(videoDir, plan.targetName, videoPath) ||
-		(effectiveSuffix == "-video" && videoNameTaken(videoDir, matchedBase, videoPath)) {
+		(effectiveSuffix == "-video" && videoNameTaken(videoDir, matchedBase, videoPath)) ||
+		p.plainerVideoClaims(videoDir, videoFile, matchKey, audioData) {
 		clean, post := cleanVideoIgnored, keepLeadingSpace(postSuffix, postSuffixIgnored)
 		extra := extraText(clean)
 		if extra == "" && post == "" { // only ignored text sets it apart: keep that
@@ -526,7 +687,30 @@ func (p *Processor) planVideo(videoDir, videoFile string, audioData map[string]s
 			plan.tagPost = extra + " " + strings.TrimSpace(postSuffix)
 			plan.nameSuffix = foundSuffix // an unsuffixed file must still be renamed to add "-video"
 			plan.correct = plan.targetName == clean+foundSuffix+post || plan.targetName == videoBase
+			if !plan.correct && clean == cleanVideoIgnored { // put back what this file's own patterns stripped
+				// Kept text may hold extra's text too, when a global pattern sits inside
+				// it (" (Live) [HD]" around " [HD]"): then it replaces extra.
+				if keepClean != "" && !strings.Contains(extra, keepClean) {
+					if strings.Contains(keepClean, extra) {
+						extra = keepClean
+					} else {
+						extra += " " + keepClean
+					}
+				}
+				if keepPost != "" && !strings.Contains(post, keepPost) {
+					if strings.Contains(keepPost, strings.TrimSpace(post)) {
+						post = " " + keepPost
+					} else {
+						post += " " + keepPost
+					}
+				}
+				plan.targetName = matchedBase + withSpace(extra) + effectiveSuffix + post
+				plan.correct = plan.targetName == videoBase
+			}
 		}
+	} else if keepClean != "" || keepPost != "" {
+		plan.targetName = matchedBase + withSpace(keepClean) + effectiveSuffix + withSpace(keepPost)
+		plan.correct = plan.targetName == videoBase
 	}
 	return plan, true
 }
@@ -579,11 +763,12 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		} else {
 			fmt.Printf("    [OK] Renamed to: %s%s\n", targetName, ext)
 			p.markArtistTouched(videoDir)
+			p.moveFilePatterns(videoPath, newPath)
 			// Tag from the new name, as the next run will, so the tag settles now.
 			if next, ok := p.planVideo(videoDir, targetName+ext, audioData); ok && next.correct {
 				p.copyTagsIfConfigured(newPath, next.matchKey, next.cleanVideo, next.tagPost, videoDir, newPath, audioPaths)
 			} else {
-				p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
+				p.copyTagsIfConfigured(newPath, matchKey, cleanVideo, tagPost, videoDir, newPath, audioPaths) // the patterns moved there
 			}
 			return "renamed"
 		}
@@ -609,11 +794,10 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 			} else {
 				fmt.Printf("    [OK] Added '%s' to ignore list for %s\n", pattern, videoFile)
 			}
-			reCheckedClean := removeIgnoredParts(cleanVideo, p.effectivePatterns(videoPath))
-			reCheckedPost := keepLeadingSpace(postSuffix, removeIgnoredParts(postSuffix, p.effectivePatterns(videoPath)))
-			if reCheckedClean+plan.nameSuffix+reCheckedPost == targetName {
+			// Re-plan as the next run will, since the target may now keep this text.
+			if next, ok := p.planVideo(videoDir, videoFile, audioData); ok && next.correct {
 				fmt.Println("    [OK] File now matches after ignoring pattern!")
-				p.copyTagsIfConfigured(fullPath, matchKey, cleanVideo, tagPost, videoDir, videoPath, audioPaths)
+				p.copyTagsIfConfigured(fullPath, next.matchKey, next.cleanVideo, next.tagPost, videoDir, videoPath, audioPaths)
 			} else {
 				fmt.Println("    Still doesn't match after ignoring")
 			}
