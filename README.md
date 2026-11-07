@@ -915,8 +915,9 @@ At the "Run/open downloaded file(s)?" prompt, `.exe`/`.msi` assets launch
 elevated; `.zip` and `.7z` assets are extracted next to the download and the
 folder opened. A password-protected archive needs an app-level
 `archive_password` (ZipCrypto zips and AES 7z; AES-encrypted zips are not
-supported). If running or extracting fails, the "Mark version as
-installed/seen?" prompt defaults to No.
+supported). If an asset fails to download, or running or extracting fails, the
+"Mark version as installed/seen?" prompt defaults to No. A failed download
+also makes `install` exit non-zero once the prompts are done.
 
 ```json
 {

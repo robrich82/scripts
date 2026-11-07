@@ -71,7 +71,7 @@ func cmdCheck(args []string) error {
 		return nil
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: checkTransport}
 	checker := NewChecker(client)
 	detector := NewDetector()
 

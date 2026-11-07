@@ -34,6 +34,10 @@ type Checker interface {
 	Check(app App) (*CheckResult, error)
 }
 
+// checkTransport carries checker requests; nil means http.DefaultTransport.
+// Tests set it to a TLS test server's transport.
+var checkTransport http.RoundTripper
+
 // NewChecker returns a Checker that dispatches based on app.Checker.Type.
 func NewChecker(client *http.Client) Checker {
 	return &checkerDispatch{client: client}

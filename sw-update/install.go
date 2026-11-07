@@ -33,7 +33,7 @@ func cmdInstall(args []string) error {
 		return runUpdate(name, app)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: checkTransport}
 	checker := NewChecker(client)
 
 	fmt.Printf("Checking latest version of %s...\n", name)
@@ -82,10 +82,12 @@ func cmdInstall(args []string) error {
 	}
 
 	var downloaded []string
+	var failed int
 	for _, asset := range result.Assets {
 		path, err := downloadAsset(asset, destDir, referer)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  Error downloading %s: %v\n", asset.Name, err)
+			failed++
 			continue
 		}
 		downloaded = append(downloaded, path)
@@ -108,16 +110,17 @@ func cmdInstall(args []string) error {
 	}
 
 	if app.Local.Type == "" || app.Local.Type == "none" {
-		// After a failed run/extract, default to not marking it installed.
+		// After a failed download or run/extract, default to not marking it installed.
+		defaultNo := failed > 0 || openFailed
 		prompt := "[Y/n]"
-		if openFailed {
+		if defaultNo {
 			prompt = "[y/N]"
 		}
 		fmt.Printf("\nMark version as installed/seen? %s: ", prompt)
 		line, _ = reader.ReadString('\n')
 		answer := strings.TrimSpace(line)
 		accept := !strings.EqualFold(answer, "n")
-		if openFailed {
+		if defaultNo {
 			accept = strings.EqualFold(answer, "y")
 		}
 		if accept {
@@ -132,6 +135,9 @@ func cmdInstall(args []string) error {
 		}
 	}
 
+	if failed > 0 {
+		return fmt.Errorf("%d of %d assets failed to download", failed, len(result.Assets))
+	}
 	return nil
 }
 
