@@ -29,6 +29,14 @@ func TestImageCoder(t *testing.T) {
 		{"avif", []byte("\x00\x00\x00\x1cftypavif\x00\x00\x00\x00"), "avif"},
 		{"heic", []byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00"), "heic"},
 		{"mp4", []byte("\x00\x00\x00\x18ftypisom\x00\x00\x00\x00"), ""},
+		{"mp4 with brands", []byte("\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41"), ""},
+		{"heif major mif2", []byte("\x00\x00\x00\x10ftypmif2\x00\x00\x00\x00"), "heic"},
+		{"heif major avci", []byte("\x00\x00\x00\x10ftypavci\x00\x00\x00\x00"), "heic"},
+		{"avif compatible brand", []byte("\x00\x00\x00\x20ftypmif1\x00\x00\x00\x00mif1miafMA1Bavif"), "avif"},
+		{"heic compatible brand", []byte("\x00\x00\x00\x18ftypjpeg\x00\x00\x00\x00heix"), "heic"},
+		{"brand past ftyp box", []byte("\x00\x00\x00\x10ftypisom\x00\x00\x00\x00avif"), ""},
+		{"jp2", []byte("\x00\x00\x00\x0cjP  \r\n\x87\n\x00\x00"), "jp2"},
+		{"j2k codestream", []byte{0xFF, 0x4F, 0xFF, 0x51, 0x00}, "j2k"},
 		{"svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), ""},
 		{"xml svg", []byte(`<?xml version="1.0"?><svg/>`), ""},
 		{"mvg", []byte("viewbox 0 0 4 4\n"), ""},
@@ -76,7 +84,7 @@ func TestMagickToPNG_RealFormats(t *testing.T) {
 	if _, err := exec.LookPath(magickBin); err != nil {
 		t.Skip("ImageMagick not installed")
 	}
-	for _, format := range []string{"gif", "webp", "bmp", "tiff", "jxl", "avif", "heic"} {
+	for _, format := range []string{"gif", "webp", "bmp", "tiff", "jxl", "avif", "heic", "jp2", "j2k"} {
 		t.Run(format, func(t *testing.T) {
 			src, err := exec.Command(magickBin, "-size", "8x6", "xc:red", format+":-").Output()
 			if err != nil || len(src) == 0 {
@@ -97,5 +105,34 @@ func TestMagickToPNG_RealFormats(t *testing.T) {
 				t.Errorf("size = %dx%d, want 8x6", b.Dx(), b.Dy())
 			}
 		})
+	}
+}
+
+// magickToPNG must name the coder: a bare "-" lets ImageMagick guess the
+// format, and the local-only real-format test is the only other check.
+func TestMagickArgsNameCoder(t *testing.T) {
+	got := strings.Join(magickArgs("webp"), " ")
+	if want := "webp:- -background white -flatten png:-"; got != want {
+		t.Errorf("magickArgs = %q, want %q", got, want)
+	}
+}
+
+// A dry run rejects an unconvertible page too, rather than previewing it as
+// converted to PNG.
+func TestProcessCBZ_DryRunRejectsSVG(t *testing.T) {
+	restore := convertImage
+	convertImage = func(src []byte) ([]byte, error) {
+		t.Error("convertImage called in dry-run")
+		return portrait, nil
+	}
+	defer func() { convertImage = restore }()
+
+	path := makeCBZ(t, []zipEntry{
+		{"001.webp", []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)},
+		{"002.png", portrait},
+	})
+	_, err := processCBZ(path, true, false, false, true, false)
+	if err == nil || !strings.Contains(err.Error(), "unrecognised image format") {
+		t.Fatalf("processCBZ dry-run error = %v, want unrecognised image format", err)
 	}
 }
