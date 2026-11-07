@@ -195,7 +195,7 @@ func TestRunAll_FailedCacheSaveErrorWarns(t *testing.T) {
 	out := captureStdout(t, func() {
 		RunAll(dir, stateDir, nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
 	})
-	if want := "[WARN]   could not save " + failedCacheFile; !strings.Contains(out, want) {
+	if want := "[WARN]   could not save " + filepath.Join(stateDir, failedCacheFile); !strings.Contains(out, want) {
 		t.Errorf("output missing %q:\n%s", want, out)
 	}
 }
@@ -215,7 +215,27 @@ func TestRunAll_CorruptFailedCacheScansAll(t *testing.T) {
 	if stats.Scanned != 1 {
 		t.Errorf("Scanned=%d, want 1", stats.Scanned)
 	}
-	if want := "[WARN]   ignoring unreadable " + failedCacheFile; !strings.Contains(out, want) {
+	if want := "[WARN]   ignoring unreadable " + filepath.Join(stateDir, failedCacheFile); !strings.Contains(out, want) {
 		t.Errorf("output missing %q:\n%s", want, out)
+	}
+}
+
+func TestRunAll_UnknownCodecSaveErrorWarns(t *testing.T) {
+	dir := t.TempDir()
+	makeMKVFile(t, dir, "movie.mkv")
+	stateDir := filepath.Join(t.TempDir(), "state")
+	if err := os.WriteFile(stateDir, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	info := &MKVInfo{Tracks: []Track{audioTrack(0, "eng", "A_UNKNOWN_FORMAT", 2, true)}}
+
+	out := captureStdout(t, func() {
+		RunAll(dir, stateDir, nil, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+	})
+	if !strings.Contains(out, "[WARN]   could not save new formats") {
+		t.Errorf("output missing the save warning:\n%s", out)
+	}
+	if strings.Contains(out, "New formats found") {
+		t.Errorf("output claims the formats were saved:\n%s", out)
 	}
 }

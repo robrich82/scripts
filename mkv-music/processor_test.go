@@ -1378,6 +1378,25 @@ func TestDefaultPatternAppender_AddsToExistingFile(t *testing.T) {
 	}
 }
 
+func TestDefaultPatternAppender_CreatesMissingFile(t *testing.T) {
+	ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
+
+	if err := defaultPatternAppender(ignoreFile, "a.mkv", "x"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got IgnoreData
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.FilePatterns["a.mkv"], []string{"x"}) {
+		t.Errorf("FilePatterns = %v, want a.mkv:[x]", got.FilePatterns)
+	}
+}
+
 func TestDefaultPatternAppender_CorruptFileLeftAlone(t *testing.T) {
 	ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
 	corrupt := []byte(`{"file_patterns": {"a.mkv": ["x"]`)

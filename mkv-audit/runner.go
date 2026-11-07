@@ -101,7 +101,7 @@ func loadFailedCache(stateDir string) []string {
 	}
 	var paths []string
 	if err := json.Unmarshal(data, &paths); err != nil {
-		fmt.Printf("[WARN]   ignoring unreadable %s: %v\n", failedCacheFile, err)
+		fmt.Printf("[WARN]   ignoring unreadable %s: %v\n", filepath.Join(stateDir, failedCacheFile), err)
 		return nil
 	}
 	return paths
@@ -725,7 +725,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 	// Persist failure list and unknown codecs.
 	if len(stats.FailedPaths) > 0 {
 		if err := saveFailedCache(stateDir, stats.FailedPaths); err != nil {
-			fmt.Printf("[WARN]   could not save %s: %v\n", failedCacheFile, err)
+			fmt.Printf("[WARN]   could not save %s: %v\n", filepath.Join(stateDir, failedCacheFile), err)
 		}
 	} else {
 		os.Remove(filepath.Join(stateDir, failedCacheFile))
