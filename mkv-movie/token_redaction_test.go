@@ -56,7 +56,8 @@ func TestPlexMovieClient_TransportErrorOmitsToken(t *testing.T) {
 	c := newHTTPPlexMovieClient(closedServerURL(), secretToken)
 	_, getErr := c.FindMovieByTMDBID("12345")
 	putErr := c.SetContentRating("77", NZRating("M"))
-	for _, err := range []error{getErr, putErr} {
+	streamErr := c.plexSetStream(5, "audioStreamID", 9)
+	for _, err := range []error{getErr, putErr, streamErr} {
 		if err == nil {
 			t.Fatal("expected a connection error")
 		}
