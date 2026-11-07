@@ -32,7 +32,10 @@ func (w *win32FileTimer) SetCreationTime(path string, t time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(handle)
 	ft := windows.NsecToFiletime(t.UnixNano())
-	return windows.SetFileTime(handle, &ft, nil, nil)
+	err = windows.SetFileTime(handle, &ft, nil, nil)
+	if cerr := windows.CloseHandle(handle); err == nil {
+		err = cerr
+	}
+	return err
 }
