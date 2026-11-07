@@ -75,7 +75,7 @@ func TestPromptTMDBID_NilResolverSkips(t *testing.T) {
 }
 
 func TestPromptTMDBID_RepromptsUntilValid(t *testing.T) {
-	tmdb := &idLookupTMDBClient{knownID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &idLookupTMDBClient{knownID: "12345", details: testDetails()}
 	rr := newMovieRatingResolver(nil, makeCache(t), false, false, nil,
 		answerPrompter("nonsense", "999", "https://www.themoviedb.org/movie/12345-x"))
 
@@ -98,9 +98,11 @@ func TestPromptTMDBID_RepromptsUntilValid(t *testing.T) {
 func TestProcessFile_TMDBNotFound_PromptedIDIsUsedAndCached(t *testing.T) {
 	path := makeTempMKVNamed(t, "Obscure.Film.2019.mkv")
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, past, past)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
 
-	tmdb := &idLookupTMDBClient{knownID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &idLookupTMDBClient{knownID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
 	cache := makeCache(t)
 	rr := newMovieRatingResolver(nil, cache, false, false, nil, answerPrompter("12345"))
@@ -116,7 +118,7 @@ func TestProcessFile_TMDBNotFound_PromptedIDIsUsedAndCached(t *testing.T) {
 
 func TestProcessFile_TMDBNotFound_NoPrompterStillSkips(t *testing.T) {
 	path := makeTempMKVNamed(t, "Obscure.Film.2019.mkv")
-	tmdb := &idLookupTMDBClient{knownID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &idLookupTMDBClient{knownID: "12345", details: testDetails()}
 	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped", result)

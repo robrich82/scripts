@@ -15,7 +15,7 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 
 ## Requirements
 
-- Go 1.27.3, staticcheck, unparam and govulncheck, pinned in `mise.toml`: run `mise install`.
+- Go 1.27.3, golangci-lint and govulncheck, pinned in `mise.toml`: run `mise install`.
   - A linter `go install`ed into `go env GOBIN` shadows the pinned one; delete it there.
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
@@ -485,7 +485,7 @@ A renamed MKV's title tag is built from its new name, so text the rename drops
 |------|-------------|
 | `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
 | `--all` | Process all files regardless of modification date |
-| `--clean` | Remove file-specific pattern entries from `ignore_patterns.json` for video files that no longer exist under the current directory, then exit |
+| `--clean` | Remove file-specific pattern entries from `ignore_patterns.json` for video files that no longer exist under the current directory, then exit. Entries on an offline drive, or that it can't check because a folder is unreadable, are kept |
 
 ### Configuration
 

@@ -64,12 +64,17 @@ func NewTitleChecker(
 //  1. Compares filename title(s) against TMDB and offers to rename on mismatch.
 //  2. Sets the MKV title metadata to the full (untruncated) TMDB title and
 //     caches it so normal mode will not overwrite it with the filename title.
-func (tc *TitleChecker) Run() error {
+func (tc *TitleChecker) Run() {
 	showFiles := map[string][]string{}
 	var showOrder []string
 
-	err := filepath.WalkDir(tc.cfg.MediaDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(tc.cfg.MediaDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[!] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
@@ -96,9 +101,6 @@ func (tc *TitleChecker) Run() error {
 		showFiles[showFolder] = append(showFiles[showFolder], path)
 		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("walking media dir: %w", err)
-	}
 
 	for _, showFolder := range showOrder {
 		cacheKey := filepath.Join(tc.cfg.MediaDir, showFolder)
@@ -216,8 +218,6 @@ func (tc *TitleChecker) Run() error {
 			fmt.Printf("[!] Failed to save title cache: %v\n", err)
 		}
 	}
-
-	return nil
 }
 
 // checkMismatch compares fileTitles against expectedTitles and, when they

@@ -273,7 +273,7 @@ func TestOrderedAudio_MultiGroupAndWithinGroup(t *testing.T) {
 
 func TestPlanTrim_SubsReordered(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "eng"),
+		videoTrack("eng"),
 		audioTrack(1, "eng", "A_AC3", 6, true),
 		// Signs track comes before main sub — Plex would pick signs first
 		subTrack(2, "eng", "S_TEXT/ASS", "Signs/Songs", false, true),
@@ -294,7 +294,7 @@ func TestPlanTrim_SubsReordered(t *testing.T) {
 
 func TestPlanTrim_SubsAlreadyOrdered(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "eng"),
+		videoTrack("eng"),
 		audioTrack(1, "eng", "A_AC3", 6, true),
 		subTrack(2, "eng", "S_TEXT/ASS", "", true, false),
 		subTrack(3, "eng", "S_TEXT/ASS", "Signs/Songs", false, true),
@@ -307,7 +307,7 @@ func TestPlanTrim_SubsAlreadyOrdered(t *testing.T) {
 
 func TestPlanTrim_AudioWinnerFirst_NoOriginLang(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "eng"),
+		videoTrack("eng"),
 		audioTrack(1, "eng", "A_AC3", 2, false),
 		audioTrack(2, "eng", "A_TRUEHD", 6, false),
 	}}
@@ -326,7 +326,7 @@ func TestPlanTrim_AudioWinnerFirst_NoOriginLang(t *testing.T) {
 // main and a signs English subtitle track.
 func subbedShow() MKVInfo {
 	return MKVInfo{Tracks: []Track{
-		videoTrack(0, "jpn"),
+		videoTrack("jpn"),
 		audioTrack(1, "jpn", "A_FLAC", 6, true),
 		audioTrack(2, "eng", "A_AC3", 6, false),
 		subTrack(3, "eng", "S_TEXT/ASS", "", true, false),
@@ -352,7 +352,7 @@ func TestPlanTrim_NoAccountLangs_DropsEnglishAudioAndForcedSubs(t *testing.T) {
 
 func TestPlanTrim_DialogueAndSignsSub_NotTreatedAsForced(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "jpn"),
+		videoTrack("jpn"),
 		audioTrack(1, "jpn", "A_FLAC", 6, true),
 		audioTrack(2, "eng", "A_AC3", 6, false),
 		subTrack(3, "eng", "S_TEXT/ASS", "Dialogue & Signs [TSPlease]", true, false),
@@ -398,7 +398,7 @@ func TestPlanTrim_OtherAccountLangKeptButForcedEngStillDropped(t *testing.T) {
 
 func TestPlanTrim_EnglishOrigin_KeepsForcedSubs(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "eng"),
+		videoTrack("eng"),
 		audioTrack(1, "eng", "A_FLAC", 6, true),
 		subTrack(2, "eng", "S_TEXT/ASS", "", true, false),
 		subTrack(3, "eng", "S_TEXT/ASS", "Signs/Songs", false, true),
@@ -419,7 +419,7 @@ func TestPlanTrim_UnknownOrigin_KeepsEverything(t *testing.T) {
 
 func TestPlanTrim_UndTracksAlwaysKept(t *testing.T) {
 	info := MKVInfo{Tracks: []Track{
-		videoTrack(0, "jpn"),
+		videoTrack("jpn"),
 		audioTrack(1, "jpn", "A_FLAC", 6, true),
 		audioTrack(2, "", "A_AC3", 6, false),
 		subTrack(3, "", "S_TEXT/ASS", "Signs/Songs", false, true),

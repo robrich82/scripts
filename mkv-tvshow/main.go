@@ -182,10 +182,7 @@ func main() {
 		cfg := Config{MediaDir: mediaDir}
 		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter, mkv, titleCache, timer)
 		fmt.Printf("Checking episode titles in %s...\n", mediaDir)
-		if err := checker.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
+		checker.Run()
 		return
 	}
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,7 +33,7 @@ func TestDownloadAssetRejectsEncodedTraversalFromHTMLPage(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		w.Write([]byte("payload"))
+		fmt.Fprint(w, "payload")
 	}))
 	defer srv.Close()
 

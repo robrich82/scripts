@@ -581,8 +581,13 @@ func extractYear(filename string) string {
 // walkAndProcess walks root for .mkv files and processes each one.
 func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, force bool, cutoff time.Time) Stats {
 	var stats Stats
-	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[!] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
@@ -662,8 +667,13 @@ func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer F
 // are preserved. Files not in manualData are skipped entirely.
 func runDebandOnly(dir string, manualData map[string]MovieManualEntry, tagger MKVTagger, timer FileTimer) Stats {
 	var stats Stats
-	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[!] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {

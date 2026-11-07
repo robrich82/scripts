@@ -24,8 +24,13 @@ type setRatingPlan struct {
 // Run (files directly under mediaDir have no show folder and are ignored).
 func showFoldersWithMKV(mediaDir string) []string {
 	seen := make(map[string]bool)
-	filepath.WalkDir(mediaDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(mediaDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[!] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {

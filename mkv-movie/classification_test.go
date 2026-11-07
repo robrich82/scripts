@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +18,7 @@ func classificationHTMLWith(title, rating string) string {
 func TestClassificationSource_FetchRating_Found(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(classificationHTMLWith("The Dark Knight", "M")))
+		fmt.Fprint(w, classificationHTMLWith("The Dark Knight", "M"))
 	}))
 	defer srv.Close()
 
@@ -34,7 +35,7 @@ func TestClassificationSource_FetchRating_Found(t *testing.T) {
 func TestClassificationSource_FetchRating_NoMatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(classificationHTMLWith("Some Other Film", "R16")))
+		fmt.Fprint(w, classificationHTMLWith("Some Other Film", "R16"))
 	}))
 	defer srv.Close()
 

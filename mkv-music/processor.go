@@ -115,9 +115,16 @@ func (p *Processor) refreshPlexArtists() {
 // defaultPatternAppender adds pattern to the file-specific section for
 // videoFile in the JSON ignore file at ignoreFile.
 func defaultPatternAppender(ignoreFile, videoFile, pattern string) error {
+	// Any read or parse failure aborts, so the rewrite can't drop existing patterns.
 	var data IgnoreData
-	if existing, err := os.ReadFile(ignoreFile); err == nil {
-		json.Unmarshal(existing, &data)
+	existing, err := os.ReadFile(ignoreFile)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil {
+		if err := json.Unmarshal(existing, &data); err != nil {
+			return fmt.Errorf("parse %s: %w", ignoreFile, err)
+		}
 	}
 	if data.FilePatterns == nil {
 		data.FilePatterns = make(map[string][]string)
@@ -751,7 +758,7 @@ func (p *Processor) processVideo(videoDir, videoFile string, audioData, audioPat
 		newPath := filepath.Join(videoDir, targetName+ext)
 		if newPath != fullPath {
 			// A case-only rename finds the file itself here; let only that through.
-			if newInfo, statErr := os.Lstat(newPath); statErr == nil && !(strings.EqualFold(newPath, fullPath) && sameFile(newInfo, fullPath)) {
+			if newInfo, statErr := os.Lstat(newPath); statErr == nil && (!strings.EqualFold(newPath, fullPath) || !sameFile(newInfo, fullPath)) {
 				// os.Rename would silently clobber an existing file (e.g. two
 				// videos matching the same track). Refuse rather than destroy it.
 				fmt.Printf("    [SKIP] Target already exists, not overwriting: %s%s\n", targetName, ext)
@@ -817,8 +824,13 @@ func (p *Processor) Run() (Stats, []string, []string) {
 
 	dirOrder := []string{}
 	dirFiles := map[string][]string{}
-	filepath.WalkDir(p.root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(p.root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[WARN] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		dir := filepath.Dir(path)

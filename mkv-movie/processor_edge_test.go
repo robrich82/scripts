@@ -150,7 +150,7 @@ func TestProcessFile_BadFilename_Skipped(t *testing.T) {
 	// A filename whose title portion is empty after stripping year should be skipped.
 	// "(2019).mkv" → year="2019", title="" after truncation.
 	path := makeTempMKVNamed(t, "(2019).mkv")
-	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails("2019-04-26")}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped for empty-title filename", result)
@@ -160,7 +160,9 @@ func TestProcessFile_BadFilename_Skipped(t *testing.T) {
 func TestProcessFile_ApplierError_ReturnsUpdated_WithoutMarkingApplied(t *testing.T) {
 	path := makeTempMKVNamed(t, "Inception.2010.mkv")
 	past := time.Date(2005, 1, 1, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, past, past)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "27205", details: MovieDetails{
 		TMDBID:      "27205",
@@ -182,7 +184,9 @@ func TestProcessFile_ApplierError_ReturnsUpdated_WithoutMarkingApplied(t *testin
 func TestProcessFile_CachedTMDBID_SkipsSearch(t *testing.T) {
 	path := makeTempMKVNamed(t, "Interstellar.2014.mkv")
 	past := time.Date(2005, 1, 1, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, past, past)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
 
 	// Client will error on SearchAndFetch but succeed on GetMovieDetails.
 	searchCalled := false
@@ -215,7 +219,9 @@ func TestProcessFile_CachedTMDBID_SkipsSearch(t *testing.T) {
 func TestProcessFile_ForceFlag_ReappliesEvenWhenApplied(t *testing.T) {
 	path := makeTempMKVNamed(t, "Parasite.2019.mkv")
 	target := time.Date(2019, 5, 30, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, target, target)
+	if err := os.Chtimes(path, target, target); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "496243", details: MovieDetails{
 		TMDBID:      "496243",
@@ -241,7 +247,9 @@ func TestProcessFile_ForceFlag_ReappliesEvenWhenApplied(t *testing.T) {
 func TestProcessFile_CtimeNeedsUpdate_SetsCreationTime(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.2012.mkv")
 	target := time.Date(2012, 5, 4, 0, 0, 0, 0, time.Local)
-	os.Chtimes(path, target, target)
+	if err := os.Chtimes(path, target, target); err != nil {
+		t.Fatal(err)
+	}
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: "24428", details: MovieDetails{
 		TMDBID:      "24428",
@@ -277,7 +285,9 @@ func TestWalkAndProcess_MultipleFiles_CountsAll(t *testing.T) {
 		"2019.mkv", // year-only filename → skipped
 	}
 	for _, name := range names {
-		os.WriteFile(filepath.Join(dir, name), []byte{}, 0644)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte{}, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Client always returns not-found.

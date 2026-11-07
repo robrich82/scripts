@@ -82,14 +82,14 @@ func (f *fakeRatingSource) FetchEpisodeRating(_, _ string, _, _ int) (NZRating, 
 
 // helpers
 
-func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tmdb TMDBClient, mkv MKVRunner, prompter Prompter) (*Processor, *captureFileTimer) {
+func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tmdb TMDBClient, mkv MKVRunner, prompter Prompter) *Processor {
 	t.Helper()
 	if cfg.MediaDir == "" {
 		cfg.MediaDir = dir
 	}
 	timer := &captureFileTimer{}
 	rc, _ := LoadRatingCache(filepath.Join(t.TempDir(), "rating_cache.json"))
-	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t), rc, nil, nil, nil), timer
+	return NewProcessor(cfg, cache, map[string]ManualEntry{}, tmdb, mkv, prompter, timer, emptyRetryList(t), rc, nil, nil, nil)
 }
 
 func emptyRetryList(t *testing.T) *RetryList {
@@ -117,7 +117,7 @@ func cacheWith(t *testing.T, entries map[string]string) *ShowCache {
 
 func TestResolveShowID_AlreadyInCache_ProcessAll(t *testing.T) {
 	cache := cacheWith(t, map[string]string{"Show A": "111"})
-	p, _ := newTestProcessor(t, "", Config{ProcessAll: true}, cache,
+	p := newTestProcessor(t, "", Config{ProcessAll: true}, cache,
 		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{})
 
 	id := p.resolveShowID("Show A")
@@ -128,7 +128,7 @@ func TestResolveShowID_AlreadyInCache_ProcessAll(t *testing.T) {
 
 func TestResolveShowID_AlreadyInCache_PromptYes(t *testing.T) {
 	cache := cacheWith(t, map[string]string{"Show B": "222"})
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"y"}})
 
 	id := p.resolveShowID("Show B")
@@ -139,7 +139,7 @@ func TestResolveShowID_AlreadyInCache_PromptYes(t *testing.T) {
 
 func TestResolveShowID_AlreadyInCache_PromptNo(t *testing.T) {
 	cache := cacheWith(t, map[string]string{"Show C": "333"})
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"n"}})
 
 	id := p.resolveShowID("Show C")
@@ -154,7 +154,7 @@ func TestResolveShowID_AlreadyInCache_PromptNo(t *testing.T) {
 func TestResolveShowID_AlreadyInCache_TypoDefaultsToSkip(t *testing.T) {
 	// Anything other than "y" should skip, not process.
 	cache := cacheWith(t, map[string]string{"Show D": "444"})
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		&fakeTMDB{}, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"nn"}})
 
 	id := p.resolveShowID("Show D")
@@ -166,7 +166,7 @@ func TestResolveShowID_AlreadyInCache_TypoDefaultsToSkip(t *testing.T) {
 func TestResolveShowID_NewShow_AcceptFirstResult(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 456, Name: "New Show", FirstAirDate: "2021-01-01"}}}
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		tmdb, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"y"}})
 
 	id := p.resolveShowID("New Show")
@@ -181,7 +181,7 @@ func TestResolveShowID_NewShow_AcceptFirstResult(t *testing.T) {
 func TestResolveShowID_NewShow_ManualID(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 1, Name: "Wrong Show"}}}
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		tmdb, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"99999"}})
 
 	id := p.resolveShowID("My Show")
@@ -193,7 +193,7 @@ func TestResolveShowID_NewShow_ManualID(t *testing.T) {
 func TestResolveShowID_NewShow_SkipAnswer(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 1, Name: "A Show"}}}
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		tmdb, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"s"}})
 
 	id := p.resolveShowID("My Show")
@@ -205,7 +205,7 @@ func TestResolveShowID_NewShow_SkipAnswer(t *testing.T) {
 func TestResolveShowID_NewShow_NoResults_ManualID(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: nil}
-	p, _ := newTestProcessor(t, "", Config{}, cache,
+	p := newTestProcessor(t, "", Config{}, cache,
 		tmdb, &fakeMKVRunner{}, &scriptedPrompter{answers: []string{"77777"}})
 
 	id := p.resolveShowID("Obscure Show")
@@ -218,7 +218,7 @@ func TestResolveShowID_SessionSkipped_NoRePrompt(t *testing.T) {
 	cache := emptyCache(t)
 	tmdb := &fakeTMDB{searchResults: []ShowResult{{ID: 1}}}
 	prompter := &scriptedPrompter{answers: []string{"s"}} // only one answer queued
-	p, _ := newTestProcessor(t, "", Config{}, cache, tmdb, &fakeMKVRunner{}, prompter)
+	p := newTestProcessor(t, "", Config{}, cache, tmdb, &fakeMKVRunner{}, prompter)
 
 	p.resolveShowID("Skipped Show")       // consumes the one answer
 	id := p.resolveShowID("Skipped Show") // should not prompt again
@@ -271,7 +271,9 @@ func TestResolveEpisode_PantyStocking_SeasonOverride(t *testing.T) {
 func TestNormalizeFilename_TwoEpisodes_NoRename(t *testing.T) {
 	dir := t.TempDir()
 	name := "Show - S01E01E02.mkv"
-	os.WriteFile(filepath.Join(dir, name), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, name), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := &Processor{}
 	got, _ := p.normalizeFilename(dir, name)
@@ -283,7 +285,9 @@ func TestNormalizeFilename_TwoEpisodes_NoRename(t *testing.T) {
 func TestNormalizeFilename_ThreeEpisodes_Renamed(t *testing.T) {
 	dir := t.TempDir()
 	name := "Show - S01E01E02E03.mkv"
-	os.WriteFile(filepath.Join(dir, name), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, name), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := &Processor{}
 	got, _ := p.normalizeFilename(dir, name)
@@ -789,16 +793,22 @@ func TestApplyRatingOnlyMKV_AlreadyApplied_SkipsWrite(t *testing.T) {
 func TestProcessorRun_SkipsOldFiles(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Test Show")
-	os.MkdirAll(showDir, 0755)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	mkvPath := filepath.Join(showDir, "Test Show - S01E01.mkv")
-	os.WriteFile(mkvPath, []byte{}, 0644)
+	if err := os.WriteFile(mkvPath, []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 	oldTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	os.Chtimes(mkvPath, oldTime, oldTime)
+	if err := os.Chtimes(mkvPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Test Show": "12345"})
 	runner := &fakeMKVRunner{avail: true}
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		CutoffDate: time.Now(),
 		ProcessAll: true,
@@ -817,12 +827,16 @@ func TestProcessorRun_SkipsOldFiles(t *testing.T) {
 func TestProcessorRun_SkipsNonMKV(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Test Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "subtitle.srt"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "subtitle.srt"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Test Show": "12345"})
 	runner := &fakeMKVRunner{avail: true}
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		CutoffDate: time.Time{},
 		ProcessAll: true,
@@ -837,13 +851,17 @@ func TestProcessorRun_SkipsNonMKV(t *testing.T) {
 func TestProcessorRun_SkipsShowOnSKIP(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Skip Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "Skip Show - S01E01.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "Skip Show - S01E01.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := emptyCache(t)
 	runner := &fakeMKVRunner{avail: true}
 	// User skips the new show prompt
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		CutoffDate: time.Time{},
 	}, cache, &fakeTMDB{searchResults: []ShowResult{{ID: 1}}}, runner,
@@ -858,10 +876,14 @@ func TestProcessorRun_SkipsShowOnSKIP(t *testing.T) {
 func TestProcessorRun_SuccessPath(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Good Show")
-	os.MkdirAll(showDir, 0755)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	mkvPath := filepath.Join(showDir, "Good Show - S01E01.mkv")
-	os.WriteFile(mkvPath, []byte{}, 0644)
+	if err := os.WriteFile(mkvPath, []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Good Show": "999"})
 	tmdb := &fakeTMDB{
@@ -878,7 +900,7 @@ func TestProcessorRun_SuccessPath(t *testing.T) {
 		applyResult: mkvpropeditSuccessMsg,
 		tagsPath:    "t.xml",
 	}
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		CutoffDate: time.Time{},
 		ProcessAll: true,
@@ -909,8 +931,12 @@ func TestProcessorRun_SuccessPath(t *testing.T) {
 func TestProcessorRun_NoEpisodeDate_FallsBackToPreviousEpisode(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Fallback Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "Fallback Show - S01E02.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "Fallback Show - S01E02.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Fallback Show": "999"})
 	tmdb := &fakeTMDB{
@@ -939,8 +965,12 @@ func TestProcessorRun_NoEpisodeDate_FallsBackToPreviousEpisode(t *testing.T) {
 func TestProcessorRun_NoEpisodeDate_NoPrevious_FallsBackToSeasonDate(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Season Date Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "Season Date Show - S01E01.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "Season Date Show - S01E01.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Season Date Show": "999"})
 	tmdb := &fakeTMDB{
@@ -968,8 +998,12 @@ func TestProcessorRun_NoEpisodeDate_NoPrevious_FallsBackToSeasonDate(t *testing.
 func TestProcessorRun_NoEpisodeDate_NoSeasonDate_FallsBackToShowDate(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Show Date Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "Show Date Show - S01E01.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "Show Date Show - S01E01.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Show Date Show": "999"})
 	tmdb := &fakeTMDB{
@@ -999,9 +1033,13 @@ func TestProcessorRun_NoEpisodeDate_NoSeasonDate_FallsBackToShowDate(t *testing.
 func TestProcessorRun_FallbackDate_AddsToRetryList(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Retry Show")
-	os.MkdirAll(showDir, 0755)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	mkvPath := filepath.Join(showDir, "Retry Show - S01E01.mkv")
-	os.WriteFile(mkvPath, []byte{}, 0644)
+	if err := os.WriteFile(mkvPath, []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Retry Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1022,9 +1060,13 @@ func TestProcessorRun_FallbackDate_AddsToRetryList(t *testing.T) {
 func TestProcessorRun_RealDate_RemovesFromRetryList(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Real Date Show")
-	os.MkdirAll(showDir, 0755)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	mkvPath := filepath.Join(showDir, "Real Date Show - S01E01.mkv")
-	os.WriteFile(mkvPath, []byte{}, 0644)
+	if err := os.WriteFile(mkvPath, []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Real Date Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1047,13 +1089,19 @@ func TestProcessorRun_RealDate_RemovesFromRetryList(t *testing.T) {
 func TestProcessorRun_RetryList_BypassesCutoff(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Old Show")
-	os.MkdirAll(showDir, 0755)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	mkvPath := filepath.Join(showDir, "Old Show - S01E01.mkv")
-	os.WriteFile(mkvPath, []byte{}, 0644)
+	if err := os.WriteFile(mkvPath, []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Set the file's mod time to well before the cutoff.
 	oldTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	os.Chtimes(mkvPath, oldTime, oldTime)
+	if err := os.Chtimes(mkvPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"Old Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1078,8 +1126,12 @@ func TestProcessorRun_RetryList_BypassesCutoff(t *testing.T) {
 func TestProcessorRun_ManualExtra_Processed(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S02 - Drama CD.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S02 - Drama CD.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1118,8 +1170,12 @@ func TestProcessorRun_ManualExtra_Processed(t *testing.T) {
 func TestProcessorRun_ManualExtra_EpisodeRef_UsesEpisodeData(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S01 NCOP.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S01 NCOP.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1173,8 +1229,12 @@ func TestProcessorRun_ManualExtra_OpEdSuffix_FilenameTitle(t *testing.T) {
 	// Extra with manual date (no episode ref) but OP/ED suffix in filename.
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S02 ED.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S02 ED.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1216,8 +1276,12 @@ func TestProcessorRun_ManualExtra_EpisodePatternInName_TreatedAsExtra(t *testing
 	// NCOP suffix and the referenced episode's TMDB data.
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S01E03 - A Friend-NCOP.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S01E03 - A Friend-NCOP.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1268,8 +1332,12 @@ func TestProcessorRun_ManualExtra_EpisodeRef_NoSeason_DerivesSeasonFromEpisode(t
 	// the episode data can be fetched and the timestamp is set correctly.
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S02 - Promo.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S02 - Promo.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1312,8 +1380,12 @@ func TestProcessorRun_ManualExtra_EpisodeRef_DateOverridesEpisodeDate(t *testing
 	// When both date and episode are specified, date wins for the timestamp.
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S01 - Bonus.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S01 - Bonus.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1362,12 +1434,16 @@ func TestProcessorRun_ManualExtra_EpisodeRef_DateOverridesEpisodeDate(t *testing
 func TestProcessorRun_ManualExtra_NoEntry_Skipped(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S02 - Drama CD.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S02 - Drama CD.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	runner := &fakeMKVRunner{avail: true}
-	p, _ := newTestProcessor(t, dir, Config{
+	p := newTestProcessor(t, dir, Config{
 		MediaDir:   dir,
 		ProcessAll: true,
 	}, cache, &fakeTMDB{}, runner, &scriptedPrompter{})
@@ -1388,8 +1464,12 @@ func TestProcessorRun_ManualDate_NoTMDBDate_SetsTimestamp(t *testing.T) {
 	// as a real date (stampDate is set, so filesystem timestamps are written).
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S01E03.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S01E03.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	tmdb := &fakeTMDB{
@@ -1426,8 +1506,12 @@ func TestProcessorRun_ManualDate_NoTMDBDate_SetsTimestamp(t *testing.T) {
 func TestProcessorRun_ManualDate_OverridesTMDBDate(t *testing.T) {
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "My Show")
-	os.MkdirAll(showDir, 0755)
-	os.WriteFile(filepath.Join(showDir, "My Show - S01E01.mkv"), []byte{}, 0644)
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "My Show - S01E01.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cache := cacheWith(t, map[string]string{"My Show": "999"})
 	tmdb := &fakeTMDB{

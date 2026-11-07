@@ -37,9 +37,32 @@ func runClean(root string) {
 		return
 	}
 
+	removed := removeStalePatterns(&data, root)
+	if removed == 0 {
+		fmt.Println("File patterns are clean; nothing to remove.")
+		return
+	}
+
+	if err := writeIgnoreFile(ignoreFile, data); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving ignore patterns: %v\n", err)
+		os.Exit(1)
+	}
+
+	suffix := "ies"
+	if removed == 1 {
+		suffix = "y"
+	}
+	fmt.Printf("\nRemoved %d stale file-pattern entr%s.\n", removed, suffix)
+}
+
+// removeStalePatterns deletes the file-pattern entries in data whose video no
+// longer exists and returns how many it removed. An entry it can't confirm is
+// gone, because its drive is offline or part of root is unreadable, is kept.
+func removeStalePatterns(data *IgnoreData, root string) int {
 	// For legacy base-name keys, walk root to collect existing .mkv file names.
 	// Newer entries store absolute paths and are checked directly via os.Stat.
 	mkvFiles := make(map[string]bool)
+	scanned := true
 	hasLegacyKeys := false
 	for name := range data.FilePatterns {
 		if !filepath.IsAbs(name) {
@@ -48,8 +71,14 @@ func runClean(root string) {
 		}
 	}
 	if hasLegacyKeys {
-		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err == nil && !d.IsDir() && filepath.Ext(d.Name()) == ".mkv" {
+		// The callback never returns an error, so neither does WalkDir.
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				fmt.Printf("[WARN] Could not read %s, keeping legacy entries: %v\n", path, err)
+				scanned = false
+				return nil
+			}
+			if !d.IsDir() && filepath.Ext(d.Name()) == ".mkv" {
 				mkvFiles[d.Name()] = true
 			}
 			return nil
@@ -60,10 +89,9 @@ func runClean(root string) {
 	for name := range data.FilePatterns {
 		var stale bool
 		if filepath.IsAbs(name) {
-			_, err := os.Stat(name)
-			stale = os.IsNotExist(err)
+			stale = videoGone(name)
 		} else {
-			stale = !mkvFiles[name]
+			stale = scanned && !mkvFiles[name]
 		}
 		if stale {
 			fmt.Printf("Removing stale file-pattern entry: %s\n", name)
@@ -71,25 +99,15 @@ func runClean(root string) {
 			removed++
 		}
 	}
+	return removed
+}
 
-	if removed == 0 {
-		fmt.Println("File patterns are clean; nothing to remove.")
-		return
+// videoGone reports whether path is missing from a volume that is itself
+// reachable, so an offline drive or share doesn't make its videos look deleted.
+func videoGone(path string) bool {
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		return false
 	}
-
-	updated, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error marshalling ignore patterns: %v\n", err)
-		os.Exit(1)
-	}
-	if err := os.WriteFile(ignoreFile, updated, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving ignore patterns: %v\n", err)
-		os.Exit(1)
-	}
-
-	suffix := "ies"
-	if removed == 1 {
-		suffix = "y"
-	}
-	fmt.Printf("\nRemoved %d stale file-pattern entr%s.\n", removed, suffix)
+	_, err := os.Stat(filepath.VolumeName(path) + string(filepath.Separator))
+	return err == nil
 }

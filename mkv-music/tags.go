@@ -294,14 +294,14 @@ func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix stri
 		wantTrack = strconv.Itoa(want.TrackNum)
 	}
 
-	if !(lvl30["TITLE"] == want.Title &&
-		lvl30["ARTIST"] == want.Artist &&
-		lvl30["PART_NUMBER"] == wantTrack &&
-		lvl50["TITLE"] == want.Album &&
-		lvl50["ARTIST"] == want.AlbumArtist &&
-		lvl50["DATE_RECORDED"] == want.Date &&
-		lvl50["GENRE"] == want.Genre &&
-		lvl50["COMMENT"] == want.Comment) {
+	if lvl30["TITLE"] != want.Title ||
+		lvl30["ARTIST"] != want.Artist ||
+		lvl30["PART_NUMBER"] != wantTrack ||
+		lvl50["TITLE"] != want.Album ||
+		lvl50["ARTIST"] != want.AlbumArtist ||
+		lvl50["DATE_RECORDED"] != want.Date ||
+		lvl50["GENRE"] != want.Genre ||
+		lvl50["COMMENT"] != want.Comment {
 		return false, nil
 	}
 

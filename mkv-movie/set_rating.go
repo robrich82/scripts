@@ -24,8 +24,13 @@ type setRatingPlan struct {
 // never been processed, so there is no key to store a rating under.
 func planSetRating(dir string, cache *MovieRatingCache) (plans []setRatingPlan, unknown []string) {
 	byID := make(map[string]bool)
-	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[!] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		basename := d.Name()

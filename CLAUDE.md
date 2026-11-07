@@ -15,13 +15,13 @@ When adding a new tool, changing a tool's commands/flags/config, or adding new f
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
 
 - `make all` / `make <tool>` — build to `dist/<tool>.exe`. The make target always equals the module directory name.
-- `make vet` — `go vet`, `gofmt -l`, `go mod tidy -diff`, `staticcheck`, `unparam` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters are pinned in `mise.toml`; `mise install` provides them.
+- `make vet` — `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters and formatter are configured in `.golangci.yml` and pinned in `mise.toml`; `mise install` provides them. Suppress a finding with `//nolint:<linter> // reason`, not staticcheck's `//lint:ignore`.
 - `make vet-linux` — `GOOS=linux go vet ./...` per module, to type-check the non-Windows stubs.
 - `make test` — `go test ./...` per module.
 - `make vuln` — `govulncheck` per module (needs network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per module that has a `go.mod` (only those with changed files, except on the weekly run or a `ci.yml` or `mise.toml` change), and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
+CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per module that has a `go.mod` (only those with changed files, except on the weekly run or a `ci.yml`, `mise.toml` or `.golangci.yml` change), and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
 
 Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`, in sessions started at the repo root.
 - The block is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +21,7 @@ func TestPlexClient_SendsTokenInHeader(t *testing.T) {
 			t.Errorf("%s %s: X-Plex-Token header = %q", r.Method, r.URL.Path, got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"MediaContainer":{}}`))
+		fmt.Fprint(w, `{"MediaContainer":{}}`)
 	}))
 	defer srv.Close()
 
@@ -62,7 +63,7 @@ func TestPlexClient_RedirectToOtherHostDropsToken(t *testing.T) {
 		if got := r.Header.Get("X-Plex-Token"); got != "" {
 			t.Errorf("other host got X-Plex-Token %q", got)
 		}
-		w.Write([]byte(`{"MediaContainer":{}}`))
+		fmt.Fprint(w, `{"MediaContainer":{}}`)
 	}))
 	t.Cleanup(other.Close)
 	sameHostTokens := []string{}

@@ -25,8 +25,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Every module on a schedule, a ci.yml or mise.toml change, or an unknown
-      # base (new branch, force push); otherwise only modules with changed files.
+      # Every module on a schedule, a ci.yml, mise.toml or .golangci.yml change, or
+      # an unknown base (new branch, force push); otherwise only modules with
+      # changed files.
       - id: pick
         env:
           EVENT: ${{ github.event_name }}
@@ -38,7 +39,7 @@ jobs:
             picked=$all
           else
             files=$(git diff --name-only "$BASE...$HEAD")
-            if grep -qxE '\.github/workflows/ci\.yml|mise\.toml' <<<"$files"; then
+            if grep -qxE '\.github/workflows/ci\.yml|mise\.toml|\.golangci\.yml' <<<"$files"; then
               picked=$all
             else
               picked=$(for m in $all; do grep -q "^$m/" <<<"$files" && echo "$m"; done || true)
@@ -74,25 +75,15 @@ jobs:
 
       # Linters at the versions mise.toml pins. Go stays with setup-go (go.mod's
       # version, build cache); without MISE_DISABLE_TOOLS mise refuses to build
-      # the linters until its own Go is installed.
+      # govulncheck until its own Go is installed.
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         env:
           MISE_DISABLE_TOOLS: go
         with:
           version: 2026.11.3
           install_args: >-
-            go:honnef.co/go/tools/cmd/staticcheck
-            go:mvdan.cc/unparam
+            golangci-lint
             go:golang.org/x/vuln/cmd/govulncheck
-
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt needed on the files below"
-            echo "$unformatted"
-            exit 1
-          fi
 
       - name: go mod tidy
         run: go mod tidy -diff
@@ -103,11 +94,12 @@ jobs:
       - name: go vet (non-Windows stubs)
         run: GOOS=linux go vet ./...
 
-      - name: staticcheck
-        run: staticcheck ./...
+      - name: golangci-lint
+        run: golangci-lint run ./...
 
-      - name: unparam
-        run: unparam ./...
+      # run only sees files in the Windows build; this also covers the stubs.
+      - name: golangci-lint fmt
+        run: golangci-lint fmt --diff ./...
 
       - name: go test
         run: go test ./...

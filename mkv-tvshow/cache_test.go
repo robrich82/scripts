@@ -19,7 +19,9 @@ func TestLoadCache_FileNotExist(t *testing.T) {
 func TestLoadCache_ValidStringJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
-	os.WriteFile(path, []byte(`{"ShowA": "12345"}`), 0644)
+	if err := os.WriteFile(path, []byte(`{"ShowA": "12345"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := LoadCache(path)
 	if err != nil {
@@ -35,7 +37,9 @@ func TestLoadCache_NumericJSON(t *testing.T) {
 	// Python-generated cache files store IDs as JSON numbers.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
-	os.WriteFile(path, []byte(`{"ShowB": 67890}`), 0644)
+	if err := os.WriteFile(path, []byte(`{"ShowB": 67890}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := LoadCache(path)
 	if err != nil {
@@ -50,7 +54,9 @@ func TestLoadCache_NumericJSON(t *testing.T) {
 func TestLoadCache_MalformedJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
-	os.WriteFile(path, []byte(`not json`), 0644)
+	if err := os.WriteFile(path, []byte(`not json`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := LoadCache(path)
 	if err == nil {

@@ -261,7 +261,9 @@ func TestGithubChecker(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(releases)
+		if err := json.NewEncoder(w).Encode(releases); err != nil {
+			t.Error(err)
+		}
 	}))
 	defer srv.Close()
 
@@ -288,7 +290,9 @@ func TestGithubChecker(t *testing.T) {
 			{TagName: "v2.0.0", Draft: false, Assets: []ghAsset{{Name: "app.exe"}}},
 		}
 		srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(drafts)
+			if err := json.NewEncoder(w).Encode(drafts); err != nil {
+				t.Error(err)
+			}
 		}))
 		defer srv2.Close()
 		r, err := (&githubChecker{client: clientFor(srv2)}).check(app)
@@ -306,7 +310,9 @@ func TestGithubChecker(t *testing.T) {
 			{TagName: "v2.0.0", Assets: []ghAsset{{Name: "app.exe"}}},
 		}
 		srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(pres)
+			if err := json.NewEncoder(w).Encode(pres); err != nil {
+				t.Error(err)
+			}
 		}))
 		defer srv2.Close()
 		r, err := (&githubChecker{client: clientFor(srv2)}).check(app)
@@ -324,7 +330,9 @@ func TestGithubChecker(t *testing.T) {
 			{TagName: "v2.0.0", Assets: []ghAsset{{Name: "app-windows.exe"}}},
 		}
 		srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(rels)
+			if err := json.NewEncoder(w).Encode(rels); err != nil {
+				t.Error(err)
+			}
 		}))
 		defer srv2.Close()
 		appWithAsset := App{
@@ -354,7 +362,9 @@ func TestGithubChecker(t *testing.T) {
 			}},
 		}
 		srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(rels)
+			if err := json.NewEncoder(w).Encode(rels); err != nil {
+				t.Error(err)
+			}
 		}))
 		defer srv2.Close()
 		appAsset := App{
@@ -378,7 +388,9 @@ func TestGithubChecker(t *testing.T) {
 
 	t.Run("no releases returns error", func(t *testing.T) {
 		srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode([]ghRelease{})
+			if err := json.NewEncoder(w).Encode([]ghRelease{}); err != nil {
+				t.Error(err)
+			}
 		}))
 		defer srv2.Close()
 		_, err := (&githubChecker{client: clientFor(srv2)}).check(app)

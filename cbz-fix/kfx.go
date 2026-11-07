@@ -126,7 +126,7 @@ func kfxPageOrder(zr *zip.Reader) []*zip.File {
 		// directory) so the duplicate page doesn't reappear as p001.
 		ordered = filterFiles(ordered, func(o *zip.File) bool {
 			return o.Name != f.Name &&
-				!(o.CRC32 == f.CRC32 && o.UncompressedSize64 == f.UncompressedSize64)
+				(o.CRC32 != f.CRC32 || o.UncompressedSize64 != f.UncompressedSize64)
 		})
 		ordered = append([]*zip.File{f}, ordered...)
 		break

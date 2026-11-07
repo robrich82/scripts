@@ -112,8 +112,13 @@ func (p *Processor) Run() Stats {
 	showFiles := map[string][]string{}
 	var showOrder []string
 
-	filepath.WalkDir(p.cfg.MediaDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(p.cfg.MediaDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[!] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {
@@ -911,8 +916,13 @@ func (p *Processor) RunDebandOnly() Stats {
 	showFiles := map[string][]string{}
 	var showOrder []string
 
-	filepath.WalkDir(p.cfg.MediaDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	// The callback never returns an error, so neither does WalkDir.
+	_ = filepath.WalkDir(p.cfg.MediaDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			fmt.Printf("[!] Skipping unreadable %s: %v\n", path, err)
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mkv") {

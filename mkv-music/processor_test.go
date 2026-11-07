@@ -167,7 +167,9 @@ func TestProcessVideo_AlreadyCorrect_NoAction(t *testing.T) {
 
 func TestProcessVideo_RenameChosen_RenamesFile(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
 	audioData := map[string]string{"Artist - Song": "Artist - Song - Song"}
@@ -223,7 +225,9 @@ func TestProcessVideo_IgnoreChosen_SavesPattern(t *testing.T) {
 func TestProcessVideo_PostSuffix_PromptsAndIgnores(t *testing.T) {
 	dir := t.TempDir()
 	mkvFile := "08 - Rise & Shine - Rise & Shine-video (Second Version).mkv"
-	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	var savedPattern string
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", ""}})
@@ -243,7 +247,9 @@ func TestProcessVideo_PostSuffix_PromptsAndIgnores(t *testing.T) {
 func TestProcessVideo_PostSuffix_AlreadyIgnored_NoPrompt(t *testing.T) {
 	dir := t.TempDir()
 	mkvFile := "08 - Rise & Shine - Rise & Shine-video (Second Version).mkv"
-	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := NewProcessor(dir, "", &fakePrompter{})
 	p.ignoreData.FilePatterns = map[string][]string{filepath.Join(dir, mkvFile): {" (Second Version)"}}
@@ -270,8 +276,12 @@ func TestProcessVideo_DefaultSuffix_WhenNoKnownSuffix(t *testing.T) {
 
 func TestRun_AlreadyCorrect_NoStats(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "Artist - Song - Song-video.mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song - Song-video.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := NewProcessor(dir, "", &fakePrompter{})
 	stats, skipped, _ := p.Run()
@@ -282,8 +292,12 @@ func TestRun_AlreadyCorrect_NoStats(t *testing.T) {
 
 func TestRun_SkipsNonVideoFiles(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "readme.txt"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := NewProcessor(dir, "", &fakePrompter{})
 	stats, _, _ := p.Run()
@@ -294,9 +308,13 @@ func TestRun_SkipsNonVideoFiles(t *testing.T) {
 
 func TestRun_CountsUnmatched(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 	// "Nemure.mkv" has no Latin/Japanese character overlap with audio files.
-	os.WriteFile(filepath.Join(dir, "Nemure.mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Nemure.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := NewProcessor(dir, "", &fakePrompter{})
 	stats, _, unmatched := p.Run()
@@ -310,9 +328,13 @@ func TestRun_CountsUnmatched(t *testing.T) {
 
 func TestRun_CountsSkipped(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 	// Video name doesn't match the target name.
-	os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"s"}})
 	stats, skipped, _ := p.Run()
@@ -328,9 +350,15 @@ func TestRun_SuffixedVideoPromptedBeforeUnsuffixed(t *testing.T) {
 	// Both videos target "01 - foo - foo-video". The "-video" file sorts after
 	// the " (Special Music Video)" one but must get the first rename prompt.
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "01 - bob - bob-video.mkv"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "01 - bob - bob-video.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "s"}})
 	p.Run()
@@ -345,9 +373,15 @@ func TestRun_TakenNameKeepsExtraText(t *testing.T) {
 	// Once the "-video" file has the standard name, the special video is
 	// offered the new title with its "(Special Music Video)" kept, plus "-video".
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "01 - bob - bob-video.mkv"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "01 - bob - bob-video.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	tagger := &fakeTagger{}
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "r"}})
@@ -375,7 +409,9 @@ func TestRun_PlainSuffixedVideoPromptedBeforeVersioned(t *testing.T) {
 	// "-video (Second Version)" sorts before "-video" but must not take its name.
 	dir := t.TempDir()
 	for _, n := range []string{"01 - New.flac", "01 - Old - Old-video.mkv", "01 - Old - Old-video (Second Version).mkv"} {
-		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+		if err := os.WriteFile(filepath.Join(dir, n), []byte{}, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	NewProcessor(dir, "", &fakePrompter{answers: []string{"r", "r"}}).Run()
 	assertFiles(t, dir, "01 - New - New-video.mkv", "01 - New - New-video (Second Version).mkv")
@@ -521,7 +557,9 @@ func TestRun_TakenNameOtherExtension(t *testing.T) {
 	// An .mp4 holding the standard name counts as taken for an .mkv.
 	dir := t.TempDir()
 	for _, n := range []string{"01 - foo.flac", "01 - foo - foo-video.mp4", "01 - bob - bob (Special Music Video).mkv"} {
-		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+		if err := os.WriteFile(filepath.Join(dir, n), []byte{}, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
 	if _, err := os.Stat(filepath.Join(dir, "01 - foo - foo (Special Music Video)-video.mkv")); err != nil {
@@ -533,7 +571,9 @@ func TestRun_TakenNameExtraAlreadyInTitle(t *testing.T) {
 	// The new title already ends in "(Live)": don't offer "… (Live) (Live)".
 	dir := t.TempDir()
 	for _, n := range []string{"01 - foo (Live).flac", "01 - foo (Live) - foo (Live)-video.mkv", "01 - foo - foo (live).mkv"} {
-		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+		if err := os.WriteFile(filepath.Join(dir, n), []byte{}, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run(); stats.Skipped != 1 {
 		t.Errorf("stats = %+v, want Skipped=1 (standard name taken)", stats)
@@ -544,7 +584,9 @@ func TestRun_TakenNameIgnoredTextSettles(t *testing.T) {
 	// Ignoring " [HD]" lets the alternative name match, and it stays matched.
 	dir := t.TempDir()
 	for _, n := range []string{"01 - New.flac", "01 - New - New-video.mkv", "01 - New [HD] - New [HD] (Live)-video.mkv"} {
-		os.WriteFile(filepath.Join(dir, n), []byte{}, 0644)
+		if err := os.WriteFile(filepath.Join(dir, n), []byte{}, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	tagger := &fakeTagger{}
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", " [HD]"}})
@@ -747,9 +789,14 @@ func TestRun_RenameKeepsFilePatternText(t *testing.T) {
 			if got := tagOf(tagger); got != tc.tag {
 				t.Errorf("rename run tag = %q, want %q", got, tc.tag)
 			}
-			b, _ := os.ReadFile(ignoreFile)
+			b, err := os.ReadFile(ignoreFile)
+			if err != nil {
+				t.Fatal(err)
+			}
 			var saved IgnoreData
-			json.Unmarshal(b, &saved)
+			if err := json.Unmarshal(b, &saved); err != nil {
+				t.Fatal(err)
+			}
 			if _, ok := saved.FilePatterns[oldPath]; ok || !slices.Equal(saved.FilePatterns[newPath], tc.patterns) {
 				t.Errorf("saved file patterns = %q, want only %q under the new path", saved.FilePatterns, tc.patterns)
 			}
@@ -917,8 +964,12 @@ func TestIsTrackNumber(t *testing.T) {
 func TestRun_FreeNameStillGetsStandardName(t *testing.T) {
 	// With no "-video" file, the special video is offered the standard name.
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "01 - foo.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "01 - bob - bob (Special Music Video).mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
 	if _, err := os.Stat(filepath.Join(dir, "01 - foo - foo-video.mkv")); err != nil {
@@ -955,8 +1006,12 @@ func TestRun_CaseOnlyRename(t *testing.T) {
 		t.Skip("filesystem is case-sensitive")
 	}
 	os.Remove(filepath.Join(dir, "probe"))
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "artist - song - song-video.mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "artist - song - song-video.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
 	if stats.Renamed != 1 {
@@ -975,9 +1030,15 @@ func TestRun_CaseOnlyRename(t *testing.T) {
 func TestRun_DifferentFileWithSameNameStillProtected(t *testing.T) {
 	// Two videos competing for one name: the second must not clobber the first.
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "Artist - Song - Song-video.mkv"), []byte("keep"), 0644)
-	os.WriteFile(filepath.Join(dir, "Artist - Sonng - Sonng-video.mkv"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song - Song-video.mkv"), []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Sonng - Sonng-video.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	stats, _, _ := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}}).Run()
 	if stats.Skipped != 1 {
@@ -993,8 +1054,12 @@ func TestRun_SymlinkToTargetNotRenamedOverIt(t *testing.T) {
 	// the same file, but renaming the link over it would destroy the data.
 	dir := t.TempDir()
 	target := filepath.Join(dir, "Artist - Song - Song-video.mkv")
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
-	os.WriteFile(target, []byte("keep"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(target, filepath.Join(dir, "Artist - Sonng - Sonng-video.mkv")); err != nil {
 		t.Skipf("cannot create symlink: %v", err)
 	}
@@ -1019,9 +1084,15 @@ const kelvinVideo = "Artist - Kick - Kick-video.mkv"
 func TestRun_FoldEqualDifferentFileProtected(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "Artist - Kick - Kick-video.mkv")
-	os.WriteFile(filepath.Join(dir, "Artist - Kick.flac"), []byte{}, 0644)
-	os.WriteFile(target, []byte("keep"), 0644)
-	os.WriteFile(filepath.Join(dir, kelvinVideo), []byte("video"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Kick.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, kelvinVideo), []byte("video"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if b, _ := os.ReadFile(target); string(b) != "keep" {
 		t.Skip("filesystem treats the two names as one")
 	}
@@ -1038,8 +1109,12 @@ func TestRun_FoldEqualDifferentFileProtected(t *testing.T) {
 func TestRun_FoldEqualSymlinkNotRenamedOverTarget(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "Artist - Kick - Kick-video.mkv")
-	os.WriteFile(filepath.Join(dir, "Artist - Kick.flac"), []byte{}, 0644)
-	os.WriteFile(target, []byte("keep"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Kick.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(target, filepath.Join(dir, kelvinVideo)); err != nil {
 		t.Skipf("cannot create symlink: %v", err)
 	}
@@ -1097,7 +1172,9 @@ func TestLoadIgnorePatterns_FilePatterns(t *testing.T) {
 	})
 
 	p := NewProcessor(dir, ignoreFile, &fakePrompter{})
-	p.LoadIgnorePatterns()
+	if err := p.LoadIgnorePatterns(); err != nil {
+		t.Fatal(err)
+	}
 	if len(p.ignoreData.Global) != 1 || p.ignoreData.Global[0] != "1080p" {
 		t.Errorf("global=%v", p.ignoreData.Global)
 	}
@@ -1119,8 +1196,12 @@ func TestLoadIgnorePatterns_EmptyIgnoreFile_NoOp(t *testing.T) {
 func TestProcessVideo_AlreadyCorrect_CopiesTags(t *testing.T) {
 	dir := t.TempDir()
 	mkvFile := "Artist - Song - Song-video.mkv"
-	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	ft := &fakeTagger{}
 	p := NewProcessor(dir, "", &fakePrompter{})
@@ -1146,8 +1227,12 @@ func TestProcessVideo_AlreadyCorrect_CopiesTags(t *testing.T) {
 
 func TestProcessVideo_Renamed_CopiesTagsToNewPath(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song-video.mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	ft := &fakeTagger{}
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
@@ -1232,8 +1317,12 @@ func TestFindIgnoredPatterns_FileSpecific(t *testing.T) {
 func TestProcessVideo_AlreadyCorrect_TagsUpToDate_SkipsCopy(t *testing.T) {
 	dir := t.TempDir()
 	mkvFile := "Artist - Song - Song-video.mkv"
-	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	ft := &fakeTagger{tagsMatch: true}
 	p := NewProcessor(dir, "", &fakePrompter{})
@@ -1254,8 +1343,12 @@ func TestProcessVideo_Ignore_MatchesAfterPattern_CopiesTags(t *testing.T) {
 	// Video name = matchedBase ("Artist - Song - Song") + " OFFICIAL" + "-video"
 	// After ignoring " OFFICIAL", reChecked == matchedBase → tags should be copied.
 	mkvFile := "Artist - Song - Song OFFICIAL-video.mkv"
-	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Artist - Song.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	ft := &fakeTagger{}
 	p := NewProcessor(dir, "", &fakePrompter{answers: []string{"i", " OFFICIAL"}})
@@ -1279,8 +1372,12 @@ func TestProcessVideo_IgnorePatternInFilename_PassesTitleSuffix(t *testing.T) {
 	dir := t.TempDir()
 	// Video already matches after stripping " (Alternate Version)".
 	mkvFile := "09 - On My Way - On My Way (Alternate Version).mkv"
-	os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644)
-	os.WriteFile(filepath.Join(dir, "09 - On My Way.flac"), []byte{}, 0644)
+	if err := os.WriteFile(filepath.Join(dir, mkvFile), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "09 - On My Way.flac"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	ft := &fakeTagger{}
 	p := NewProcessor(dir, "", &fakePrompter{})
@@ -1355,5 +1452,82 @@ func TestFindMatch_ArtistPrefixKeepsCutoff(t *testing.T) {
 	audio := buildAudioData([]string{"Artist - Zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.flac"})
 	if m, ok := findMatch("Artist - Qqqqqqqqqqqqqqqqqqqqqqqqqqqqqq - Qqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", audio); ok {
 		t.Errorf("got %q, want no match", m)
+	}
+}
+
+func TestDefaultPatternAppender_AddsToExistingFile(t *testing.T) {
+	ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
+	writeIgnoreJSON(t, ignoreFile, IgnoreData{FilePatterns: map[string][]string{"a.mkv": {"x"}}})
+
+	if err := defaultPatternAppender(ignoreFile, "b.mkv", "y"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got IgnoreData
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.FilePatterns["a.mkv"], []string{"x"}) || !slices.Equal(got.FilePatterns["b.mkv"], []string{"y"}) {
+		t.Errorf("FilePatterns = %v, want a.mkv:[x] b.mkv:[y]", got.FilePatterns)
+	}
+}
+
+func TestDefaultPatternAppender_CreatesMissingFile(t *testing.T) {
+	ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
+
+	if err := defaultPatternAppender(ignoreFile, "a.mkv", "x"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got IgnoreData
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.FilePatterns["a.mkv"], []string{"x"}) {
+		t.Errorf("FilePatterns = %v, want a.mkv:[x]", got.FilePatterns)
+	}
+}
+
+func TestDefaultPatternAppender_CorruptFileLeftAlone(t *testing.T) {
+	ignoreFile := filepath.Join(t.TempDir(), "ignore.json")
+	corrupt := []byte(`{"file_patterns": {"a.mkv": ["x"]`)
+	if err := os.WriteFile(ignoreFile, corrupt, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := defaultPatternAppender(ignoreFile, "b.mkv", "y"); err == nil {
+		t.Error("err = nil, want a parse error")
+	}
+	if got, _ := os.ReadFile(ignoreFile); string(got) != string(corrupt) {
+		t.Errorf("ignore file rewritten to %s", got)
+	}
+}
+
+func TestRun_UnreadableRootWarns(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	p := NewProcessor(root, filepath.Join(t.TempDir(), "ignore.json"), &fakePrompter{})
+
+	out := captureStdout(t, func() { p.Run() })
+	if want := "[WARN] Skipping unreadable " + root; !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
+}
+
+func TestSetAudioTimestamps_UnreadableRootWarns(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+
+	var stats AudioTimestampStats
+	out := captureStdout(t, func() { stats = SetAudioTimestamps(root, time.Time{}, nil, "") })
+	if stats != (AudioTimestampStats{}) {
+		t.Errorf("stats = %+v, want zero", stats)
+	}
+	if want := "[AUDIO] Skipping unreadable " + root; !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
 	}
 }

@@ -1,0 +1,22 @@
+version: "2"
+
+run:
+  # Queue behind a concurrent run (another worktree) instead of failing.
+  allow-serial-runners: true
+
+linters:
+  default: standard
+  enable:
+    - unparam
+  exclusions:
+    # Unchecked Close, os.Remove, fmt.Print and the like.
+    presets:
+      - std-error-handling
+
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      # Plain gofmt, so the gofmt -w edit hook clears every finding.
+      simplify: false
