@@ -11,7 +11,7 @@ import (
 
 func main() {
 	libraryFlag := flag.String("library", "", "library name to use (overrides auto-detection)")
-	verboseFlag := flag.Bool("verbose", false, "print planned mkvpropedit edits before applying")
+	verboseFlag := flag.Bool("verbose", false, "print planned mkvpropedit edits and MKV conversions before applying")
 	cutoffDateStr := flag.String("cutoff-date", "", "only process files modified on or after this date (YYYY-MM-DD); defaults to today")
 	allFlag := flag.Bool("all", false, "process all files regardless of modification date")
 	cleanFlag := flag.Bool("clean", false, "remove stale directory-override entries from config for paths that no longer exist, then exit")
@@ -107,15 +107,18 @@ func main() {
 	fmt.Println("--- Running Library Architect ---")
 
 	var ed MKVEditor = runner
+	var conv MKVConverter = runner
 	if *verboseFlag {
 		ed = &loggingEditor{inner: runner}
+		conv = &loggingConverter{inner: runner}
 	}
-	stats := RunAll(dir, stateDir, lib, runner, ed, newStdinPrompter(), tmdb, runner, cutoffDate)
+	stats := RunAll(dir, stateDir, lib, runner, ed, newStdinPrompter(), tmdb, runner, conv, cutoffDate)
 
 	fmt.Println()
 	fmt.Println("========================================")
 	fmt.Printf("%-24s%s\n", "FINAL SUMMARY", "")
 	fmt.Println("========================================")
+	fmt.Printf("Total Converted to MKV: %d\n", stats.Converted)
 	fmt.Printf("Total Scanned:          %d\n", stats.Scanned)
 	fmt.Printf("Total Skipped (old):    %d\n", stats.SkippedOld)
 	fmt.Printf("Total Fixed:            %d\n", stats.Fixed)

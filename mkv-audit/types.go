@@ -64,6 +64,7 @@ type Stats struct {
 	Fixed        int
 	Failed       int
 	Trimmed      int
+	Converted    int
 	SkippedOld   int
 	LangFixes    int
 	IETFFixes    int
