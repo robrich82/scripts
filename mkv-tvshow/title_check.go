@@ -286,7 +286,11 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 		return
 	}
 
-	origStat, statErr := os.Stat(path)
+	origStat, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("  [!] Cannot read timestamps to restore, not setting title: %v\n", err)
+		return
+	}
 
 	combined, rc, err := tc.mkv.Apply(path, []string{"--edit", "info", "--set", "title=" + fullTitle})
 	if err != nil {
@@ -299,13 +303,11 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 	}
 
 	// Restore timestamps so normal mode's cutoff filter sees the original mtime.
-	if statErr == nil {
-		if err := tc.timer.SetTimes(path, origStat.ModTime()); err != nil {
-			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-		}
-		if err := tc.timer.SetCreationTime(path, origStat.ModTime()); err != nil {
-			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-		}
+	if err := tc.timer.SetTimes(path, origStat.ModTime()); err != nil {
+		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+	}
+	if err := tc.timer.SetCreationTime(path, origStat.ModTime()); err != nil {
+		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
 	}
 
 	tc.titleCache.Set(path, fullTitle)
