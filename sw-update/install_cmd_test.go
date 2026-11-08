@@ -104,7 +104,7 @@ func serveAssets(bMissing bool) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		w.Write([]byte("PK payload"))
+		_, _ = w.Write([]byte("PK payload"))
 	}
 }
 
@@ -202,7 +202,7 @@ func TestInstallReportsStateSaveError(t *testing.T) {
 	}
 	newInstallEnv(t, "none", serveAssets(false))
 	path := writeStateFile(t, "{}", 0444)
-	t.Cleanup(func() { os.Chmod(path, 0644) })
+	t.Cleanup(func() { _ = os.Chmod(path, 0644) })
 
 	out, err := runInstall(t, proceedNoRun+"\n")
 	if err == nil || !strings.Contains(err.Error(), "save state") {
