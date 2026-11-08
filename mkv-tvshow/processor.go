@@ -138,11 +138,7 @@ func (p *Processor) Run() Stats {
 
 		// In --ratings-only mode collect every MKV regardless of modification date.
 		if !p.cfg.RatingsOnly {
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-			if info.ModTime().Before(p.cfg.CutoffDate) && !p.retryList.Has(path) {
+			if olderThan(d, p.cfg.CutoffDate) && !p.retryList.Has(path) {
 				stats.SkippedOld++
 				return nil
 			}
@@ -432,6 +428,13 @@ func (p *Processor) Run() Stats {
 	}
 
 	return stats
+}
+
+// olderThan reports whether d was last modified before cutoff. A file whose
+// info can't be read counts as new, so it is processed rather than dropped.
+func olderThan(d fs.DirEntry, cutoff time.Time) bool {
+	info, err := d.Info()
+	return err == nil && info.ModTime().Before(cutoff)
 }
 
 // resolveShowID returns the TMDB show ID for showFolder, prompting the user if

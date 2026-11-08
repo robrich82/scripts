@@ -2,10 +2,12 @@ package main
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // captureStdout returns what fn prints to os.Stdout.
@@ -54,5 +56,39 @@ func TestWalks_UnreadableRootWarns(t *testing.T) {
 				t.Errorf("output missing %q:\n%s", want, out)
 			}
 		})
+	}
+}
+
+// statFailingEntry is a DirEntry whose Info fails, as when a file vanishes
+// between the directory read and the stat.
+type statFailingEntry struct{ fs.DirEntry }
+
+func (statFailingEntry) Info() (fs.FileInfo, error) { return nil, fs.ErrNotExist }
+
+func TestOlderThan(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"old.mkv", "new.mkv"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cutoff := time.Now().Add(-time.Hour)
+	old := cutoff.Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "old.mkv"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, d := range entries {
+		want := d.Name() == "old.mkv"
+		if got := olderThan(d, cutoff); got != want {
+			t.Errorf("olderThan(%s) = %v, want %v", d.Name(), got, want)
+		}
+		if olderThan(statFailingEntry{d}, cutoff) {
+			t.Errorf("olderThan(%s) with failing Info = true, want false so the file is processed", d.Name())
+		}
 	}
 }
