@@ -66,7 +66,8 @@ func (c *ShowCache) AllEntries() map[string]string {
 	return out
 }
 
-// CleanStaleFolders removes entries whose folder no longer exists on disk.
+// CleanStaleFolders removes entries whose folder no longer exists on disk
+// (see pathGone: a folder on an offline drive is kept).
 // New entries store absolute paths and are checked directly; legacy base-name
 // entries (relative to mediaDir) are resolved via filepath.Join as a fallback.
 // Returns the TMDB IDs that were removed so callers can purge dependent caches.
@@ -79,7 +80,7 @@ func (c *ShowCache) CleanStaleFolders(mediaDir string) []string {
 		} else {
 			checkPath = filepath.Join(mediaDir, folder)
 		}
-		if _, err := os.Stat(checkPath); os.IsNotExist(err) {
+		if pathGone(checkPath) {
 			removedIDs = append(removedIDs, id)
 			delete(c.data, folder)
 		}
