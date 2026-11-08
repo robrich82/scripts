@@ -79,7 +79,7 @@ func TestRunClean_OfflineDriveKeepsEntries(t *testing.T) {
 	ignore.AddShow("200")
 	mustSave(t, ignore.Save())
 
-	captureStdout(t, func() { runClean(media) })
+	captureStdout(t, func() { runClean() })
 
 	shows, _ = LoadCache(filepath.Join(cfg, "show_cache.json"))
 	for folder, want := range map[string]bool{offlineDir: true, goneDir: false, keptDir: true} {
@@ -120,5 +120,43 @@ func mustSave(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A legacy show_cache key holds only a folder name, with nothing recording its
+// library. --clean must keep it, and its show ID in the dependent caches, rather
+// than resolve it against the current directory.
+func TestRunClean_KeepsLegacyFolderNameKeys(t *testing.T) {
+	cfg := useTempConfigDir(t)
+	t.Chdir(t.TempDir()) // not the library root
+
+	shows, _ := LoadCache(filepath.Join(cfg, "show_cache.json"))
+	shows.Set("Legacy Show", "100")
+	shows.Set(filepath.Join(t.TempDir(), "Gone Show"), "200")
+	mustSave(t, shows.Save())
+
+	ratings, _ := LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
+	ratings.SetShowRating("100", RatingPG)
+	mustSave(t, ratings.Save())
+	ignore, _ := LoadMissingIgnoreList(filepath.Join(cfg, "missing_ignore.json"))
+	ignore.AddShow("100")
+	mustSave(t, ignore.Save())
+
+	captureStdout(t, func() { runClean() })
+
+	shows, _ = LoadCache(filepath.Join(cfg, "show_cache.json"))
+	if _, ok := shows.Get("Legacy Show"); !ok {
+		t.Error("legacy folder-name key was removed")
+	}
+	if n := len(shows.AllEntries()); n != 1 {
+		t.Errorf("show_cache has %d entries, want only the legacy key: %v", n, shows.AllEntries())
+	}
+	ratings, _ = LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
+	if _, ok := ratings.GetShowRating("100"); !ok {
+		t.Error("rating_cache lost the legacy show's rating")
+	}
+	ignore, _ = LoadMissingIgnoreList(filepath.Join(cfg, "missing_ignore.json"))
+	if !ignore.IsShowIgnored("100") {
+		t.Error("missing_ignore lost the legacy show")
 	}
 }
