@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -183,6 +184,73 @@ func TestRunAll_SavesFailedCache(t *testing.T) {
 	got := loadFailedCache(stateDir)
 	if want := filepath.Join(dir, "bad.mkv"); len(got) != 1 || got[0] != want {
 		t.Errorf("failed cache = %v, want [%s]", got, want)
+	}
+}
+
+func TestRunAll_UnreadableRootKeepsEarlierFailures(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "offline")
+	stateDir := t.TempDir()
+	old := []string{filepath.Join(root, "Show", "a.mkv")}
+	if err := saveFailedCache(stateDir, old); err != nil {
+		t.Fatal(err)
+	}
+
+	captureStdout(t, func() {
+		RunAll(root, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+	})
+
+	if got := loadFailedCache(stateDir); !slices.Equal(got, old) {
+		t.Errorf("failed cache = %v, want %v", got, old)
+	}
+}
+
+func TestRunAll_FullScanDropsFixedFailuresKeepsOthers(t *testing.T) {
+	dir, stateDir := t.TempDir(), t.TempDir()
+	makeMKVFile(t, dir, "fixed.mkv")
+	outside := filepath.Join(t.TempDir(), "other.mkv")
+	if err := saveFailedCache(stateDir, []string{filepath.Join(dir, "fixed.mkv"), outside}); err != nil {
+		t.Fatal(err)
+	}
+
+	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+
+	if got := loadFailedCache(stateDir); !slices.Equal(got, []string{outside}) {
+		t.Errorf("failed cache = %v, want [%s]", got, outside)
+	}
+}
+
+func TestRunAll_FullScanKeepsFailuresSkippedByCutoff(t *testing.T) {
+	dir, stateDir := t.TempDir(), t.TempDir()
+	makeMKVFile(t, dir, "old.mkv")
+	cutoff := time.Now().Add(-time.Hour)
+	old := cutoff.Add(-24 * time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "old.mkv"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(dir, "deleted.mkv")
+	if err := saveFailedCache(stateDir, []string{filepath.Join(dir, "old.mkv"), gone}); err != nil {
+		t.Fatal(err)
+	}
+
+	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, cutoff)
+
+	// old.mkv wasn't retried, so it stays; deleted.mkv is in a scanned folder and gone.
+	if got, want := loadFailedCache(stateDir), []string{filepath.Join(dir, "old.mkv")}; !slices.Equal(got, want) {
+		t.Errorf("failed cache = %v, want %v", got, want)
+	}
+}
+
+func TestRunAll_RetryOnlyReplacesFailedCache(t *testing.T) {
+	dir, stateDir := t.TempDir(), t.TempDir()
+	makeMKVFile(t, dir, "fixed.mkv")
+	if err := saveFailedCache(stateDir, []string{filepath.Join(dir, "fixed.mkv")}); err != nil {
+		t.Fatal(err)
+	}
+
+	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, nil, time.Time{})
+
+	if _, err := os.Stat(filepath.Join(stateDir, failedCacheFile)); !os.IsNotExist(err) {
+		t.Errorf("failed cache still present after every retried file passed (stat err %v)", err)
 	}
 }
 

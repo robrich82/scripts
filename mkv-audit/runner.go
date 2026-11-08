@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -110,6 +111,49 @@ func loadFailedCache(stateDir string) []string {
 // saveFailedCache writes the list of failed paths to stateDir.
 func saveFailedCache(stateDir string, paths []string) error {
 	return writeStateJSON(stateDir, failedCacheFile, paths)
+}
+
+// unscannedFailures returns the entries of oldFails that a full scan of root
+// didn't retry: not in scanned, and outside root, inside a folder in
+// unreadable, or still on disk (e.g. skipped as older than the cutoff).
+func unscannedFailures(oldFails, scanned []string, root string, unreadable []string) []string {
+	seen := make(map[string]bool, len(scanned))
+	for _, p := range scanned {
+		seen[pathKey(p)] = true
+	}
+	var out []string
+	for _, p := range oldFails {
+		if seen[pathKey(p)] {
+			continue
+		}
+		_, err := os.Stat(p)
+		if !within(p, root) || slices.ContainsFunc(unreadable, func(dir string) bool { return within(p, dir) }) || !os.IsNotExist(err) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// pathKey normalises p for comparison; Windows paths are case-insensitive.
+func pathKey(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(p)
+	}
+	return p
+}
+
+// within reports whether path is dir or inside it.
+func within(path, dir string) bool {
+	absPath, err1 := filepath.Abs(path)
+	absDir, err2 := filepath.Abs(dir)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absDir, absPath)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // writeStateJSON writes v as indented JSON to name in stateDir, creating the
@@ -352,11 +396,14 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 		}
 	}
 
-	if len(filesToScan) == 0 {
+	fullScan := len(filesToScan) == 0
+	var unreadable []string
+	if fullScan {
 		// The callback never returns an error, so neither does WalkDir.
 		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				fmt.Printf("[WARN]   skipping unreadable %s: %v\n", path, err)
+				unreadable = append(unreadable, path)
 				return nil
 			}
 			if d.IsDir() {
@@ -722,9 +769,14 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 		}
 	}
 
-	// Persist failure list and unknown codecs.
-	if len(stats.FailedPaths) > 0 {
-		if err := saveFailedCache(stateDir, stats.FailedPaths); err != nil {
+	// Persist failure list and unknown codecs. Earlier failures a full scan
+	// didn't retry stay listed.
+	failed := stats.FailedPaths
+	if fullScan {
+		failed = slices.Concat(failed, unscannedFailures(oldFails, filesToScan, root, unreadable))
+	}
+	if len(failed) > 0 {
+		if err := saveFailedCache(stateDir, failed); err != nil {
 			fmt.Printf("[WARN]   could not save %s: %v\n", filepath.Join(stateDir, failedCacheFile), err)
 		}
 	} else {
