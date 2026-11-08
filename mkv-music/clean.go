@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func runClean(root string) {
@@ -59,9 +60,10 @@ func runClean(root string) {
 // longer exists and returns how many it removed. An entry it can't confirm is
 // gone, because its drive is offline or part of root is unreadable, is kept.
 func removeStalePatterns(data *IgnoreData, root string) int {
-	// For legacy base-name keys, walk root to collect existing .mkv file names.
+	// For legacy base-name keys, walk root to collect existing video file names,
+	// lower-cased so a key still matches after a case-only rename.
 	// Newer entries store absolute paths and are checked directly via os.Stat.
-	mkvFiles := make(map[string]bool)
+	videoFiles := make(map[string]bool)
 	scanned := true
 	hasLegacyKeys := false
 	for name := range data.FilePatterns {
@@ -78,8 +80,8 @@ func removeStalePatterns(data *IgnoreData, root string) int {
 				scanned = false
 				return nil
 			}
-			if !d.IsDir() && filepath.Ext(d.Name()) == ".mkv" {
-				mkvFiles[d.Name()] = true
+			if !d.IsDir() && containsStr(videoExts, strings.ToLower(filepath.Ext(d.Name()))) {
+				videoFiles[strings.ToLower(d.Name())] = true
 			}
 			return nil
 		})
@@ -91,7 +93,7 @@ func removeStalePatterns(data *IgnoreData, root string) int {
 		if filepath.IsAbs(name) {
 			stale = videoGone(name)
 		} else {
-			stale = scanned && !mkvFiles[name]
+			stale = scanned && !videoFiles[strings.ToLower(name)]
 		}
 		if stale {
 			fmt.Printf("Removing stale file-pattern entry: %s\n", name)

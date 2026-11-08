@@ -27,6 +27,25 @@ func TestRemoveStalePatterns_RemovesMissingVideos(t *testing.T) {
 	}
 }
 
+func TestRemoveStalePatterns_LegacyKeysMatchEveryVideoExt(t *testing.T) {
+	root := musicDir(t, "Upper.MKV", "clip.mp4", "Old.Avi", "song.flac")
+	data := &IgnoreData{FilePatterns: map[string][]string{
+		"Upper.MKV": {"a"},
+		"clip.mp4":  {"b"},
+		"old.avi":   {"c"}, // case-only rename since the key was stored
+		"song.flac": {"d"}, // not a video, so it doesn't count as existing
+	}}
+
+	if removed := removeStalePatterns(data, root); removed != 1 {
+		t.Errorf("removed = %d, want 1", removed)
+	}
+	for _, k := range []string{"Upper.MKV", "clip.mp4", "old.avi"} {
+		if _, ok := data.FilePatterns[k]; !ok {
+			t.Errorf("entry %q removed, want kept", k)
+		}
+	}
+}
+
 func TestRemoveStalePatterns_UnreadableRootKeepsLegacyEntries(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "offline")
 	data := &IgnoreData{FilePatterns: map[string][]string{"video.mkv": {"a"}}}
