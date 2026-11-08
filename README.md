@@ -186,7 +186,7 @@ Scanned: 120  Fixed: 14  Failed: 0  LangFixes: 9  FlagFixes: 8
 | `--verbose` | Print planned mkvpropedit edits before applying |
 | `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
 | `--all` | Process all files regardless of modification date |
-| `--clean` | Remove stale `overrides` entries from `config.json` for directories that no longer exist on disk, then exit |
+| `--clean` | Remove stale `overrides` entries from `config.json` for directories that no longer exist on disk, then exit. Overrides on an offline drive are kept |
 
 ### Track trimming
 
