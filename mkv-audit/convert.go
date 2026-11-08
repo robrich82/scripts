@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -23,6 +24,59 @@ type MKVConverter interface {
 	// path with a non-nil error means the MKV was written but a later step
 	// (copying timestamps, removing src) failed.
 	ConvertToMKV(src string) (string, error)
+}
+
+// convertExts are the video containers the walk converts to MKV. .wmv is
+// listed so it gets a warning: mkvmerge can't read it.
+var convertExts = []string{".avi", ".flv", ".m2ts", ".m4v", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".webm", ".wmv"}
+
+// isConvertible reports whether path has one of convertExts.
+func isConvertible(path string) bool {
+	return slices.Contains(convertExts, strings.ToLower(filepath.Ext(path)))
+}
+
+// convertAll converts each convertible path in paths to MKV and returns a new
+// list with the MKV in its place. A source that is skipped or fails to
+// convert is dropped; a failure is also recorded in stats.
+func convertAll(paths []string, converter MKVConverter, stats *Stats) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if !isConvertible(p) {
+			out = append(out, p)
+			continue
+		}
+		base := filepath.Base(p)
+		dst, err := converter.ConvertToMKV(p)
+		switch {
+		case errors.Is(err, errMKVExists):
+			fmt.Printf("[WARN]   %s: %s already exists, not converting\n", base, filepath.Base(strings.TrimSuffix(p, filepath.Ext(p))+".mkv"))
+		case errors.Is(err, errUnsupportedContainer):
+			fmt.Printf("[WARN]   %s: %v, not converting\n", base, err)
+		case dst == "":
+			fmt.Printf("[ERR]    %s: convert: %v\n", base, err)
+			stats.Failed++
+			stats.FailedPaths = append(stats.FailedPaths, p)
+		default:
+			fmt.Printf("[CONVERT] %s → %s\n", base, filepath.Base(dst))
+			if err != nil {
+				fmt.Printf("[WARN]   %s: %v\n", base, err)
+			}
+			stats.Converted++
+			out = append(out, dst)
+		}
+	}
+	return out
+}
+
+// loggingConverter wraps an MKVConverter and prints the planned conversion.
+type loggingConverter struct {
+	inner MKVConverter
+}
+
+func (l *loggingConverter) ConvertToMKV(src string) (string, error) {
+	dst := strings.TrimSuffix(src, filepath.Ext(src)) + ".mkv"
+	fmt.Printf("  convert: mkvmerge -o %q %q\n", filepath.Base(dst), filepath.Base(src))
+	return l.inner.ConvertToMKV(src)
 }
 
 // ConvertToMKV implements MKVConverter on realMKVRunner.

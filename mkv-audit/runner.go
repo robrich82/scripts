@@ -379,7 +379,9 @@ func applyLangFixes(tracks []Track, fixes []langFix) []Track {
 // pass nil to skip TMDB lookups (e.g. no API key configured).
 // remuxer is used to remove/reorder tracks after property edits; pass nil to
 // skip track trimming entirely.
-func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter, tmdb TMDBOriginClient, remuxer MKVRemuxer, cutoffDate time.Time) Stats {
+// converter remuxes other video containers (see convertExts) to MKV before
+// processing; pass nil to process only .mkv and .mka files.
+func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKVEditor, prompter Prompter, tmdb TMDBOriginClient, remuxer MKVRemuxer, converter MKVConverter, cutoffDate time.Time) Stats {
 	var stats Stats
 	var trimCandidates []trimCandidate
 	var langMismatches []langMismatchCandidate
@@ -410,7 +412,8 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				return nil
 			}
 			lower := strings.ToLower(d.Name())
-			if !strings.HasSuffix(lower, ".mkv") && !strings.HasSuffix(lower, ".mka") {
+			if !strings.HasSuffix(lower, ".mkv") && !strings.HasSuffix(lower, ".mka") &&
+				(converter == nil || !isConvertible(path)) {
 				return nil
 			}
 			if !cutoffDate.IsZero() {
@@ -423,6 +426,13 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			filesToScan = append(filesToScan, path)
 			return nil
 		})
+	}
+
+	// Convert other containers to MKV and scan the result in their place. An
+	// earlier failure on a source counts as retried even if it's skipped now.
+	attempted := filesToScan
+	if converter != nil {
+		filesToScan = convertAll(filesToScan, converter, &stats)
 	}
 
 	// Pre-compute TMDB origin info sequentially before the concurrent phase.
@@ -773,7 +783,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 	// didn't retry stay listed.
 	failed := stats.FailedPaths
 	if fullScan {
-		failed = slices.Concat(failed, unscannedFailures(oldFails, filesToScan, root, unreadable))
+		failed = slices.Concat(failed, unscannedFailures(oldFails, slices.Concat(attempted, filesToScan), root, unreadable))
 	}
 	if len(failed) > 0 {
 		if err := saveFailedCache(stateDir, failed); err != nil {

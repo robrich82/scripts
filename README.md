@@ -157,6 +157,7 @@ Normalizes MKV/MKA track metadata in bulk:
 - `flag-hearing-impaired` on SDH/CC tracks; `flag-commentary` on commentary tracks
 - `flag-original` on tracks whose language matches the content's original language (requires TMDB)
 - Track ordering by codec quality (e.g. TrueHD before AC3)
+- **Container conversion**: other video files (`.mp4`, `.m4v`, `.avi`, `.mpg`/`.mpeg`, `.mov`, `.ts`, `.m2ts`, `.webm`, `.flv`) are remuxed to `<name>.mkv`, which keeps the original's modification and creation times. The original is deleted once the MKV has every source track. A file is skipped with a warning when `<name>.mkv` already exists or `mkvmerge` can't read it (e.g. `.wmv`)
 - **Track trimming** (with prompt): removes audio tracks not in the original or English language, removes non-English subtitles, and reorders tracks so that the best-quality track for each language is physically first (for Plex compatibility)
 
 ### Usage
@@ -175,7 +176,7 @@ Scanned: 120  Fixed: 14  Failed: 0  LangFixes: 9  FlagFixes: 8
 
 ### Dependencies
 
-- `mkvmerge` — reads track metadata; also used for track trimming remux
+- `mkvmerge` — reads track metadata; also used for container conversion and track trimming remux
 - `mkvpropedit` — applies property edits (language codes, flags)
 
 #### Flags
@@ -183,7 +184,7 @@ Scanned: 120  Fixed: 14  Failed: 0  LangFixes: 9  FlagFixes: 8
 | Flag | Description |
 |------|-------------|
 | `--library <name>` | Use a named library from config (overrides auto-detection) |
-| `--verbose` | Print planned mkvpropedit edits before applying |
+| `--verbose` | Print planned mkvpropedit edits and MKV conversions before applying |
 | `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
 | `--all` | Process all files regardless of modification date |
 | `--clean` | Remove stale `overrides` entries from `config.json` for directories that no longer exist on disk, then exit |

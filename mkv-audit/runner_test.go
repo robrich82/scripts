@@ -65,7 +65,7 @@ func TestRunAll_NoEditsNeeded_OK(t *testing.T) {
 	}}
 
 	editor := &fakeEditor{}
-	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, nil, nil, nil, time.Time{})
 
 	if stats.Scanned != 1 {
 		t.Errorf("Scanned=%d, want 1", stats.Scanned)
@@ -80,7 +80,7 @@ func TestRunAll_IdentifyError_CountsFailed(t *testing.T) {
 	makeMKVFile(t, dir, "bad.mkv")
 
 	ident := &fakeIdentifier{err: fmt.Errorf("mkvmerge failed")}
-	stats := RunAll(dir, t.TempDir(), nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
+	stats := RunAll(dir, t.TempDir(), nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil, nil, time.Time{})
 
 	if stats.Failed != 1 {
 		t.Errorf("Failed=%d, want 1", stats.Failed)
@@ -103,7 +103,7 @@ func TestRunAll_EditsApplied_CountsFixed(t *testing.T) {
 	}}
 
 	editor := &fakeEditor{}
-	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, nil, nil, nil, time.Time{})
 
 	if stats.Fixed != 1 {
 		t.Errorf("Fixed=%d, want 1", stats.Fixed)
@@ -119,7 +119,7 @@ func TestRunAll_SkipsNonMKV(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
+	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{}, nil, nil, nil, time.Time{})
 	if stats.Scanned != 0 {
 		t.Errorf("Scanned=%d, want 0 for non-MKV file", stats.Scanned)
 	}
@@ -136,7 +136,7 @@ func TestRunAll_MKAIncluded(t *testing.T) {
 		}},
 	}}
 
-	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+	stats := RunAll(dir, t.TempDir(), nil, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, nil, time.Time{})
 	if stats.Scanned != 1 {
 		t.Errorf("Scanned=%d, want 1 for .mka file", stats.Scanned)
 	}
@@ -164,7 +164,7 @@ func TestRunAll_UnreadableRootWarns(t *testing.T) {
 
 	var stats Stats
 	out := captureStdout(t, func() {
-		stats = RunAll(root, t.TempDir(), nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
+		stats = RunAll(root, t.TempDir(), nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{}, nil, nil, nil, time.Time{})
 	})
 	if stats.Scanned != 0 {
 		t.Errorf("Scanned=%d, want 0", stats.Scanned)
@@ -179,7 +179,7 @@ func TestRunAll_SavesFailedCache(t *testing.T) {
 	makeMKVFile(t, dir, "bad.mkv")
 
 	ident := &fakeIdentifier{err: fmt.Errorf("mkvmerge failed")}
-	RunAll(dir, stateDir, nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
+	RunAll(dir, stateDir, nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil, nil, time.Time{})
 
 	got := loadFailedCache(stateDir)
 	if want := filepath.Join(dir, "bad.mkv"); len(got) != 1 || got[0] != want {
@@ -196,7 +196,7 @@ func TestRunAll_UnreadableRootKeepsEarlierFailures(t *testing.T) {
 	}
 
 	captureStdout(t, func() {
-		RunAll(root, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+		RunAll(root, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, nil, time.Time{})
 	})
 
 	if got := loadFailedCache(stateDir); !slices.Equal(got, old) {
@@ -212,7 +212,7 @@ func TestRunAll_FullScanDropsFixedFailuresKeepsOthers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, nil, time.Time{})
 
 	if got := loadFailedCache(stateDir); !slices.Equal(got, []string{outside}) {
 		t.Errorf("failed cache = %v, want [%s]", got, outside)
@@ -232,7 +232,7 @@ func TestRunAll_FullScanKeepsFailuresSkippedByCutoff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, cutoff)
+	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, nil, cutoff)
 
 	// old.mkv wasn't retried, so it stays; deleted.mkv is in a scanned folder and gone.
 	if got, want := loadFailedCache(stateDir), []string{filepath.Join(dir, "old.mkv")}; !slices.Equal(got, want) {
@@ -247,7 +247,7 @@ func TestRunAll_RetryOnlyReplacesFailedCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, nil, time.Time{})
+	RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, nil, nil, time.Time{})
 
 	if _, err := os.Stat(filepath.Join(stateDir, failedCacheFile)); !os.IsNotExist(err) {
 		t.Errorf("failed cache still present after every retried file passed (stat err %v)", err)
@@ -265,7 +265,7 @@ func TestRunAll_FailedCacheSaveErrorWarns(t *testing.T) {
 
 	ident := &fakeIdentifier{err: fmt.Errorf("mkvmerge failed")}
 	out := captureStdout(t, func() {
-		RunAll(dir, stateDir, nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil, time.Time{})
+		RunAll(dir, stateDir, nil, ident, &fakeEditor{}, &fakePrompter{}, nil, nil, nil, time.Time{})
 	})
 	if want := "[WARN]   could not save " + filepath.Join(stateDir, failedCacheFile); !strings.Contains(out, want) {
 		t.Errorf("output missing %q:\n%s", want, out)
@@ -282,7 +282,7 @@ func TestRunAll_CorruptFailedCacheScansAll(t *testing.T) {
 	var stats Stats
 	out := captureStdout(t, func() {
 		// "y" would restrict the run to the cached paths, if any loaded.
-		stats = RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, nil, time.Time{})
+		stats = RunAll(dir, stateDir, nil, &fakeIdentifier{info: &MKVInfo{}}, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, nil, nil, time.Time{})
 	})
 	if stats.Scanned != 1 {
 		t.Errorf("Scanned=%d, want 1", stats.Scanned)
@@ -302,7 +302,7 @@ func TestRunAll_UnknownCodecSaveErrorWarns(t *testing.T) {
 	info := &MKVInfo{Tracks: []Track{audioTrack(0, "eng", "A_UNKNOWN_FORMAT", 2, true)}}
 
 	out := captureStdout(t, func() {
-		RunAll(dir, stateDir, nil, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, time.Time{})
+		RunAll(dir, stateDir, nil, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, nil, time.Time{})
 	})
 	if !strings.Contains(out, "[WARN]   could not save new formats") {
 		t.Errorf("output missing the save warning:\n%s", out)
