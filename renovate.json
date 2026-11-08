@@ -46,6 +46,17 @@
       "matchDepNames": ["go"],
       "rangeStrategy": "bump",
       "groupName": "Go"
+    },
+    {
+      "description": "golangci-lint fails on a go line newer than the Go it was built with; grouping lets the lint release built with a new Go land on that Go bump's PR.",
+      "matchManagers": ["mise"],
+      "matchDepNames": ["golangci-lint"],
+      "groupName": "Go"
+    },
+    {
+      "matchDepNames": ["go"],
+      "matchUpdateTypes": ["minor"],
+      "prBodyNotes": ["CI stays red until golangci-lint has a release built with this Go; Renovate adds it to this PR once there is one."]
     }
   ]
 }
