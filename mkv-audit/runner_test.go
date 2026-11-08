@@ -339,7 +339,7 @@ func TestRunAll_TrimKeepsOnlyAudioTrackAndWarns(t *testing.T) {
 	remuxer := &recordingRemuxer{}
 
 	out := captureStdout(t, func() {
-		RunAll(dir, t.TempDir(), lib, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, remuxer, time.Time{})
+		RunAll(dir, t.TempDir(), lib, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, remuxer, nil, time.Time{})
 	})
 
 	if len(remuxer.plans) != 1 {
