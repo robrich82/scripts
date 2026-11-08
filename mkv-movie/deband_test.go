@@ -244,6 +244,23 @@ func TestApplyDebandOnlyFile_Success_CallsApplyAndRestoresTimestamp(t *testing.T
 	}
 }
 
+func TestApplyDebandOnlyFile_StatError_DoesNotTag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Missing.2020.mkv")
+	tagger := &fakeMKVTagger{available: true, extractedXML: `<Tags><Tag><Targets></Targets></Tag></Tags>`}
+
+	var ok bool
+	out := captureStdout(t, func() { ok = applyDebandOnlyFile(path, true, tagger, &fakeFileTimer{}) })
+	if ok {
+		t.Error("expected false when the file can't be stat'd")
+	}
+	if len(tagger.appliedPaths) != 0 {
+		t.Errorf("ApplyTags called with %v, want no call: timestamps couldn't be restored", tagger.appliedPaths)
+	}
+	if !strings.Contains(out, "not tagging") {
+		t.Errorf("output doesn't explain the skip:\n%s", out)
+	}
+}
+
 // --- runDebandOnly tests ---
 
 func TestRunDebandOnly_SkipsFilesNotInManualData(t *testing.T) {

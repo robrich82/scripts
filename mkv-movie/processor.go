@@ -629,7 +629,11 @@ func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer F
 		return false
 	}
 
-	origStat, statErr := os.Stat(filePath)
+	origStat, err := os.Stat(filePath)
+	if err != nil {
+		fmt.Printf("  [!] Cannot read timestamps to restore, not tagging: %v\n", err)
+		return false
+	}
 
 	currentXML, err := tagger.ExtractTags(filePath)
 	if err != nil {
@@ -651,13 +655,11 @@ func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer F
 		return false
 	}
 
-	if statErr == nil {
-		if err := timer.SetTimes(filePath, origStat.ModTime()); err != nil {
-			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-		}
-		if err := timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
-			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-		}
+	if err := timer.SetTimes(filePath, origStat.ModTime()); err != nil {
+		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+	}
+	if err := timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
+		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
 	}
 	return true
 }
