@@ -68,19 +68,13 @@ func (c *ShowCache) AllEntries() map[string]string {
 
 // CleanStaleFolders removes entries whose folder no longer exists on disk
 // (see pathGone: a folder on an offline drive is kept).
-// New entries store absolute paths and are checked directly; legacy base-name
-// entries (relative to mediaDir) are resolved via filepath.Join as a fallback.
+// Legacy entries keyed by a bare folder name are kept: nothing records which
+// library they belong to, so they can't be checked.
 // Returns the TMDB IDs that were removed so callers can purge dependent caches.
-func (c *ShowCache) CleanStaleFolders(mediaDir string) []string {
+func (c *ShowCache) CleanStaleFolders() []string {
 	var removedIDs []string
 	for folder, id := range c.data {
-		var checkPath string
-		if filepath.IsAbs(folder) {
-			checkPath = folder
-		} else {
-			checkPath = filepath.Join(mediaDir, folder)
-		}
-		if pathGone(checkPath) {
+		if filepath.IsAbs(folder) && pathGone(folder) {
 			removedIDs = append(removedIDs, id)
 			delete(c.data, folder)
 		}

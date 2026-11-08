@@ -25,12 +25,7 @@ func main() {
 	flag.Parse()
 
 	if *cleanFlag {
-		mediaDir, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
-			os.Exit(1)
-		}
-		runClean(mediaDir)
+		runClean()
 		return
 	}
 

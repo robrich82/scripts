@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-func runClean(mediaDir string) {
+func runClean() {
 	cfgDir, err := configDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error resolving config dir: %v\n", err)
@@ -21,7 +21,7 @@ func runClean(mediaDir string) {
 		fmt.Fprintf(os.Stderr, "Error loading show_cache.json: %v\n", err)
 		os.Exit(1)
 	}
-	removedIDs := showCache.CleanStaleFolders(mediaDir)
+	removedIDs := showCache.CleanStaleFolders()
 	if n := len(removedIDs); n > 0 {
 		fmt.Printf("show_cache.json:      removed %d stale entr%s\n", n, es(n))
 		total += n
