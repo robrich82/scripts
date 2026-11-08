@@ -445,3 +445,52 @@ func TestTrimSummary_SubsReordered(t *testing.T) {
 		t.Errorf("expected 'Reorder subs' in summary, got: %s", summary)
 	}
 }
+
+func TestPlanTrim_OnlyAudioMismatched_KeepsIt(t *testing.T) {
+	info := MKVInfo{Tracks: []Track{
+		videoTrack("jpn"),
+		audioTrack(1, "eng", "A_AC3", 6, true),
+		subTrack(2, "eng", "S_TEXT/ASS", "", true, false),
+	}}
+	plan := PlanTrim(info, "jpn", nil)
+	if !intsEqual(trackIDs(plan.KeepAudio), []int{1}) {
+		t.Errorf("KeepAudio = %v; want the only audio track [1]", trackIDs(plan.KeepAudio))
+	}
+	if len(plan.RemoveAudio) != 0 {
+		t.Errorf("RemoveAudio = %v; want none", trackIDs(plan.RemoveAudio))
+	}
+	if !intsEqual(trackIDs(plan.MismatchedAudio), []int{1}) {
+		t.Errorf("MismatchedAudio = %v; want [1]", trackIDs(plan.MismatchedAudio))
+	}
+	if plan.NeedsChange {
+		t.Error("NeedsChange = true; nothing should be trimmed")
+	}
+}
+
+func TestPlanTrim_AllAudioMismatched_KeepsAllButStillTrimsSubs(t *testing.T) {
+	info := MKVInfo{Tracks: []Track{
+		videoTrack("jpn"),
+		audioTrack(1, "fre", "A_AC3", 2, true),
+		audioTrack(2, "ger", "A_AC3", 6, false),
+		subTrack(3, "fre", "S_TEXT/ASS", "", true, false),
+	}}
+	plan := PlanTrim(info, "jpn", []string{"kor"})
+	if len(plan.KeepAudio) != 2 || len(plan.RemoveAudio) != 0 {
+		t.Errorf("KeepAudio = %v, RemoveAudio = %v; want both audio tracks kept",
+			trackIDs(plan.KeepAudio), trackIDs(plan.RemoveAudio))
+	}
+	if !intsEqual(trackIDs(plan.MismatchedAudio), []int{1, 2}) {
+		t.Errorf("MismatchedAudio = %v; want [1 2]", trackIDs(plan.MismatchedAudio))
+	}
+	if !intsEqual(trackIDs(plan.RemoveSubs), []int{3}) || !plan.NeedsChange {
+		t.Errorf("RemoveSubs = %v, NeedsChange = %v; the fre sub should still be trimmed",
+			trackIDs(plan.RemoveSubs), plan.NeedsChange)
+	}
+}
+
+func TestPlanTrim_OneAudioMatches_NoMismatch(t *testing.T) {
+	plan := PlanTrim(subbedShow(), "jpn", nil)
+	if len(plan.MismatchedAudio) != 0 {
+		t.Errorf("MismatchedAudio = %v; want none when a track matches", trackIDs(plan.MismatchedAudio))
+	}
+}

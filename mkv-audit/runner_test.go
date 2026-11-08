@@ -311,3 +311,44 @@ func TestRunAll_UnknownCodecSaveErrorWarns(t *testing.T) {
 		t.Errorf("output claims the formats were saved:\n%s", out)
 	}
 }
+
+// recordingRemuxer records each Remux call's plan.
+type recordingRemuxer struct {
+	plans []*TrimPlan
+}
+
+func (r *recordingRemuxer) Remux(_ string, plan *TrimPlan, _ MKVInfo) error {
+	r.plans = append(r.plans, plan)
+	return nil
+}
+
+func TestRunAll_TrimKeepsOnlyAudioTrackAndWarns(t *testing.T) {
+	dir := t.TempDir()
+	makeMKVFile(t, dir, "ep.mkv")
+	lib := &Library{Path: dir, Overrides: []DirOverride{{Path: ".", OriginLang: "jpn"}}}
+
+	info := &MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "video", Properties: TrackProperties{Language: "jpn", LanguageIETF: "ja"}},
+		{ID: 1, Type: "audio", Properties: TrackProperties{
+			Language: "eng", LanguageIETF: "en", CodecID: "A_AC3", AudioChannels: 6, DefaultTrack: true,
+		}},
+		{ID: 2, Type: "subtitles", Properties: TrackProperties{
+			Language: "fre", LanguageIETF: "fr", CodecID: "S_TEXT/ASS",
+		}},
+	}}
+	remuxer := &recordingRemuxer{}
+
+	out := captureStdout(t, func() {
+		RunAll(dir, t.TempDir(), lib, &fakeIdentifier{info: info}, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, remuxer, time.Time{})
+	})
+
+	if len(remuxer.plans) != 1 {
+		t.Fatalf("Remux called %d times, want 1 (the fre sub still needs trimming)\n%s", len(remuxer.plans), out)
+	}
+	if ids := trackIDs(remuxer.plans[0].KeepAudio); !intsEqual(ids, []int{1}) {
+		t.Errorf("KeepAudio = %v, want the only audio track [1]", ids)
+	}
+	if !strings.Contains(out, "[WARN]   ep.mkv: no audio track is the original language jpn") || !strings.Contains(out, "(audio: eng)") {
+		t.Errorf("missing mismatch warning:\n%s", out)
+	}
+}
