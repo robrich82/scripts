@@ -139,13 +139,13 @@ func (c *MovieRatingCache) SetStreamsApplied(tmdbID, lang string) {
 // longer exist on disk. Returns the counts of entries removed from each map.
 func (c *MovieRatingCache) CleanStalePaths() (applied, metaApplied int) {
 	for path := range c.data.Applied {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if pathGone(path) {
 			delete(c.data.Applied, path)
 			applied++
 		}
 	}
 	for path := range c.data.MetaApplied {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if pathGone(path) {
 			delete(c.data.MetaApplied, path)
 			metaApplied++
 		}

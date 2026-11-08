@@ -59,7 +59,7 @@ func (r *RetryList) Len() int {
 func (r *RetryList) CleanStalePaths() int {
 	removed := 0
 	for path := range r.data {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if pathGone(path) {
 			delete(r.data, path)
 			removed++
 		}

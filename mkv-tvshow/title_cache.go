@@ -55,7 +55,7 @@ func (tc *TitleCache) Set(filePath, title string) {
 func (tc *TitleCache) CleanStalePaths() int {
 	removed := 0
 	for path := range tc.Titles {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if pathGone(path) {
 			delete(tc.Titles, path)
 			removed++
 		}

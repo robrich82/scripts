@@ -89,7 +89,7 @@ func (c *RatingCache) MarkApplied(filePath string, r NZRating) {
 func (c *RatingCache) CleanStalePaths() int {
 	removed := 0
 	for path := range c.data.Applied {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if pathGone(path) {
 			delete(c.data.Applied, path)
 			removed++
 		}
