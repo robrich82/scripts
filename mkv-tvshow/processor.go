@@ -865,7 +865,11 @@ func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
 		return false
 	}
 
-	origStat, statErr := os.Stat(filePath)
+	origStat, err := os.Stat(filePath)
+	if err != nil {
+		fmt.Printf("  [!] Cannot read timestamps to restore, not tagging: %v\n", err)
+		return false
+	}
 
 	currentXML, err := p.mkv.ExtractTags(filePath)
 	if err != nil {
@@ -894,13 +898,11 @@ func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
 		return false
 	}
 
-	if statErr == nil {
-		if err := p.timer.SetTimes(filePath, origStat.ModTime()); err != nil {
-			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-		}
-		if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
-			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-		}
+	if err := p.timer.SetTimes(filePath, origStat.ModTime()); err != nil {
+		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+	}
+	if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
+		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
 	}
 
 	return true

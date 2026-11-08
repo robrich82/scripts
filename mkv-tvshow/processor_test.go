@@ -429,15 +429,47 @@ func TestApplyDebandOnlyMKV_MkvpropeditNotFound(t *testing.T) {
 	}
 }
 
+// debandTestFile creates an MKV stand-in that applyDebandOnlyMKV can stat.
+func debandTestFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ep.mkv")
+	if err := os.WriteFile(path, []byte("fake"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestApplyDebandOnlyMKV_ExtractTagsFails(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, extractTagsErr: fmt.Errorf("mkvextract not found")}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyDebandOnlyMKV("file.mkv", true)
+	ok := p.applyDebandOnlyMKV(debandTestFile(t), true)
 	if ok {
 		t.Error("expected false when ExtractTags fails")
 	}
 	if len(runner.calls) != 0 {
 		t.Error("Apply should not be called after ExtractTags failure")
+	}
+}
+
+func TestApplyDebandOnlyMKV_StatError_DoesNotTag(t *testing.T) {
+	runner := &fakeMKVRunner{
+		avail:          true,
+		applyResult:    mkvpropeditSuccessMsg,
+		tagsPath:       "tags.xml",
+		extractTagsXML: `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`,
+	}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+
+	var ok bool
+	out := captureStdout(t, func() { ok = p.applyDebandOnlyMKV(filepath.Join(t.TempDir(), "missing.mkv"), true) })
+	if ok {
+		t.Error("expected false when the file can't be stat'd")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("Apply called %d times, want none: timestamps couldn't be restored", len(runner.calls))
+	}
+	if !strings.Contains(out, "not tagging") {
+		t.Errorf("output doesn't explain the skip:\n%s", out)
 	}
 }
 
@@ -480,7 +512,7 @@ func TestApplyDebandOnlyMKV_PassesUpdatedXMLToApply(t *testing.T) {
 		extractTagsXML: `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`,
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyDebandOnlyMKV("file.mkv", true)
+	p.applyDebandOnlyMKV(debandTestFile(t), true)
 
 	if len(runner.calls) == 0 {
 		t.Fatal("expected Apply to be called")
