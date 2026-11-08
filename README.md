@@ -206,7 +206,7 @@ removed or reordered. For each such file it prints what will change and prompts:
 - **`a`** — remux this and all remaining files without further prompting
 
 Keep rules:
-- **Audio**: retain tracks in the original language and in any language a Plex account is configured to watch in (see below); all others are removed. If the original language is unknown (no TMDB lookup), all audio is kept.
+- **Audio**: retain tracks in the original language and in any language a Plex account is configured to watch in (see below); all others are removed. If the original language is unknown (no TMDB lookup), all audio is kept. Trim never removes the last audio track: when no track is in a kept language, all audio is kept with a warning to check the language tags.
 - **Subtitles**: retain English and undetermined (`und`) tracks only. Forced/signs English subtitles are kept only when English audio is also kept — they exist to caption on-screen text for someone watching in English, so with nobody watching in English they are removed. A track named "Dialogue & Signs" is a full track, not a forced one, unless its name also says "forced".
 
 #### Per-account audio languages

@@ -22,6 +22,10 @@ type TrimPlan struct {
 	// SubsReordered is true when KeepSubs is in a different order than the
 	// tracks appeared in the source file.
 	SubsReordered bool
+	// MismatchedAudio lists the audio tracks kept only because every audio
+	// track fell outside the keep set. A tag is more likely wrong than the
+	// audio, so the caller should warn rather than leave the file silent.
+	MismatchedAudio []Track
 	// NeedsChange is true when any removal or reordering is required.
 	NeedsChange bool
 }
@@ -38,6 +42,7 @@ type TrimPlan struct {
 //   - Keep if lang is one of accountLangs (someone watches in that language)
 //   - Keep if lang == "und" (language unknown; keep to be safe)
 //   - If originLang is empty or "und", all audio tracks are kept.
+//   - If no audio track would be kept, all are kept and listed in MismatchedAudio.
 //
 // Subtitle keep rules (always applied):
 //   - Keep if lang == "und"
@@ -98,6 +103,12 @@ func PlanTrim(info MKVInfo, originLang string, accountLangs []string) *TrimPlan 
 			} else {
 				plan.RemoveAudio = append(plan.RemoveAudio, t)
 			}
+		}
+		// Never trim away the last audio track.
+		if len(keptAudio) == 0 && len(audioTracks) > 0 {
+			keptAudio = audioTracks
+			plan.MismatchedAudio = audioTracks
+			plan.RemoveAudio = nil
 		}
 	}
 	plan.KeepAudio = orderedAudio(keptAudio, originLang)

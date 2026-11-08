@@ -739,10 +739,18 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				tc.info.Tracks = applyLangFixes(tc.info.Tracks, fixes)
 			}
 			plan := PlanTrim(tc.info, tc.originLang, tc.accountLangs)
+			basename := filepath.Base(tc.path)
+			if len(plan.MismatchedAudio) > 0 {
+				langs := make([]string, len(plan.MismatchedAudio))
+				for i, t := range plan.MismatchedAudio {
+					langs[i] = normalizeLanguage(t.Properties.Language)
+				}
+				fmt.Printf("[WARN]   %s: no audio track is the original language %s or an account language (audio: %s); keeping all audio, check the language tags\n",
+					basename, tc.originLang, strings.Join(langs, ", "))
+			}
 			if !plan.NeedsChange {
 				continue
 			}
-			basename := filepath.Base(tc.path)
 			if !autoAll {
 				summary := TrimSummary(plan)
 				ans, _ := prompter.Ask(fmt.Sprintf("[TRIM]   %s\n%s  Proceed? (y/n/a=all): ", basename, summary))
