@@ -35,7 +35,10 @@ func (r *realMKVRunner) mux(src, dst string) error {
 	out, err := exec.Command(r.mkvmerge, "-o", dst, src).CombinedOutput()
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return nil // exit code 1 means warnings only; the output is complete
+		// Warnings only: the output is complete, but show them, since the
+		// source is deleted once the MKV checks out.
+		fmt.Printf("[WARN]   %s: mkvmerge warnings:\n%s\n", filepath.Base(src), strings.TrimSpace(string(out)))
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("mkvmerge: %w\n%s", err, out)
@@ -57,9 +60,11 @@ func convertToMKV(src string, ident MKVIdentifier, mux func(src, dst string) err
 	if err != nil {
 		return "", err
 	}
+	// Identify parses mkvmerge's JSON even when it exits non-zero, so an
+	// unreadable container shows up as no tracks; an error is a real failure.
 	srcInfo, err := ident.Identify(src)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", errUnsupportedContainer, err)
+		return "", fmt.Errorf("identify: %w", err)
 	}
 	if len(srcInfo.Tracks) == 0 {
 		return "", errUnsupportedContainer
@@ -103,7 +108,7 @@ func convertToMKV(src string, ident MKVIdentifier, mux func(src, dst string) err
 		return dst, fmt.Errorf("copy timestamps: %w; kept %s", err, filepath.Base(src))
 	}
 	if err := os.Remove(src); err != nil {
-		return dst, fmt.Errorf("remove original: %w", err)
+		return dst, fmt.Errorf("remove original: %w; delete it by hand", err)
 	}
 	return dst, nil
 }

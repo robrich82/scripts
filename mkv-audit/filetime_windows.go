@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -11,7 +12,7 @@ import (
 func copyCreationTime(path string, src os.FileInfo) error {
 	attr, ok := src.Sys().(*syscall.Win32FileAttributeData)
 	if !ok {
-		return nil
+		return fmt.Errorf("no creation time recorded for %s", src.Name())
 	}
 	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {

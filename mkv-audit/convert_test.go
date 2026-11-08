@@ -36,14 +36,9 @@ func (p *pathIdentifier) Identify(path string) (*MKVInfo, error) {
 
 func (p *pathIdentifier) ReadTagDate(string) (time.Time, bool) { return time.Time{}, false }
 
-// writingMux stands in for mkvmerge: it writes dst, or returns err.
-func writingMux(err error) func(src, dst string) error {
-	return func(_, dst string) error {
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dst, []byte("mkv"), 0o644)
-	}
+// writeMux stands in for mkvmerge: it writes dst.
+func writeMux(_, dst string) error {
+	return os.WriteFile(dst, []byte("mkv"), 0o644)
 }
 
 // oldSource writes dir/name with a modification time in the past.
@@ -80,7 +75,7 @@ func TestConvertToMKV_Success(t *testing.T) {
 	dir := t.TempDir()
 	src, mod := oldSource(t, dir, "Movie (2019).mp4")
 
-	dst, err := convertToMKV(src, &pathIdentifier{srcExt: ".mp4", srcTracks: 2, outTracks: 2}, writingMux(nil))
+	dst, err := convertToMKV(src, &pathIdentifier{srcExt: ".mp4", srcTracks: 2, outTracks: 2}, writeMux)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,22 +109,80 @@ func TestConvertToMKV_MKVExists_LeavesBoth(t *testing.T) {
 		t.Error("mkvmerge ran although the MKV exists")
 	}
 	assertOnly(t, dir, "ep.avi", "ep.mkv")
+	assertContent(t, filepath.Join(dir, "ep.mkv"), "existing")
 }
 
 func TestConvertToMKV_UnsupportedContainer(t *testing.T) {
-	for name, ident := range map[string]*pathIdentifier{
-		"no tracks":      {srcExt: ".wmv"},
-		"identify error": {srcExt: ".wmv", srcErr: errors.New("exit status 2")},
-	} {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			src, _ := oldSource(t, dir, "clip.wmv")
-			_, err := convertToMKV(src, ident, writingMux(nil))
-			if !errors.Is(err, errUnsupportedContainer) {
-				t.Errorf("err = %v, want errUnsupportedContainer", err)
-			}
-			assertOnly(t, dir, "clip.wmv")
-		})
+	dir := t.TempDir()
+	src, _ := oldSource(t, dir, "clip.wmv")
+	_, err := convertToMKV(src, &pathIdentifier{srcExt: ".wmv"}, writeMux)
+	if !errors.Is(err, errUnsupportedContainer) {
+		t.Errorf("err = %v, want errUnsupportedContainer", err)
+	}
+	assertOnly(t, dir, "clip.wmv")
+}
+
+// An Identify error means mkvmerge itself failed, not that it can't read the
+// container, so it must not be reported as the (warning-only) unsupported case.
+func TestConvertToMKV_IdentifyError_IsAFailure(t *testing.T) {
+	dir := t.TempDir()
+	src, _ := oldSource(t, dir, "clip.mp4")
+	_, err := convertToMKV(src, &pathIdentifier{srcExt: ".mp4", srcErr: errors.New("mkvmerge not found")}, writeMux)
+	if err == nil || errors.Is(err, errUnsupportedContainer) {
+		t.Errorf("err = %v, want a plain failure", err)
+	}
+	assertOnly(t, dir, "clip.mp4")
+}
+
+// The MKV appearing while mkvmerge runs must not be overwritten: os.Rename
+// replaces an existing file.
+func TestConvertToMKV_MKVAppearsDuringMux_LeavesBoth(t *testing.T) {
+	dir := t.TempDir()
+	src, _ := oldSource(t, dir, "ep.mp4")
+	racing := func(_, dst string) error {
+		if err := os.WriteFile(filepath.Join(dir, "ep.mkv"), []byte("existing"), 0o644); err != nil {
+			return err
+		}
+		return os.WriteFile(dst, []byte("mkv"), 0o644)
+	}
+
+	_, err := convertToMKV(src, &pathIdentifier{srcExt: ".mp4", srcTracks: 1, outTracks: 1}, racing)
+	if !errors.Is(err, errMKVExists) {
+		t.Errorf("err = %v, want errMKVExists", err)
+	}
+	assertOnly(t, dir, "ep.mkv", "ep.mp4")
+	assertContent(t, filepath.Join(dir, "ep.mkv"), "existing")
+}
+
+func TestConvertToMKV_IdentifyOutputFails_KeepsSource(t *testing.T) {
+	dir := t.TempDir()
+	src, _ := oldSource(t, dir, "ep.mp4")
+	ident := &outErrIdentifier{pathIdentifier{srcExt: ".mp4", srcTracks: 2}}
+
+	if _, err := convertToMKV(src, ident, writeMux); err == nil {
+		t.Fatal("want an error")
+	}
+	assertOnly(t, dir, "ep.mp4")
+}
+
+// outErrIdentifier fails to identify anything but the source.
+type outErrIdentifier struct{ pathIdentifier }
+
+func (o *outErrIdentifier) Identify(path string) (*MKVInfo, error) {
+	if !strings.EqualFold(filepath.Ext(path), o.srcExt) {
+		return nil, errors.New("truncated output")
+	}
+	return o.pathIdentifier.Identify(path)
+}
+
+func assertContent(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("%s holds %q, want %q", filepath.Base(path), got, want)
 	}
 }
 
@@ -151,7 +204,7 @@ func TestConvertToMKV_TrackCountMismatch_KeepsSource(t *testing.T) {
 	dir := t.TempDir()
 	src, _ := oldSource(t, dir, "ep.mov")
 
-	_, err := convertToMKV(src, &pathIdentifier{srcExt: ".mov", srcTracks: 3, outTracks: 2}, writingMux(nil))
+	_, err := convertToMKV(src, &pathIdentifier{srcExt: ".mov", srcTracks: 3, outTracks: 2}, writeMux)
 	if err == nil || !strings.Contains(err.Error(), "2 tracks, source has 3") {
 		t.Errorf("err = %v, want a track count mismatch", err)
 	}
