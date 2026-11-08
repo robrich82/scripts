@@ -73,7 +73,7 @@ func runRetag(t *testing.T, originLang string, files []string, audioLangs []stri
 	}
 	var stats Stats
 	out := captureStdout(t, func() {
-		stats = RunAll(dir, t.TempDir(), lib, &fakeIdentifier{info: &MKVInfo{Tracks: tracks}}, ed, pr, nil, &recordingRemuxer{}, time.Time{})
+		stats = RunAll(dir, t.TempDir(), lib, &fakeIdentifier{info: &MKVInfo{Tracks: tracks}}, ed, pr, nil, &recordingRemuxer{}, nil, time.Time{})
 	})
 	return stats, out
 }
