@@ -350,9 +350,49 @@ type trimCandidate struct {
 	path       string
 	info       MKVInfo
 	originLang string
+	// ietfMap is the file's resolved ISO 639-2/B → IETF map, used to retag
+	// a mismatched audio track.
+	ietfMap map[string]string
 	// accountLangs are the ISO 639-2/B audio languages the Plex accounts are
 	// configured to watch this title in, from the sibling tool's manual_data.json.
 	accountLangs []string
+}
+
+// retagOnlyAudio offers to set a file's only audio track to the original
+// language: language, plus language-ietf when the language has an IETF mapping.
+// Answering "a" sets *all so later files are retagged without asking.
+func retagOnlyAudio(tc trimCandidate, track Track, editor MKVEditor, prompter Prompter, all *bool, stats *Stats) {
+	basename := filepath.Base(tc.path)
+	ietf, hasIETF := tc.ietfMap[tc.originLang]
+	if !*all {
+		target := tc.originLang
+		if hasIETF {
+			target += " (" + ietf + ")"
+		}
+		ans, _ := prompter.Ask(fmt.Sprintf("[RETAG]  %s\n    audio track: %q → %s\n  Retag as the original language? (y/n/a=all): ",
+			basename, normalizeLanguage(track.Properties.Language), target))
+		switch strings.ToLower(strings.TrimSpace(ans)) {
+		case "a":
+			*all = true
+		case "y":
+			// proceed
+		default:
+			fmt.Printf("[SKIP]   %s (retag skipped)\n", basename)
+			return
+		}
+	}
+	kv := []string{"language", tc.originLang}
+	if hasIETF {
+		kv = append(kv, "language-ietf", ietf)
+	}
+	if err := editor.Apply(tc.path, trackEdit(track.ID, kv...)); err != nil {
+		fmt.Printf("[ERR]    %s: retag: %v\n", basename, err)
+		stats.Failed++
+		stats.FailedPaths = append(stats.FailedPaths, tc.path)
+		return
+	}
+	fmt.Printf("[RETAG]  %s: audio language set to %s\n", basename, tc.originLang)
+	stats.LangFixes++
 }
 
 // applyLangFixes returns a copy of tracks with the language and IETF tag of each
@@ -676,6 +716,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 					path:         p,
 					info:         trimInfo,
 					originLang:   originLang,
+					ietfMap:      ietfMap,
 					accountLangs: accountLangs.forFile(p, libRoot),
 				})
 			}
@@ -731,7 +772,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 
 	// Sequential trim phase: prompt per file, then remux.
 	if remuxer != nil {
-		autoAll := false
+		autoAll, retagAll := false, false
 		for _, tc := range trimCandidates {
 			// Reflect any lang fixes applied above so the plan doesn't drop a
 			// track whose language was just corrected on disk.
@@ -747,6 +788,11 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				}
 				fmt.Printf("[WARN]   %s: no audio track is the original language %s or an account language (audio: %s); keeping all audio, check the language tags\n",
 					basename, tc.originLang, strings.Join(langs, ", "))
+			}
+			// With one audio track the tag is the likely mistake, so offer to
+			// fix it. With several it isn't clear which one to retag.
+			if len(plan.MismatchedAudio) == 1 {
+				retagOnlyAudio(tc, plan.MismatchedAudio[0], editor, prompter, &retagAll, &stats)
 			}
 			if !plan.NeedsChange {
 				continue
