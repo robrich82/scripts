@@ -37,12 +37,20 @@ func isConvertible(path string) bool {
 
 // convertAll converts each convertible path in paths to MKV and returns a new
 // list with the MKV in its place. A source that is skipped or fails to
-// convert is dropped; a failure is also recorded in stats.
+// convert is dropped; a failure is also recorded in stats. Each path appears
+// once, so a retry list holding both x.mp4 and x.mkv doesn't scan x.mkv twice.
 func convertAll(paths []string, converter MKVConverter, stats *Stats) []string {
 	out := make([]string, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
+	keep := func(p string) {
+		if k := pathKey(p); !seen[k] {
+			seen[k] = true
+			out = append(out, p)
+		}
+	}
 	for _, p := range paths {
 		if !isConvertible(p) {
-			out = append(out, p)
+			keep(p)
 			continue
 		}
 		base := filepath.Base(p)
@@ -62,7 +70,7 @@ func convertAll(paths []string, converter MKVConverter, stats *Stats) []string {
 				fmt.Printf("[WARN]   %s: %v\n", base, err)
 			}
 			stats.Converted++
-			out = append(out, dst)
+			keep(dst)
 		}
 	}
 	return out

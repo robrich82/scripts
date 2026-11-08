@@ -38,11 +38,13 @@ func (r *recordingIdentifier) names() []string {
 	return out
 }
 
-// fakeConverter fails sources whose base name is in errs, and otherwise
+// fakeConverter fails sources whose base name is in errs, writes the MKV but
+// keeps the source and returns the error for those in partial, and otherwise
 // replaces src with <name>.mkv.
 type fakeConverter struct {
-	errs  map[string]error
-	calls []string
+	errs    map[string]error
+	partial map[string]error
+	calls   []string
 }
 
 func (f *fakeConverter) ConvertToMKV(src string) (string, error) {
@@ -53,6 +55,9 @@ func (f *fakeConverter) ConvertToMKV(src string) (string, error) {
 	dst := strings.TrimSuffix(src, filepath.Ext(src)) + ".mkv"
 	if err := os.WriteFile(dst, nil, 0o644); err != nil {
 		return "", err
+	}
+	if err, ok := f.partial[filepath.Base(src)]; ok {
+		return dst, err
 	}
 	return dst, os.Remove(src)
 }
@@ -77,8 +82,8 @@ func TestRunAll_ConvertsOtherContainers(t *testing.T) {
 	if got, want := ident.names(), []string{"a.mkv", "b.mkv"}; !slices.Equal(got, want) {
 		t.Errorf("scanned %v, want %v", got, want)
 	}
-	if stats.Converted != 1 || stats.Scanned != 2 {
-		t.Errorf("Converted = %d, Scanned = %d; want 1, 2", stats.Converted, stats.Scanned)
+	if stats.Converted != 1 || stats.Scanned != 2 || stats.Failed != 1 {
+		t.Errorf("Converted = %d, Scanned = %d, Failed = %d; want 1, 2, 1", stats.Converted, stats.Scanned, stats.Failed)
 	}
 	if got, want := loadFailedCache(stateDir), []string{filepath.Join(dir, "e.mov")}; !slices.Equal(got, want) {
 		t.Errorf("failed cache = %v, want %v (only the real failure)", got, want)
@@ -201,3 +206,61 @@ func TestRunAll_ConvertsRealMP4(t *testing.T) {
 	}
 	assertOnly(t, dir, "clip.mkv")
 }
+
+// The MKV was written but removing the source failed: the MKV is scanned, the
+// run warns, and the source isn't listed as a failure (a retry would only find
+// the MKV already there).
+func TestRunAll_ConvertPartialSuccess_ScansMKVAndWarns(t *testing.T) {
+	dir, stateDir := t.TempDir(), t.TempDir()
+	makeMKVFile(t, dir, "ep.mp4")
+	conv := &fakeConverter{partial: map[string]error{"ep.mp4": errors.New("remove original: in use; delete it by hand")}}
+	ident := &recordingIdentifier{}
+
+	var stats Stats
+	out := captureStdout(t, func() {
+		stats = RunAll(dir, stateDir, nil, ident, &fakeEditor{}, &fakePrompter{answer: "n"}, nil, nil, conv, time.Time{})
+	})
+
+	if stats.Converted != 1 || stats.Failed != 0 || !slices.Equal(ident.names(), []string{"ep.mkv"}) {
+		t.Errorf("Converted = %d, Failed = %d, scanned %v; want 1, 0, [ep.mkv]", stats.Converted, stats.Failed, ident.names())
+	}
+	if !strings.Contains(out, "[WARN]   ep.mp4: remove original: in use; delete it by hand") {
+		t.Errorf("missing partial-success warning:\n%s", out)
+	}
+	if got := loadFailedCache(stateDir); len(got) != 0 {
+		t.Errorf("failed cache = %v, want empty", got)
+	}
+}
+
+func TestRunAll_RetryWithSourceAndMKVScansMKVOnce(t *testing.T) {
+	dir, stateDir := t.TempDir(), t.TempDir()
+	makeMKVFile(t, dir, "ep.mp4")
+	if err := saveFailedCache(stateDir, []string{filepath.Join(dir, "ep.mkv"), filepath.Join(dir, "ep.mp4")}); err != nil {
+		t.Fatal(err)
+	}
+	ident := &countingIdentifier{}
+
+	RunAll(dir, stateDir, nil, ident, &fakeEditor{}, &fakePrompter{answer: "y"}, nil, nil, &fakeConverter{}, time.Time{})
+
+	if n := ident.count["ep.mkv"]; n != 2 { // once in the und pass, once in the main pass
+		t.Errorf("ep.mkv identified %d times, want 2 (scanned once)", n)
+	}
+}
+
+// countingIdentifier counts Identify calls per base name.
+type countingIdentifier struct {
+	mu    sync.Mutex
+	count map[string]int
+}
+
+func (c *countingIdentifier) Identify(path string) (*MKVInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.count == nil {
+		c.count = map[string]int{}
+	}
+	c.count[filepath.Base(path)]++
+	return &MKVInfo{}, nil
+}
+
+func (c *countingIdentifier) ReadTagDate(string) (time.Time, bool) { return time.Time{}, false }
