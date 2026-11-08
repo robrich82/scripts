@@ -813,7 +813,11 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	}
 
 	// Snapshot the current mtime before mkvpropedit touches it.
-	origStat, statErr := os.Stat(filePath)
+	origStat, err := os.Stat(filePath)
+	if err != nil {
+		fmt.Printf("  [!] Cannot read timestamps to restore, not tagging: %v\n", err)
+		return false
+	}
 
 	// Extract existing tags so other tags (DEBAND, SUMMARY, TMDB_ID, etc.) are preserved.
 	currentXML, err := p.mkv.ExtractTags(filePath)
@@ -842,13 +846,11 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 	}
 
 	// Restore the original timestamps so the file appears unmodified to other tools.
-	if statErr == nil {
-		if err := p.timer.SetTimes(filePath, origStat.ModTime()); err != nil {
-			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-		}
-		if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
-			fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-		}
+	if err := p.timer.SetTimes(filePath, origStat.ModTime()); err != nil {
+		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+	}
+	if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
+		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
 	}
 
 	// Record that the tags have been written so subsequent runs can skip this file.

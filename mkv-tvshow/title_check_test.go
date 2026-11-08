@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -171,5 +172,46 @@ func TestTitleCheck_SkipsPlaceholderRename(t *testing.T) {
 	// File must not have been renamed.
 	if _, err := os.Stat(mkvPath); os.IsNotExist(err) {
 		t.Errorf("file was renamed or deleted: %s", mkvPath)
+	}
+}
+
+func TestApplyFullTitle_RestoresTimestamps(t *testing.T) {
+	path := debandTestFile(t)
+	want := time.Date(2021, 3, 15, 0, 0, 0, 0, time.Local)
+	if err := os.Chtimes(path, want, want); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg}
+	timer := &captureFileTimer{}
+	tc := NewTitleChecker(Config{}, nil, nil, nil, nil, runner, newNullTitleCache(t), timer)
+
+	tc.applyFullTitle(path, "Full Title")
+
+	if len(runner.calls) != 1 {
+		t.Fatalf("Apply called %d times, want 1", len(runner.calls))
+	}
+	if len(timer.setTimesCalls) != 1 || !timer.setTimesCalls[0].t.Equal(want) {
+		t.Errorf("SetTimes calls = %v, want one restoring %v", timer.setTimesCalls, want)
+	}
+	if got, ok := tc.titleCache.Get(path); !ok || got != "Full Title" {
+		t.Errorf("title cache = %q ok=%v, want the new title", got, ok)
+	}
+}
+
+func TestApplyFullTitle_StatError_DoesNotSetTitle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.mkv")
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg}
+	tc := NewTitleChecker(Config{}, nil, nil, nil, nil, runner, newNullTitleCache(t), &captureFileTimer{})
+
+	out := captureStdout(t, func() { tc.applyFullTitle(path, "Full Title") })
+
+	if len(runner.calls) != 0 {
+		t.Errorf("Apply called %d times, want none: timestamps couldn't be restored", len(runner.calls))
+	}
+	if _, ok := tc.titleCache.Get(path); ok {
+		t.Error("title cached although it was never set")
+	}
+	if !strings.Contains(out, "not setting title") {
+		t.Errorf("output doesn't explain the skip:\n%s", out)
 	}
 }

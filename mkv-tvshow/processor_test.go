@@ -429,7 +429,7 @@ func TestApplyDebandOnlyMKV_MkvpropeditNotFound(t *testing.T) {
 	}
 }
 
-// debandTestFile creates an MKV stand-in that applyDebandOnlyMKV can stat.
+// debandTestFile creates an MKV stand-in that the tag-only helpers can stat.
 func debandTestFile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ep.mkv")
@@ -569,7 +569,7 @@ func TestApplyRatingOnlyMKV_Failure_NoTimestampRestore(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyRC: 1, applyResult: "Error"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
-	ok := p.applyRatingOnlyMKV("file.mkv", RatingPG)
+	ok := p.applyRatingOnlyMKV(debandTestFile(t), RatingPG)
 	if ok {
 		t.Error("expected false on mkvpropedit failure")
 	}
@@ -581,7 +581,7 @@ func TestApplyRatingOnlyMKV_Failure_NoTimestampRestore(t *testing.T) {
 func TestApplyRatingOnlyMKV_ExtractTagsFails_ReturnsFalse(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, extractTagsErr: fmt.Errorf("mkvextract not found")}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyRatingOnlyMKV("file.mkv", RatingM)
+	ok := p.applyRatingOnlyMKV(debandTestFile(t), RatingM)
 	if ok {
 		t.Error("expected false when ExtractTags fails")
 	}
@@ -600,7 +600,7 @@ func TestApplyRatingOnlyMKV_PreservesExistingDebandTag(t *testing.T) {
 		extractTagsXML: existingXML,
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyRatingOnlyMKV("file.mkv", RatingM)
+	ok := p.applyRatingOnlyMKV(debandTestFile(t), RatingM)
 	if !ok {
 		t.Fatal("expected success")
 	}
@@ -1952,4 +1952,26 @@ func containsAll(haystack []string, needles ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestApplyRatingOnlyMKV_StatError_DoesNotTag(t *testing.T) {
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	rc := emptyRatingCache(t)
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}, ratingCache: rc}
+	path := filepath.Join(t.TempDir(), "missing.mkv")
+
+	var ok bool
+	out := captureStdout(t, func() { ok = p.applyRatingOnlyMKV(path, RatingM) })
+	if ok {
+		t.Error("expected false when the file can't be stat'd")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("Apply called %d times, want none: timestamps couldn't be restored", len(runner.calls))
+	}
+	if rc.IsApplied(path, RatingM) {
+		t.Error("rating marked applied although nothing was written")
+	}
+	if !strings.Contains(out, "not tagging") {
+		t.Errorf("output doesn't explain the skip:\n%s", out)
+	}
 }
