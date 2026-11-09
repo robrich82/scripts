@@ -100,7 +100,7 @@ jobs:
       - name: golangci-lint (non-Windows stubs)
         run: GOOS=linux golangci-lint run ./...
 
-      # run only sees files in the Windows build; this also covers the stubs.
+      # fmt ignores build tags, so one run covers both builds.
       - name: golangci-lint fmt
         run: golangci-lint fmt --diff ./...
 
