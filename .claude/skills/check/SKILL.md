@@ -10,7 +10,7 @@ Run the full test and lint suite across all modules.
 1. Run `make vet` — executes `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` across all modules.
    - If vet fails, report the errors clearly. Do not proceed to tests until vet passes.
    - Fix any `go vet` or golangci-lint issues before continuing. For a `gofmt` finding, run `gofmt -w` on the file; for a `go mod tidy -diff` failure, run `go mod tidy` in that module.
-2. Run `make vet-linux` — type-checks the non-Windows stubs, as CI does.
+2. Run `make vet-linux` — type-checks and lints the non-Windows stubs, as CI does.
    - If it fails, report the errors clearly and fix them before continuing.
 3. Run `make test` — executes `go test ./...` across all modules.
    - Report any test failures with the full output.
