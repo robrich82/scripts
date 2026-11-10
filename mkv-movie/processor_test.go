@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -201,6 +202,43 @@ func TestProcessFile_NoApplier_LeavesFileAlone(t *testing.T) {
 	}
 	if cache.IsMetaApplied(path, "12345") {
 		t.Error("file marked applied with no applier")
+	}
+}
+
+func TestProcessFile_NoApplier_ForcedTaggedFileStillGetsTimestamps(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	timer := &fakeFileTimer{}
+	cache := makeCache(t)
+	cache.SetTMDBID("Avengers Endgame:2019", "12345")
+	cache.MarkMetaApplied(path, "12345")
+
+	result := processFile(path, tmdb, nil, timer, nil, cache, nil, true /* force */)
+	if result != ResultUpdated {
+		t.Errorf("got %v, want ResultUpdated", result)
+	}
+	if len(timer.setTimesCalls) != 1 {
+		t.Errorf("SetTimes calls = %v, want 1", timer.setTimesCalls)
+	}
+}
+
+func TestProcessFile_NoApplier_ReportsPlexPush(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	cache := makeCache(t)
+	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingR16}
+	rr := newMovieRatingResolver(nil, cache, false, false, plex, func(string) (string, error) { return "", nil })
+
+	var result FileResult
+	out := captureStdout(t, func() { result = processFile(path, tmdb, nil, &fakeFileTimer{}, rr, cache, nil, false) })
+	if result != ResultSkipped {
+		t.Errorf("got %v, want ResultSkipped", result)
+	}
+	if r, ok := cache.GetPlexRating("12345"); !ok || r != RatingR16 {
+		t.Errorf("Plex rating cached = %q, %v; want R16", r, ok)
+	}
+	if !strings.Contains(out, "[SKIP]") || !strings.Contains(out, "Plex rating: R16") {
+		t.Errorf("output doesn't report the Plex push:\n%s", out)
 	}
 }
 

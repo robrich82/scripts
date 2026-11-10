@@ -349,18 +349,27 @@ func TestRealMKVApplier_Apply_ExtractFails_ReturnsError(t *testing.T) {
 }
 
 // Without mkvextract the applier can't keep existing tags, so it isn't built.
-func TestNewRealMKVApplier_NoMkvextract_Error(t *testing.T) {
-	dir := t.TempDir()
-	name := "mkvpropedit"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), nil, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-	if _, err := newRealMKVApplier(); err == nil {
-		t.Error("newRealMKVApplier succeeded with only mkvpropedit in PATH")
+func TestNewRealMKVApplier_NeedsMkvextract(t *testing.T) {
+	for _, tc := range []struct {
+		tools  []string
+		wantOK bool
+	}{
+		{[]string{"mkvpropedit"}, false},
+		{[]string{"mkvpropedit", "mkvextract"}, true},
+	} {
+		dir := t.TempDir()
+		for _, name := range tc.tools {
+			if runtime.GOOS == "windows" {
+				name += ".exe"
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), nil, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Setenv("PATH", dir)
+		if _, err := newRealMKVApplier(); (err == nil) != tc.wantOK {
+			t.Errorf("PATH with %v: err = %v, want ok=%v", tc.tools, err, tc.wantOK)
+		}
 	}
 }
 
@@ -489,6 +498,9 @@ func TestRealMKVTagger_DebandOnOff_NoEmptyBlock(t *testing.T) {
 	statsOnly := muxTestMKV(t, dir, "stats.mkv", "--no-global-tags")
 	untagged := muxTestMKV(t, dir, "untagged.mkv", "--no-global-tags", "--disable-track-statistics-tags", "-T")
 	tagger := newRealMKVTagger()
+	if tags := extractRealTags(t, untagged); tags != "" {
+		t.Fatalf("untagged fixture has tags:\n%s", tags)
+	}
 
 	if !applyDebandOnlyFile(statsOnly, true, tagger, &fakeFileTimer{}) || !applyDebandOnlyFile(statsOnly, false, tagger, &fakeFileTimer{}) {
 		t.Fatal("applyDebandOnlyFile on a stats-only file failed")

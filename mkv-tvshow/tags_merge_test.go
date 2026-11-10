@@ -558,6 +558,9 @@ func TestRealMKVRunner_DebandOnOff_NoEmptyBlock(t *testing.T) {
 	dir := t.TempDir()
 	statsOnly, runner := muxTestMKV(t, dir, "stats.mkv", "--no-global-tags")
 	untagged, _ := muxTestMKV(t, dir, "untagged.mkv", "--no-global-tags", "--disable-track-statistics-tags", "-T")
+	if tags := extractRealTags(t, runner, untagged); tags != "" {
+		t.Fatalf("untagged fixture has tags:\n%s", tags)
+	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 
 	if !p.applyDebandOnlyMKV(statsOnly, true) || !p.applyDebandOnlyMKV(statsOnly, false) {

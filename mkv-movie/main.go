@@ -100,7 +100,7 @@ func main() {
 	if a, err := newRealMKVApplier(); err == nil {
 		applier = a
 	} else {
-		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated.\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated, and files not yet tagged are skipped.\n", err)
 	}
 
 	plexURL := os.Getenv("PLEX_URL")

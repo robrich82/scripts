@@ -399,6 +399,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	// Both are independent of needsApply so corrected cache entries are always propagated.
 	var langSet string
 	var langAltSuffix string
+	ratingPushed := false
 	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet() {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
 		if plexErr != nil {
@@ -420,6 +421,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					fmt.Printf("  [!] Plex rating update failed: %v\n", err)
 				} else {
 					cache.SetPlexRating(tmdbID, rating)
+					ratingPushed = true
 				}
 			}
 			if plexStreamsNeedSet() {
@@ -446,10 +448,16 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		os.Remove(posterPath)
 	}
 
-	// Backdating an untagged file would put it behind the default cutoff, so it
-	// would stay untagged once MKVToolNix is installed.
-	if needsApply && applier == nil {
-		fmt.Printf("[SKIP]    %s (mkvpropedit/mkvextract not found; file not changed)\n", basename)
+	// Nothing was written, so don't backdate the file or report it updated.
+	if applier == nil && !cache.IsMetaApplied(filePath, tmdbID) {
+		fmt.Printf("[SKIP]    %s (mkvpropedit/mkvextract not found; file not changed)", basename)
+		if ratingPushed {
+			fmt.Printf(" (Plex rating: %s)", rating)
+		}
+		if langSet != "" {
+			fmt.Printf(" (Plex lang: %s%s)", langSet, langAltSuffix)
+		}
+		fmt.Println()
 		return ResultSkipped
 	}
 
