@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -346,7 +347,6 @@ func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 		applyResult: mkvpropeditSuccessMsg,
 		tagsPath:    "t.xml",
 		posterPath:  "poster.jpg",
-		posterOK:    true,
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone, false)
@@ -379,7 +379,6 @@ func TestApplyMKV_ExistingCovers_ReplacedByNewPoster(t *testing.T) {
 				applyResult: mkvpropeditSuccessMsg,
 				tagsPath:    "t.xml",
 				posterPath:  "poster.jpg",
-				posterOK:    true,
 			}
 			p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 			p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone, false)
@@ -400,9 +399,11 @@ func TestApplyMKV_ExistingCovers_ReplacedByNewPoster(t *testing.T) {
 func TestApplyMKV_ExistingCover_KeptWithoutNewPoster(t *testing.T) {
 	cases := []struct {
 		name, posterURL string
+		posterErr       error
+		wantWarning     bool
 	}{
-		{"no poster URL", ""},
-		{"download failed", "http://example.com/poster.jpg"},
+		{"no poster URL", "", nil, false},
+		{"download failed", "http://example.com/poster.jpg", errors.New("unexpected status 503"), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -411,15 +412,21 @@ func TestApplyMKV_ExistingCover_KeptWithoutNewPoster(t *testing.T) {
 				attachments: AttachmentInfo{HasJPEG: true, HasPNG: true},
 				applyResult: mkvpropeditSuccessMsg,
 				tagsPath:    "t.xml",
-				posterOK:    false,
+				posterErr:   tc.posterErr,
 			}
 			p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-			p.applyMKV("show.mkv", "T", "", "", "", "", tc.posterURL, RatingNone, false)
+			out := captureStdout(t, func() {
+				p.applyMKV("show.mkv", "T", "", "", "", "", tc.posterURL, RatingNone, false)
+			})
 
 			for _, a := range runner.calls[0].args {
 				if strings.Contains(a, "attachment") {
 					t.Errorf("unexpected attachment arg %q without a new poster: %v", a, runner.calls[0].args)
 				}
+			}
+			warned := strings.Contains(out, "Poster download failed; cover unchanged: unexpected status 503")
+			if warned != tc.wantWarning {
+				t.Errorf("warning printed = %v, want %v; output:\n%s", warned, tc.wantWarning, out)
 			}
 		})
 	}

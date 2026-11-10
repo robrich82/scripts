@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,9 +29,9 @@ type MKVRunner interface {
 	Apply(filePath string, extraArgs []string) (combined string, rc int, err error)
 	// WriteTempTags writes XML to a temp file and returns its path.
 	WriteTempTags(xml string) (string, error)
-	// DownloadPoster fetches a poster image to a temp file. Returns the temp path
-	// and true on success, or ("", false) on any failure.
-	DownloadPoster(url string) (string, bool)
+	// DownloadPoster fetches a poster image to a temp file and returns its path.
+	// A non-200 status or an empty body is an error.
+	DownloadPoster(url string) (string, error)
 	// Cleanup removes the given temp file paths, ignoring errors.
 	Cleanup(paths ...string)
 	// ExtractTags returns all Matroska tags XML for filePath, per-track included.
@@ -107,27 +108,32 @@ func (r *realMKVRunner) WriteTempTags(xml string) (string, error) {
 	return f.Name(), nil
 }
 
-func (r *realMKVRunner) DownloadPoster(posterURL string) (string, bool) {
+func (r *realMKVRunner) DownloadPoster(posterURL string) (string, error) {
 	client := &http.Client{Timeout: httpTimeout}
 	resp, err := client.Get(posterURL)
-	if err != nil || resp.StatusCode != 200 {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		return "", false
+	if err != nil {
+		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %s", resp.Status)
+	}
 
 	f, err := os.CreateTemp("", "mkv-poster-*.jpg")
 	if err != nil {
-		return "", false
+		return "", err
 	}
 	defer f.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		os.Remove(f.Name())
-		return "", false
+	n, err := io.Copy(f, resp.Body)
+	if err == nil && n == 0 {
+		err = errors.New("empty response body")
 	}
-	return f.Name(), true
+	if err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func (r *realMKVRunner) Cleanup(paths ...string) {

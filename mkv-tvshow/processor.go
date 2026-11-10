@@ -612,7 +612,9 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 	// so a missing poster or failed download leaves the old cover in place.
 	var posterPath string
 	if posterURL != "" {
-		if path, ok := p.mkv.DownloadPoster(posterURL); ok {
+		if path, err := p.mkv.DownloadPoster(posterURL); err != nil {
+			fmt.Printf("  [!] Poster download failed; cover unchanged: %v\n", err)
+		} else {
 			posterPath = path
 			attachInfo, _ := p.mkv.ProbeAttachments(filePath)
 			if attachInfo.HasJPEG {
