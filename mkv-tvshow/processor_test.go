@@ -370,19 +370,52 @@ func TestApplyMKV_NoPosterURL_NoAttachment(t *testing.T) {
 	}
 }
 
-func TestApplyMKV_ExistingJPEG_DeleteArgAdded(t *testing.T) {
+func TestApplyMKV_ExistingCovers_ReplacedByNewPoster(t *testing.T) {
 	runner := &fakeMKVRunner{
 		avail:       true,
-		attachments: AttachmentInfo{HasJPEG: true},
+		attachments: AttachmentInfo{HasJPEG: true, HasPNG: true},
 		applyResult: mkvpropeditSuccessMsg,
 		tagsPath:    "t.xml",
+		posterPath:  "poster.jpg",
+		posterOK:    true,
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone, false)
+	p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone, false)
 
-	args := runner.calls[0].args
-	if !containsAll(args, "--delete-attachment", "mime-type:image/jpeg") {
-		t.Errorf("expected JPEG delete arg in: %v", args)
+	args := strings.Join(runner.calls[0].args, " ")
+	want := "--delete-attachment mime-type:image/jpeg --delete-attachment mime-type:image/png " +
+		"--attachment-name cover.jpg --attachment-mime-type image/jpeg --add-attachment poster.jpg"
+	if !strings.Contains(args, want) {
+		t.Errorf("expected covers deleted then poster added, got: %s", args)
+	}
+}
+
+// An existing cover must survive when no replacement poster is available.
+func TestApplyMKV_ExistingCover_KeptWithoutNewPoster(t *testing.T) {
+	cases := []struct {
+		name, posterURL string
+	}{
+		{"no poster URL", ""},
+		{"download failed", "http://example.com/poster.jpg"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeMKVRunner{
+				avail:       true,
+				attachments: AttachmentInfo{HasJPEG: true, HasPNG: true},
+				applyResult: mkvpropeditSuccessMsg,
+				tagsPath:    "t.xml",
+				posterOK:    false,
+			}
+			p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+			p.applyMKV("show.mkv", "T", "", "", "", "", tc.posterURL, RatingNone, false)
+
+			for _, a := range runner.calls[0].args {
+				if strings.Contains(a, "attachment") {
+					t.Errorf("unexpected attachment arg %q without a new poster: %v", a, runner.calls[0].args)
+				}
+			}
+		})
 	}
 }
 

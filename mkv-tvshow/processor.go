@@ -608,20 +608,19 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 		args = append(args, "--tags", "all:"+tagsPath)
 	}
 
-	// Delete existing image attachments before adding the new poster.
-	attachInfo, _ := p.mkv.ProbeAttachments(filePath)
-	if attachInfo.HasJPEG {
-		args = append(args, "--delete-attachment", "mime-type:image/jpeg")
-	}
-	if attachInfo.HasPNG {
-		args = append(args, "--delete-attachment", "mime-type:image/png")
-	}
-
-	// Download poster and queue it for attachment.
+	// Replace existing image attachments only once a new poster has downloaded,
+	// so a missing poster or failed download leaves the old cover in place.
 	var posterPath string
 	if posterURL != "" {
 		if path, ok := p.mkv.DownloadPoster(posterURL); ok {
 			posterPath = path
+			attachInfo, _ := p.mkv.ProbeAttachments(filePath)
+			if attachInfo.HasJPEG {
+				args = append(args, "--delete-attachment", "mime-type:image/jpeg")
+			}
+			if attachInfo.HasPNG {
+				args = append(args, "--delete-attachment", "mime-type:image/png")
+			}
 			args = append(args,
 				"--attachment-name", "cover.jpg",
 				"--attachment-mime-type", "image/jpeg",
