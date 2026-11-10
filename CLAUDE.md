@@ -9,7 +9,7 @@ All code in this project should be written in Go where possible.
 After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `make vet` or `make vet-linux` before committing.
 
 ## README
-When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change.
+When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change. `/finish` runs the `readme-drift-checker` agent to catch what was missed.
 
 ## Build, Test & Lint
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
@@ -25,16 +25,20 @@ In a worktree, run `make` and these skills from the worktree directory, and give
 
 CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml` or `.golangci.yml` change). Each job runs the equivalent of `make vet`, `make vet-linux` and `make test`, plus govulncheck, which only fails the weekly run.
 
-Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`, in sessions started at the repo root.
-- The block is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
-- They need `jq` on PATH. Without it every Bash and PowerShell call is refused until Claude Code restarts from a shell that has it.
+Hooks in `.claude/settings.json`, in sessions started at the repo root:
+- Run `gofmt -w` on every edited `.go` file.
+- Block direct `go build`. This is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
+- Before an `Edit`/`Write` to an existing file under `%APPDATA%\<tool>\` (or its `configs/<tool>` junction), copy it to `%LOCALAPPDATA%\claude-config-backups\<tool>\<path>.<UTC stamp>`. Per file it keeps the oldest copy and the newest 20, and skips a copy when nothing changed. Shell writes skip this.
+- All but the `Read` hook need `jq` on PATH. Without it every Bash, PowerShell, Edit and Write call is refused until Claude Code restarts from a shell that has it.
+- Refuse `Read` of this repo's `openapi.json`; use the `plex-api` skill.
 - After changing a hook, run `sh .claude/hooks/test.sh` from the repo root.
 
 ## Architecture
 
 Six independent tools, each its own Go module (`package main`) with its own `go.mod` — there is no shared library module. Consequences:
 
-- **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other, so run the `twin-port-checker` agent after changing either.
+- **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other.
+- **Other code is shared across tools, not just the twins**: `--clean` pruning, offline-drive detection and walk/stat error handling recur, and bugs in them have been fixed one tool at a time. Run the `twin-port-checker` agent after changing any tool; it checks both the twins and these shared shapes.
 - The Makefile finds modules by their `go.mod`, so a new tool needs no Makefile change. It does need the README tools table, and possibly a `configs/` junction (see the `configs-symlink` skill).
 
 Common shape of each tool:
