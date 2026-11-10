@@ -21,6 +21,7 @@ In a worktree, run `make` and these skills from the worktree directory, and give
 - `make test` — `go test ./...` per module.
 - `make vuln` — `govulncheck` per module (needs network).
 - `make clean` — delete `dist/`.
+- `make openapi` — refresh `openapi.json` from the Plex docs page (needs `curl`, `jq` and network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
 
 CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml` or `.golangci.yml` change). Each job runs the equivalent of `make vet`, `make vet-linux` and `make test`, plus govulncheck, which only fails the weekly run.
