@@ -9,7 +9,7 @@ All code in this project should be written in Go where possible.
 After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `make vet` or `make vet-linux` before committing.
 
 ## README
-When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change. The `readme-drift-checker` agent compares a tool's README section with the code; `/finish` runs it.
+When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change. `/finish` runs the `readme-drift-checker` agent to catch what was missed.
 
 ## Build, Test & Lint
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
