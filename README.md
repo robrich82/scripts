@@ -18,6 +18,7 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 - Go 1.27.3, golangci-lint and govulncheck, pinned in `mise.toml`: run `mise install`.
   - A linter `go install`ed into `go env GOBIN` shadows the pinned one; delete it there.
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
+- [ExifTool](https://exiftool.org/) (`exiftool` on PATH) — used by mkv-music's audio timestamp sync
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
 
 ## Building
@@ -58,7 +59,7 @@ make vuln
 
 Normalises CBZ comic archives for consistent two-page-spread viewing:
 
-1. **Backs up** each CBZ to `<file>.cbz.bak` alongside the original.
+1. **Backs up** each CBZ to `<file>.cbz.bak` alongside the original, with `--backup`.
 2. **Reads `ComicInfo.xml`** (if present) to gather page metadata.
 3. **Determines page order**: for calibre KFX/AZW3 exports (a root `.html` file
    next to a matching `*_files/` directory), the XHTML navigation chain is
@@ -488,6 +489,11 @@ A renamed MKV's title tag is built from its new name, so text the rename drops
 | `--all` | Process all files regardless of modification date |
 | `--clean` | Remove file-specific pattern entries from `ignore_patterns.json` for video files that no longer exist under the current directory, then exit. Entries on an offline drive, or that it can't check because a folder is unreadable, are kept |
 
+### Dependencies
+
+- `exiftool` on PATH — reads the embedded date from `.mka` files. If it is
+  missing, the audio timestamp sync is skipped for every format, with a warning.
+
 ### Configuration
 
 Config is stored in `%APPDATA%\mkv-music\` (Windows) or
@@ -810,6 +816,7 @@ SourceForge file releases, or web page scraping. Downloads and runs installers o
 
 ```sh
 sw-update check              # Check all enabled apps for updates
+sw-update check -v           # Also list apps that are up to date (--verbose)
 sw-update check <name>       # Check a specific app
 sw-update list               # List all apps and their known versions
 sw-update install <name>     # Download latest release and run/open installer
