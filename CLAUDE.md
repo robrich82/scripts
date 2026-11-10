@@ -39,7 +39,7 @@ Six independent tools, each its own Go module (`package main`) with its own `go.
 
 - **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other.
 - **Other code is shared across tools, not just the twins**: `--clean` pruning, offline-drive detection and walk/stat error handling recur, and bugs in them have been fixed one tool at a time. Run the `twin-port-checker` agent after changing any tool; it checks both the twins and these shared shapes.
-- Adding a new tool means updating every Makefile target (`all`, `test`, `vet`, `vet-linux`, `vuln`, `.PHONY`), the README tools table, and possibly a `configs/` junction (see the `configs-symlink` skill).
+- The Makefile finds modules by their `go.mod`, so a new tool needs no Makefile change. `/new-tool <name> <purpose>` scaffolds the module and covers the README, this file and the `configs/` junction.
 
 Common shape of each tool:
 
