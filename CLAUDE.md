@@ -54,4 +54,4 @@ Cross-tool coupling: mkv-audit's track trimming reads `manual_data.json` from `%
 Environment: `TMDB_API_KEY` (mkv-movie, mkv-tvshow; optional for mkv-audit), `PLEX_URL`, `PLEX_TOKEN` (optional Plex integration in mkv-movie, mkv-tvshow, mkv-music), `PLEX_ALT_TOKEN`, `PLEX_ALT2_TOKEN` (mkv-movie/mkv-tvshow: only per-account stream/language prefs use these), `GITHUB_PERSONAL_ACCESS_TOKEN` (sw-update rate limit).
 
 ## Plex API
-The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it through the `plex-api` skill when working with Plex API endpoints, request/response shapes, or authentication.
+The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it through the `plex-api` skill when working with Plex API endpoints, request/response shapes, or authentication. `.github/workflows/plex-openapi.yml` runs `make openapi` weekly and opens a PR when the spec changes.
