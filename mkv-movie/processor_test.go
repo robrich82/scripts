@@ -264,6 +264,31 @@ func TestProcessFile_PlexLookupError_Reported(t *testing.T) {
 	}
 }
 
+// A TMDB-ID lookup error other than not-found must not fall back to the title
+// search, whose not-found would cache the rating as if the movie weren't in Plex.
+func TestProcessFile_PlexTMDBIDLookupError_NoTitleFallback(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	cache := makeCache(t)
+	cache.Set("12345", RatingR16)
+	plex := &fakePlexMovieClient{
+		findTMDBErr:  errors.New("plex: HTTP 500"),
+		findTitleErr: ErrPlexMovieNotFound,
+	}
+	rr := newMovieRatingResolver(nil, cache, false, false, plex, func(string) (string, error) { return "", nil })
+
+	out := captureStdout(t, func() { processFile(path, tmdb, &fakeApplier{}, &fakeFileTimer{}, rr, cache, nil, false) })
+	if !strings.Contains(out, "Plex lookup failed") || !strings.Contains(out, "HTTP 500") {
+		t.Errorf("output doesn't report the TMDB-ID lookup error:\n%s", out)
+	}
+	if strings.Contains(out, "Not in Plex library") {
+		t.Errorf("transient error reported as not in library:\n%s", out)
+	}
+	if _, ok := cache.GetPlexRating("12345"); ok {
+		t.Error("Plex rating cached after a failed lookup")
+	}
+}
+
 func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
@@ -422,6 +447,7 @@ func TestProcessFile_WithRating_TagsPathSet(t *testing.T) {
 
 // fakePlexMovieClient is a test double for PlexMovieClient.
 type fakePlexMovieClient struct {
+	findTMDBErr      error // nil means ErrPlexMovieNotFound
 	titleRatingKey   string
 	findTitleErr     error
 	contentRating    NZRating
@@ -429,6 +455,9 @@ type fakePlexMovieClient struct {
 }
 
 func (f *fakePlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
+	if f.findTMDBErr != nil {
+		return "", f.findTMDBErr
+	}
 	return "", ErrPlexMovieNotFound
 }
 

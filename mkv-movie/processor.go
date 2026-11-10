@@ -402,7 +402,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	ratingPushed := false
 	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet() {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
-		if plexErr != nil {
+		if errors.Is(plexErr, ErrPlexMovieNotFound) {
 			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
 		}
 		if errors.Is(plexErr, ErrPlexMovieNotFound) {
