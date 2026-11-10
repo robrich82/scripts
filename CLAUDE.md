@@ -28,9 +28,9 @@ CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed modu
 Hooks in `.claude/settings.json`, in sessions started at the repo root:
 - Run `gofmt -w` on every edited `.go` file.
 - Block direct `go build`. This is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
-- Before an `Edit`/`Write` to a tool's live config (`configs/<tool>/…` or `%APPDATA%\<tool>\…`), copy the file to `%LOCALAPPDATA%\claude-config-backups\<tool>\` with a timestamp suffix, keeping the newest 20. Shell writes skip this.
-- Refuse `Read` of `openapi.json`; use the `plex-api` skill.
-- They need `jq` on PATH. Without it every Bash, PowerShell, Edit and Write call is refused until Claude Code restarts from a shell that has it.
+- Before an `Edit`/`Write` to an existing file under `%APPDATA%\<tool>\` (or its `configs/<tool>` junction), copy it to `%LOCALAPPDATA%\claude-config-backups\<tool>\<path>.<UTC stamp>`. Per file it keeps the oldest copy and the newest 20, and skips a copy when nothing changed. Shell writes skip this.
+- All but the `Read` hook need `jq` on PATH. Without it every Bash, PowerShell, Edit and Write call is refused until Claude Code restarts from a shell that has it.
+- Refuse `Read` of this repo's `openapi.json`; use the `plex-api` skill.
 - After changing a hook, run `sh .claude/hooks/test.sh` from the repo root.
 
 ## Architecture
