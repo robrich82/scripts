@@ -34,7 +34,8 @@ Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and b
 
 Six independent tools, each its own Go module (`package main`) with its own `go.mod` — there is no shared library module. Consequences:
 
-- **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other, so run the `twin-port-checker` agent after changing either.
+- **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other.
+- **All six tools share patterns too**: `--clean` pruning, offline-drive detection and walk/stat error handling recur across modules, and bugs in them have been fixed one tool at a time. Run the `twin-port-checker` agent after changing any tool; it checks both the twins and these shared shapes.
 - Adding a new tool means updating every Makefile target (`all`, `test`, `vet`, `vet-linux`, `vuln`, `.PHONY`), the README tools table, and possibly a `configs/` junction (see the `configs-symlink` skill).
 
 Common shape of each tool:
