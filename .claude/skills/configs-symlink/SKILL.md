@@ -16,7 +16,7 @@ The `configs/` directory at the repo root contains Windows directory symlinks po
 | sw-update       | %APPDATA%\sw-update                    |
 | mkv-tvshow      | %APPDATA%\mkv-tvshow                   |
 
-`cbz-fix` and `sw-update` do not have symlinks (neither uses a config directory).
+`cbz-fix` does not have a symlink (it does not use a config directory).
 
 ## Adding a symlink for a new binary
 
