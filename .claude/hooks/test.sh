@@ -182,5 +182,143 @@ for input in '{}' "$(jq -n --arg f "$tmp/bad.go" '{tool_input: {file_path: $f}}'
 done
 rm -rf "$tmp"
 
+# block-openapi-read: refuses this repo's openapi.json in any case or separator, passes other files.
+readcheck() { # readcheck <want rc> <file_path>
+  jq -n --arg f "$2" '{tool_input: {file_path: $f}}' | sh "$dir/block-openapi-read.sh" 2>/dev/null
+  rc=$?
+  [ "$rc" = "$1" ] || fail "block-openapi-read want rc $1 got $rc for: $2"
+}
+root=$(cd "$dir/../.." && pwd)
+readcheck 2 "$root/openapi.json"
+readcheck 2 "$root/OpenAPI.JSON"
+if command -v cygpath >/dev/null 2>&1; then readcheck 2 "$(cygpath -w "$root")\openapi.json"; fi
+readcheck 0 "$root/openapi.json.bak"
+readcheck 0 "$root/README.md"
+printf 'not json' | sh "$dir/block-openapi-read.sh" 2>/dev/null || fail 'block-openapi-read refused unreadable input'
+
+# settings.json wires each hook to its tool.
+for pair in 'Bash|PowerShell block-go-build.sh' 'Edit|Write backup-config.sh' 'Read block-openapi-read.sh'; do
+  jq -e --arg m "${pair% *}" --arg s "${pair#* }" '.hooks.PreToolUse[] | select(.matcher == $m) | .hooks[].command | contains($s)' \
+    "$dir/../settings.json" >/dev/null || fail "settings.json does not run ${pair#* } on ${pair% *}"
+  [ -f "$dir/${pair#* }" ] || fail "missing hook ${pair#* }"
+done
+tmp=$(mktemp -d)
+readcheck 0 "$tmp/openapi.json"
+rm -rf "$tmp"
+
+# backup-config: copies a module's live config aside, via the real path or a junction.
+tmp="$(mktemp -d)/sp ace é"
+roam="$tmp/roam"; store="$tmp/local/claude-config-backups"
+mkdir -p "$tmp/proj/mkv-movie" "$tmp/proj/configs" "$roam/mkv-movie/sub" "$roam/other"
+touch "$tmp/proj/mkv-movie/go.mod"
+printf 'v1' > "$roam/mkv-movie/sub/data.json"
+printf 'x' > "$roam/other/data.json"
+if command -v cygpath >/dev/null 2>&1; then
+  MSYS_NO_PATHCONV=1 cmd /c mklink /J "$(cygpath -w "$tmp/proj/configs/mkv-movie")" "$(cygpath -w "$roam/mkv-movie")" >/dev/null
+else
+  ln -s "$roam/mkv-movie" "$tmp/proj/configs/mkv-movie"
+fi
+backup() { # backup <want rc> <file_path>
+  out=$(jq -n --arg f "$2" '{tool_input: {file_path: $f}}' |
+    APPDATA="$roam" LOCALAPPDATA="$tmp/local" CLAUDE_PROJECT_DIR="$tmp/proj" sh "$dir/backup-config.sh" 2>&1)
+  rc=$?
+  [ "$rc" = "$1" ] || fail "backup-config want rc $1 got $rc for $2: $out"
+}
+count() { ls -1d "$store/$1".* 2>/dev/null | awk -v p="$store/$1." 'index($0, p) == 1 && substr($0, length(p) + 1) ~ /^[0-9]{8}-[0-9]{6}Z(-[0-9]{3})?$/' | wc -l | tr -d ' '; }
+backup 0 "$roam/mkv-movie/sub/data.json"
+[ "$(count mkv-movie/sub/data.json)" = 1 ] || fail 'backup-config did not back up via the real path'
+case "$out" in *systemMessage*) ;; *) fail "backup-config printed no systemMessage: $out" ;; esac
+backup 0 "$tmp/proj/configs/mkv-movie/sub/data.json"
+[ "$(count mkv-movie/sub/data.json)" = 1 ] || fail 'backup-config copied an unchanged file again'
+printf 'v2' > "$roam/mkv-movie/sub/data.json"
+backup 0 "$tmp/proj/configs/mkv-movie/sub/data.json"
+[ "$(count mkv-movie/sub/data.json)" = 2 ] || fail 'backup-config did not back up via the junction (same second must not overwrite)'
+[ "$(cat "$(ls -1 "$store/mkv-movie/sub/data.json".* | sort | head -1)")" = v1 ] || fail 'backup-config oldest copy has the wrong content'
+if command -v cygpath >/dev/null 2>&1; then
+  printf 'v3' > "$roam/mkv-movie/sub/data.json"
+  backup 0 "$roam/MKV-MOVIE/SUB/DATA.JSON"
+  [ "$(count mkv-movie/sub/data.json)" = 3 ] || fail 'backup-config split backups by path case'
+fi
+backup 0 "$roam/other/data.json"
+[ -e "$store/other" ] && fail 'backup-config backed up a dir that is not a module'
+backup 0 "$roam/mkv-movie/new.json"
+[ "$(count mkv-movie/new.json)" = 0 ] || fail 'backup-config backed up a file that does not exist'
+backup 0 "$tmp/proj/mkv-movie/go.mod"
+
+# Pruning keeps the oldest and the newest 20, and leaves a sibling file's backups alone.
+printf 'p' > "$roam/mkv-movie/p.json"
+for i in $(seq -w 0 24); do printf 'old%s' "$i" > "$store/mkv-movie/p.json.20000101-0000${i}Z"; done
+for i in 1 2 3; do printf 's' > "$store/mkv-movie/p.json.1.20000101-00000${i}Z"; done
+backup 0 "$roam/mkv-movie/p.json"
+[ "$(count mkv-movie/p.json)" = 21 ] || fail "backup-config kept $(count mkv-movie/p.json) backups, want 21"
+[ -e "$store/mkv-movie/p.json.20000101-000000Z" ] || fail 'backup-config pruned the oldest backup'
+[ -e "$store/mkv-movie/p.json.20000101-000001Z" ] && fail 'backup-config kept a backup it should prune'
+[ "$(count mkv-movie/p.json.1)" = 3 ] || fail 'backup-config pruned a sibling file'"'"'s backups'
+
+# A clock behind the newest backups must not prune the copy just made.
+printf 'f' > "$roam/mkv-movie/f.json"
+for i in $(seq -w 0 24); do printf 'future' > "$store/mkv-movie/f.json.20990101-0000${i}Z"; done
+printf 'oldest' > "$store/mkv-movie/f.json.20000101-000000Z"
+backup 0 "$roam/mkv-movie/f.json"
+[ "$(grep -l '^f$' "$store/mkv-movie/f.json".* 2>/dev/null | wc -l)" = 1 ] || fail 'backup-config pruned the copy it just made'
+
+# Same-stamp edits get a suffix instead of overwriting.
+mkdir "$tmp/bin"
+printf '#!/bin/sh\necho 20010101-000000Z\n' > "$tmp/bin/date"; chmod +x "$tmp/bin/date"
+printf 'c1' > "$roam/mkv-movie/c.json"
+( PATH="$tmp/bin:$PATH"; export PATH
+  backup 0 "$roam/mkv-movie/c.json"; printf 'c2' > "$roam/mkv-movie/c.json"; backup 0 "$roam/mkv-movie/c.json" )
+[ "$(cat "$store/mkv-movie/c.json.20010101-000000Z" 2>/dev/null)" = c1 ] &&
+  [ "$(cat "$store/mkv-movie/c.json.20010101-000000Z-001" 2>/dev/null)" = c2 ] || fail 'backup-config overwrote a same-stamp backup'
+rm "$tmp/bin/date"
+
+# A Windows-style path is matched, and the message uses it.
+if command -v cygpath >/dev/null 2>&1; then
+  printf 'w' > "$roam/mkv-movie/w.json"
+  backup 0 "$(cygpath -w "$roam/mkv-movie/w.json")"
+  [ "$(count mkv-movie/w.json)" = 1 ] || fail 'backup-config ignored a C:\ path'
+  case "$out" in *'"Backed up mkv-movie/w.json to C:\'*) ;; *) fail "backup-config message is not a Windows path: $out" ;; esac
+fi
+
+# A tool dir that is itself a junction is still recognised.
+mkdir -p "$tmp/proj/mkv-tvshow" "$tmp/sync/mkv-tvshow"; touch "$tmp/proj/mkv-tvshow/go.mod"
+printf 'j' > "$tmp/sync/mkv-tvshow/j.json"
+if command -v cygpath >/dev/null 2>&1; then
+  MSYS_NO_PATHCONV=1 cmd /c mklink /J "$(cygpath -w "$roam/mkv-tvshow")" "$(cygpath -w "$tmp/sync/mkv-tvshow")" >/dev/null
+else
+  ln -s "$tmp/sync/mkv-tvshow" "$roam/mkv-tvshow"
+fi
+backup 0 "$roam/mkv-tvshow/j.json"
+[ "$(count mkv-tvshow/j.json)" = 1 ] || fail 'backup-config skipped a tool dir that is a junction'
+
+# Parallel edits in one second each get their own backup.
+printf '#!/bin/sh\necho 20020101-000000Z\n' > "$tmp/bin/date"; chmod +x "$tmp/bin/date"
+for i in 1 2 3 4; do
+  printf 'q%s' "$i" > "$roam/mkv-movie/q$i.json"; cp "$roam/mkv-movie/q$i.json" "$roam/mkv-movie/q.json"
+  ( PATH="$tmp/bin:$PATH"; export PATH; backup 0 "$roam/mkv-movie/q.json" ) &
+done
+wait
+rm "$tmp/bin/date"
+
+# A failed copy or store refuses the edit.
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/cp"; chmod +x "$tmp/bin/cp"
+printf 'k' > "$roam/mkv-movie/k.json"
+( PATH="$tmp/bin:$PATH"; export PATH; backup 2 "$roam/mkv-movie/k.json" )
+rm "$tmp/bin/cp"
+printf 'x' > "$tmp/notadir"
+out=$(jq -n --arg f "$roam/mkv-movie/k.json" '{tool_input: {file_path: $f}}' |
+  APPDATA="$roam" LOCALAPPDATA="$tmp/notadir" CLAUDE_PROJECT_DIR="$tmp/proj" sh "$dir/backup-config.sh" 2>&1)
+[ $? = 2 ] || fail "backup-config did not refuse when the store can't be created: $out"
+
+# Unreadable input refuses the edit; a missing APPDATA falls back to the shell folder.
+printf 'not json' | sh "$dir/backup-config.sh" 2>/dev/null
+[ $? = 2 ] || fail 'backup-config did not refuse unreadable input'
+if command -v cygpath >/dev/null 2>&1; then
+  jq -n --arg f "$tmp/proj/mkv-movie/go.mod" '{tool_input: {file_path: $f}}' |
+    env -u APPDATA -u LOCALAPPDATA CLAUDE_PROJECT_DIR="$tmp/proj" sh "$dir/backup-config.sh" >/dev/null 2>&1
+  [ $? = 0 ] || fail 'backup-config refused a non-config edit with APPDATA unset'
+fi
+rm -rf "$(dirname "$tmp")"
+
 [ "$fails" = 0 ] || { echo "$fails failed"; exit 1; }
 echo PASS

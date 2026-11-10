@@ -9,6 +9,24 @@
             "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-go-build.sh\""
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/backup-config.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-openapi-read.sh\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
