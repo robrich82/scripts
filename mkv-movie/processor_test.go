@@ -229,10 +229,14 @@ func TestProcessFile_NoApplier_ReportsPlexPush(t *testing.T) {
 	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingR16}
 	rr := newMovieRatingResolver(nil, cache, false, false, plex, func(string) (string, error) { return "", nil })
 
+	timer := &fakeFileTimer{ctimeNeedsUpdate: true}
 	var result FileResult
-	out := captureStdout(t, func() { result = processFile(path, tmdb, nil, &fakeFileTimer{}, rr, cache, nil, false) })
+	out := captureStdout(t, func() { result = processFile(path, tmdb, nil, timer, rr, cache, nil, false) })
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped", result)
+	}
+	if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
+		t.Errorf("timestamps changed with no applier: mtime %v, ctime %v", timer.setTimesCalls, timer.setCreationTimeCalls)
 	}
 	if r, ok := cache.GetPlexRating("12345"); !ok || r != RatingR16 {
 		t.Errorf("Plex rating cached = %q, %v; want R16", r, ok)

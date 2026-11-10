@@ -348,7 +348,7 @@ func TestRealMKVApplier_Apply_ExtractFails_ReturnsError(t *testing.T) {
 	}
 }
 
-// Without mkvextract the applier can't keep existing tags, so it isn't built.
+// The applier needs mkvextract as well as mkvpropedit to keep existing tags.
 func TestNewRealMKVApplier_NeedsMkvextract(t *testing.T) {
 	for _, tc := range []struct {
 		tools  []string

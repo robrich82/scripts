@@ -448,7 +448,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		os.Remove(posterPath)
 	}
 
-	// Nothing was written, so don't backdate the file or report it updated.
+	// No tags were written to this untagged file, so don't backdate it or
+	// report it updated. Tagged files fall through for timestamp fixes.
 	if applier == nil && !cache.IsMetaApplied(filePath, tmdbID) {
 		fmt.Printf("[SKIP]    %s (mkvpropedit/mkvextract not found; file not changed)", basename)
 		if ratingPushed {

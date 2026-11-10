@@ -397,7 +397,7 @@ the next `mkv-movie --all` writes the new `LAW_RATING` tag and pushes it to Plex
 ### Dependencies
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
-- `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files whose metadata hasn't been written yet are left unchanged, timestamps included, though Plex is still updated)
+- `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files whose metadata hasn't been written yet are skipped, timestamps included; Plex updates still run)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; stream selection is applied for these accounts too
 
