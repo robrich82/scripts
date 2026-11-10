@@ -357,36 +357,42 @@ func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 	}
 }
 
-func TestApplyMKV_NoPosterURL_NoAttachment(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
-	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone, false)
-
-	args := runner.calls[0].args
-	for _, a := range args {
-		if strings.Contains(a, "attachment") {
-			t.Errorf("unexpected attachment arg %q when no poster URL given", a)
-		}
-	}
-}
-
 func TestApplyMKV_ExistingCovers_ReplacedByNewPoster(t *testing.T) {
-	runner := &fakeMKVRunner{
-		avail:       true,
-		attachments: AttachmentInfo{HasJPEG: true, HasPNG: true},
-		applyResult: mkvpropeditSuccessMsg,
-		tagsPath:    "t.xml",
-		posterPath:  "poster.jpg",
-		posterOK:    true,
+	const add = "--attachment-name cover.jpg --attachment-mime-type image/jpeg --add-attachment poster.jpg"
+	const delJPEG = "--delete-attachment mime-type:image/jpeg "
+	const delPNG = "--delete-attachment mime-type:image/png "
+	cases := []struct {
+		name     string
+		existing AttachmentInfo
+		want     string
+	}{
+		{"no cover", AttachmentInfo{}, add},
+		{"jpeg only", AttachmentInfo{HasJPEG: true}, delJPEG + add},
+		{"png only", AttachmentInfo{HasPNG: true}, delPNG + add},
+		{"jpeg and png", AttachmentInfo{HasJPEG: true, HasPNG: true}, delJPEG + delPNG + add},
 	}
-	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone, false)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeMKVRunner{
+				avail:       true,
+				attachments: tc.existing,
+				applyResult: mkvpropeditSuccessMsg,
+				tagsPath:    "t.xml",
+				posterPath:  "poster.jpg",
+				posterOK:    true,
+			}
+			p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+			p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone, false)
 
-	args := strings.Join(runner.calls[0].args, " ")
-	want := "--delete-attachment mime-type:image/jpeg --delete-attachment mime-type:image/png " +
-		"--attachment-name cover.jpg --attachment-mime-type image/jpeg --add-attachment poster.jpg"
-	if !strings.Contains(args, want) {
-		t.Errorf("expected covers deleted then poster added, got: %s", args)
+			args := runner.calls[0].args
+			idx := slices.Index(args, "--delete-attachment")
+			if idx < 0 {
+				idx = slices.Index(args, "--attachment-name")
+			}
+			if got := strings.Join(args[idx:], " "); got != tc.want {
+				t.Errorf("attachment args = %q; want %q", got, tc.want)
+			}
+		})
 	}
 }
 

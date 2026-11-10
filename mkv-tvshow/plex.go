@@ -125,14 +125,14 @@ func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	}
 }
 
-// plexGet performs a GET request to path (relative to baseURL) with an
-// Accept: application/json header. The Plex token goes in a header, not the
-// URL, so transport errors (which print the URL) can't leak it.
+// plexGet is plexRequest with GET.
 func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
 	return c.plexRequest(http.MethodGet, path)
 }
 
-// plexRequest is plexGet for any method.
+// plexRequest sends method to path (relative to baseURL) with an
+// Accept: application/json header. The Plex token goes in a header, not the
+// URL, so transport errors (which print the URL) can't leak it.
 func (c *httpPlexClient) plexRequest(method, path string) (*http.Response, error) {
 	u := c.baseURL + path
 	req, err := http.NewRequest(method, u, nil)
