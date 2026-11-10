@@ -37,5 +37,5 @@ openapi:
 	curl -fsSL https://developer.plex.tv/pms/ \
 	  | sed -n 's/^[[:space:]]*const __redoc_state = \(.*\);[[:space:]]*$$/\1/p' \
 	  | jq -e '.spec.data | select(.openapi and .paths)' > openapi.json.tmp \
-	  || { rm -f openapi.json.tmp; exit 1; }
+	  || { rm -f openapi.json.tmp; echo "openapi: no spec found on developer.plex.tv/pms/" >&2; exit 1; }
 	mv openapi.json.tmp openapi.json
