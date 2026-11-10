@@ -55,4 +55,4 @@ vuln:
 	cd sw-update && govulncheck ./...
 
 clean:
-	rmdir /s /q dist 2>nul || true
+	rm -rf dist

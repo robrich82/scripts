@@ -6,22 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All code in this project should be written in Go where possible.
 
 ## Git Commits
-After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `make vet`, `make vet-linux` or `gofmt` before committing.
+After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `make vet` or `make vet-linux` before committing.
 
 ## README
 When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change.
 
 ## Build, Test & Lint
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
+In a worktree, run `make` and these skills from the worktree directory, and give `twin-port-checker` the worktree path. From the main checkout they build, test and diff `main` instead.
 
 - `make all` / `make <tool>` — build to `dist/<tool>.exe`. The make target always equals the module directory name.
 - `make vet` — `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters and formatter are configured in `.golangci.yml` and pinned in `mise.toml`; `mise install` provides them. Suppress a finding with `//nolint:<linter> // reason`, not staticcheck's `//lint:ignore`.
 - `make vet-linux` — `GOOS=linux go vet ./...` and `GOOS=linux golangci-lint run ./...` per module, to type-check and lint the non-Windows stubs.
 - `make test` — `go test ./...` per module.
 - `make vuln` — `govulncheck` per module (needs network).
+- `make clean` — delete `dist/`.
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per module that has a `go.mod` (only those with changed files, except on the weekly run or a `ci.yml`, `mise.toml` or `.golangci.yml` change), and runs the same check as `make vet-linux`. `make vet` does not, so run `make vet-linux` as well (`/check` and `/finish` do).
+CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml` or `.golangci.yml` change). Each job runs the equivalent of `make vet`, `make vet-linux` and `make test`, plus govulncheck, which only fails the weekly run.
 
 Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`, in sessions started at the repo root.
 - The block is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
