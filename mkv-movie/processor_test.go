@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -186,6 +187,65 @@ func TestProcessFile_AlreadyApplied_MtimeCurrent_OK(t *testing.T) {
 	}
 }
 
+func TestProcessFile_NoApplier_LeavesFileAlone(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	timer := &fakeFileTimer{ctimeNeedsUpdate: true}
+	cache := makeCache(t)
+
+	result := processFile(path, tmdb, nil, timer, nil, cache, nil, false)
+	if result != ResultSkipped {
+		t.Errorf("got %v, want ResultSkipped", result)
+	}
+	if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
+		t.Errorf("timestamps changed with no applier: mtime %v, ctime %v", timer.setTimesCalls, timer.setCreationTimeCalls)
+	}
+	if cache.IsMetaApplied(path, "12345") {
+		t.Error("file marked applied with no applier")
+	}
+}
+
+func TestProcessFile_NoApplier_ForcedTaggedFileStillGetsTimestamps(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	timer := &fakeFileTimer{}
+	cache := makeCache(t)
+	cache.SetTMDBID("Avengers Endgame:2019", "12345")
+	cache.MarkMetaApplied(path, "12345")
+
+	result := processFile(path, tmdb, nil, timer, nil, cache, nil, true /* force */)
+	if result != ResultUpdated {
+		t.Errorf("got %v, want ResultUpdated", result)
+	}
+	if len(timer.setTimesCalls) != 1 {
+		t.Errorf("SetTimes calls = %v, want 1", timer.setTimesCalls)
+	}
+}
+
+func TestProcessFile_NoApplier_ReportsPlexPush(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	cache := makeCache(t)
+	plex := &fakePlexMovieClient{titleRatingKey: "77", contentRating: RatingR16}
+	rr := newMovieRatingResolver(nil, cache, false, false, plex, func(string) (string, error) { return "", nil })
+
+	timer := &fakeFileTimer{ctimeNeedsUpdate: true}
+	var result FileResult
+	out := captureStdout(t, func() { result = processFile(path, tmdb, nil, timer, rr, cache, nil, false) })
+	if result != ResultSkipped {
+		t.Errorf("got %v, want ResultSkipped", result)
+	}
+	if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
+		t.Errorf("timestamps changed with no applier: mtime %v, ctime %v", timer.setTimesCalls, timer.setCreationTimeCalls)
+	}
+	if r, ok := cache.GetPlexRating("12345"); !ok || r != RatingR16 {
+		t.Errorf("Plex rating cached = %q, %v; want R16", r, ok)
+	}
+	if !strings.Contains(out, "[SKIP]") || !strings.Contains(out, "Plex rating: R16") {
+		t.Errorf("output doesn't report the Plex push:\n%s", out)
+	}
+}
+
 func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)
@@ -220,6 +280,25 @@ func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
 	}
 	if !cache.IsMetaApplied(path, "12345") {
 		t.Error("meta should be marked applied after successful apply")
+	}
+}
+
+// Applying without the tags would mark the file applied and never write them.
+func TestProcessFile_TagsTempFileFails_ErrorWithoutApply(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	missing := filepath.Join(t.TempDir(), "missing")
+	for _, env := range []string{"TMP", "TEMP", "TMPDIR"} {
+		t.Setenv(env, missing)
+	}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	applier := &fakeApplier{}
+	cache := makeCache(t)
+
+	if got := processFile(path, tmdb, applier, &fakeFileTimer{}, nil, cache, nil, false); got != ResultError {
+		t.Errorf("got %v, want ResultError", got)
+	}
+	if len(applier.calls) != 0 || cache.IsMetaApplied(path, "12345") {
+		t.Errorf("Apply calls = %d, meta applied = %v; want neither", len(applier.calls), cache.IsMetaApplied(path, "12345"))
 	}
 }
 

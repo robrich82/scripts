@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// MKVTagger abstracts tag extraction and application for the deband-only workflow.
+// MKVTagger abstracts tag extraction and application.
 type MKVTagger interface {
 	Available() bool
 	ExtractTags(filePath string) (string, error)
@@ -33,16 +33,12 @@ func (r *realMKVTagger) Available() bool {
 	return r.mkvpropedit != "" && r.mkvextract != ""
 }
 
+// ExtractTags returns all Matroska tags XML for filePath, per-track included,
+// or "" when the file has no tags.
 func (r *realMKVTagger) ExtractTags(filePath string) (string, error) {
 	if r.mkvextract == "" {
 		return "", fmt.Errorf("mkvextract not found in PATH")
 	}
-	return extractMKVTags(r.mkvextract, filePath)
-}
-
-// extractMKVTags runs mkvextract to read the current tag XML from filePath.
-// Returns "" (with no error) when the file carries no tags.
-func extractMKVTags(mkvextract, filePath string) (string, error) {
 	f, err := os.CreateTemp("", "mkv-tags-*.xml")
 	if err != nil {
 		return "", err
@@ -51,7 +47,7 @@ func extractMKVTags(mkvextract, filePath string) (string, error) {
 	f.Close()
 	defer os.Remove(name)
 
-	out, err := exec.Command(mkvextract, filePath, "tags", name).CombinedOutput()
+	out, err := exec.Command(r.mkvextract, filePath, "tags", name).CombinedOutput()
 	if err != nil {
 		// Exit code 1 means warnings only.
 		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() > 1 {
@@ -101,102 +97,218 @@ func (r *realMKVTagger) Cleanup(paths ...string) {
 	}
 }
 
-// debandElementRe matches a DEBAND Simple element in Matroska tag XML.
-var debandElementRe = regexp.MustCompile(`(?s)<Simple>\s*<Name>\s*DEBAND\s*</Name>\s*<String>[^<]*</String>\s*</Simple>`)
+// emptyTagsDoc is a tags document with no tags. mkvpropedit rejects an empty
+// file but accepts this.
+const emptyTagsDoc = "<Tags></Tags>"
 
-// updateDebandInXML adds or removes the DEBAND tag element from a Matroska
-// tags XML string. If deband is false the element is removed; if true it is
-// inserted before the closing </Tag>. When the XML has no existing <Tag>
-// block and deband is true, a minimal tag block is returned.
-func updateDebandInXML(tagsXML string, deband bool) string {
-	updated := debandElementRe.ReplaceAllString(tagsXML, "")
-
-	if !deband {
-		return updated
+// checkTagsDoc rejects XML that doesn't end with </Tags>. mkvpropedit would
+// apply a self-closed <Tags/> as "no tags" and reject a truncated document.
+func checkTagsDoc(tagsXML string) error {
+	trimmed := strings.TrimSpace(tagsXML)
+	if !strings.HasSuffix(trimmed, "</Tags>") {
+		// The tail shows where it went wrong; the head is mkvextract's header.
+		tail := []rune(trimmed)
+		if len(tail) > 80 {
+			tail = tail[len(tail)-80:]
+		}
+		return fmt.Errorf("not a Matroska tags document, ends with %q", string(tail))
 	}
-
-	const debandEl = "<Simple><Name>DEBAND</Name><String>true</String></Simple>"
-
-	// Insert into the movie-level (TargetTypeValue 50) tag block. Using the last
-	// </Tag> in the document could nest DEBAND inside a per-track statistics tag
-	// instead, where downstream tools reading movie-level tags wouldn't find it.
-	if pos := movieTagCloseIndex(updated); pos >= 0 {
-		return updated[:pos] + debandEl + updated[pos:]
-	}
-
-	// No movie-level block, but other (per-track) tags may exist — add a
-	// movie-level block before </Tags> rather than discarding them.
-	newTag := "<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>" + debandEl + "</Tag>"
-	if idx := strings.LastIndex(updated, "</Tags>"); idx >= 0 {
-		return updated[:idx] + newTag + updated[idx:]
-	}
-
-	// No existing tag block — build minimal XML from scratch.
-	return buildMovieTagXML("", "", "", RatingNone, true)
+	return nil
 }
 
-// targetTypeValue50Re matches the movie-level target marker in Matroska tag XML.
-var targetTypeValue50Re = regexp.MustCompile(`<TargetTypeValue>\s*50\s*</TargetTypeValue>`)
+// simpleTagRe matches the opening and closing tags of <Simple> elements.
+var simpleTagRe = regexp.MustCompile(`</?Simple>`)
 
-// movieTagCloseIndex returns the index of the </Tag> that closes the movie-level
-// (TargetTypeValue 50) tag block, or -1 if there is no such block.
-func movieTagCloseIndex(xml string) int {
-	m := targetTypeValue50Re.FindStringIndex(xml)
+// topLevelSimples returns the [start, end) spans of the outermost <Simple>
+// elements in s, skipping nested ones.
+func topLevelSimples(s string) [][2]int {
+	var spans [][2]int
+	depth, start := 0, 0
+	for _, loc := range simpleTagRe.FindAllStringIndex(s, -1) {
+		if s[loc[0]+1] != '/' {
+			if depth == 0 {
+				start = loc[0]
+			}
+			depth++
+			continue
+		}
+		if depth == 0 {
+			continue // stray </Simple>
+		}
+		depth--
+		if depth == 0 {
+			spans = append(spans, [2]int{start, loc[1]})
+		}
+	}
+	return spans
+}
+
+var (
+	simpleNameRe   = regexp.MustCompile(`<Name>\s*([^<]*?)\s*</Name>`)
+	simpleStringRe = regexp.MustCompile(`<String>\s*([^<]*?)\s*</String>`)
+	lawRatingRe    = regexp.MustCompile(`<Name>\s*LAW_RATING\s*</Name>`)
+)
+
+// simpleEl is a <Simple>'s own <Name> and <String>, and its nested <Simple>s.
+type simpleEl struct{ name, value, nested string }
+
+func parseSimple(el string) simpleEl {
+	inner := strings.TrimSuffix(strings.TrimPrefix(el, "<Simple>"), "</Simple>")
+	var own, nested strings.Builder
+	last := 0
+	for _, s := range topLevelSimples(inner) {
+		own.WriteString(inner[last:s[0]])
+		nested.WriteString(inner[s[0]:s[1]])
+		last = s[1]
+	}
+	own.WriteString(inner[last:])
+	e := simpleEl{nested: nested.String()}
+	if m := simpleNameRe.FindStringSubmatch(own.String()); m != nil {
+		e.name = m[1]
+	}
+	if m := simpleStringRe.FindStringSubmatch(own.String()); m != nil {
+		e.value = m[1]
+	}
+	return e
+}
+
+func isDebandElement(e simpleEl) bool { return e.name == "DEBAND" }
+
+// isRatingElement reports whether e is the NZ COUNTRY element holding LAW_RATING.
+func isRatingElement(e simpleEl) bool {
+	return e.name == "COUNTRY" && e.value == "NZ" && lawRatingRe.MatchString(e.nested)
+}
+
+// isManagedElement reports whether e is one this tool writes.
+func isManagedElement(e simpleEl) bool {
+	switch e.name {
+	case "DATE", "YEAR", "SUMMARY", "TMDB_ID", "DEBAND":
+		return true
+	}
+	return isRatingElement(e)
+}
+
+// removeElements deletes from every <Tag> block the top-level <Simple>
+// elements that drop selects, and deletes a block it leaves with no <Simple>,
+// which mkvpropedit would reject.
+func removeElements(tagsXML string, drop func(fileLevel bool, e simpleEl) bool) string {
+	return tagBlockRe.ReplaceAllStringFunc(tagsXML, func(block string) string {
+		fileLevel := isFileLevelTag(block)
+		spans := topLevelSimples(block)
+		kept := len(spans)
+		for i := len(spans) - 1; i >= 0; i-- {
+			s := spans[i]
+			if drop(fileLevel, parseSimple(block[s[0]:s[1]])) {
+				block = strings.TrimRight(block[:s[0]], " \t\r\n") + block[s[1]:]
+				kept--
+			}
+		}
+		if kept == 0 && len(spans) > 0 {
+			return ""
+		}
+		return block
+	})
+}
+
+// replaceElement removes every top-level element for which match returns
+// true and, if el is not empty, adds el to the file-level tag block. Blank
+// input is treated as a file with no tags.
+func replaceElement(tagsXML string, match func(simpleEl) bool, el string) (string, error) {
+	if strings.TrimSpace(tagsXML) == "" {
+		tagsXML = emptyTagsDoc
+	}
+	if err := checkTagsDoc(tagsXML); err != nil {
+		return "", err
+	}
+	updated := removeElements(tagsXML, func(_ bool, e simpleEl) bool { return match(e) })
+	if el == "" {
+		return updated, nil
+	}
+	return insertFileLevelElements(updated, el), nil
+}
+
+// updateDebandInXML removes the DEBAND element from a Matroska tags XML string
+// and, if deband is true, adds it to the file-level tag block.
+func updateDebandInXML(tagsXML string, deband bool) (string, error) {
+	var el string
+	if deband {
+		el = "<Simple><Name>DEBAND</Name><String>true</String></Simple>"
+	}
+	return replaceElement(tagsXML, isDebandElement, el)
+}
+
+// tagBlockRe matches one <Tag> element; Matroska tags don't nest <Tag>.
+var tagBlockRe = regexp.MustCompile(`(?s)<Tag>.*?</Tag>`)
+
+// targetsRe matches a <Tag>'s <Targets>, capturing its contents.
+var targetsRe = regexp.MustCompile(`(?s)<Targets\s*/>|<Targets>(.*?)</Targets>`)
+
+var targetTypeValueRe = regexp.MustCompile(`<TargetTypeValue>\s*(\d+)\s*</TargetTypeValue>`)
+
+// isFileLevelTag reports whether a <Tag> block applies to the whole file: no
+// track, edition, chapter or attachment UID, and TargetTypeValue 50 or none.
+// mkvextract omits the default 50 and writes <Targets />.
+func isFileLevelTag(block string) bool {
+	m := targetsRe.FindStringSubmatch(block)
 	if m == nil {
-		return -1
+		return true
 	}
-	rel := strings.Index(xml[m[1]:], "</Tag>")
-	if rel < 0 {
-		return -1
+	if strings.Contains(m[1], "UID>") {
+		return false
 	}
-	return m[1] + rel
+	v := targetTypeValueRe.FindStringSubmatch(m[1])
+	return v == nil || v[1] == "50"
 }
 
-// removeMovieTagBlock strips the entire movie-level (TargetTypeValue 50) <Tag>
-// block from xml, leaving any per-track tag blocks intact. Returns xml unchanged
-// when there is no movie-level block.
-func removeMovieTagBlock(xml string) string {
-	m := targetTypeValue50Re.FindStringIndex(xml)
-	if m == nil {
-		return xml
+// fileLevelTagCloseIndex returns the index of the </Tag> that closes the
+// first file-level tag block, or -1 if there is none.
+func fileLevelTagCloseIndex(xml string) int {
+	for _, loc := range tagBlockRe.FindAllStringIndex(xml, -1) {
+		if isFileLevelTag(xml[loc[0]:loc[1]]) {
+			return loc[1] - len("</Tag>")
+		}
 	}
-	open := strings.LastIndex(xml[:m[0]], "<Tag>")
-	if open < 0 {
-		return xml
-	}
-	closeRel := strings.Index(xml[m[1]:], "</Tag>")
-	if closeRel < 0 {
-		return xml
-	}
-	end := m[1] + closeRel + len("</Tag>")
-	return xml[:open] + xml[end:]
+	return -1
 }
 
-// mergeMovieTags combines the file's existing tag XML (from mkvextract, possibly
-// empty) with a freshly built tag document (buildMovieTagXML output). The tool's
-// movie-level tags replace any previous movie-level block, while per-track tags
-// present in existing (e.g. mkvmerge's _STATISTICS_* tags) are preserved. This
-// avoids the data loss of applying the fresh document with "--tags all:", which
-// would otherwise drop every tag not represented in it.
-func mergeMovieTags(existing, fresh string) string {
+// insertFileLevelElements adds els to the first file-level tag block, or to a
+// new one before </Tags>: Plex doesn't read them from a per-track block.
+// tagsXML must pass checkTagsDoc.
+func insertFileLevelElements(tagsXML, els string) string {
+	if pos := fileLevelTagCloseIndex(tagsXML); pos >= 0 {
+		return tagsXML[:pos] + els + tagsXML[pos:]
+	}
+	idx := strings.LastIndex(tagsXML, "</Tags>")
+	return tagsXML[:idx] + "<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>" + els + "</Tag>" + tagsXML[idx:]
+}
+
+// mergeMovieTags merges fresh (buildMovieTagXML output) into existing (mkvextract output,
+// "" when untagged), because "--tags all:" replaces every tag. It replaces
+// this tool's file-level elements, clears DEBAND and the NZ rating from other
+// blocks too, and keeps everything else.
+func mergeMovieTags(existing, fresh string) (string, error) {
 	fresh = strings.TrimSpace(fresh)
 	if fresh == "" {
-		return existing
+		return existing, nil
 	}
-	if strings.TrimSpace(existing) == "" || !strings.Contains(existing, "<Tags") {
-		return fresh
+	if strings.TrimSpace(existing) == "" {
+		return fresh, nil
 	}
-	open := strings.Index(fresh, "<Tags>")
-	closeIdx := strings.LastIndex(fresh, "</Tags>")
-	if open < 0 || closeIdx < 0 {
-		return fresh
+	if err := checkTagsDoc(existing); err != nil {
+		return "", err
 	}
-	freshBlock := fresh[open+len("<Tags>") : closeIdx]
+	targetsEnd := strings.Index(fresh, "</Targets>")
+	tagEnd := strings.LastIndex(fresh, "</Tag>")
+	if targetsEnd < 0 || tagEnd < targetsEnd {
+		return "", fmt.Errorf("fresh tags have no <Tag> block: %q", fresh)
+	}
+	freshEls := fresh[targetsEnd+len("</Targets>") : tagEnd]
 
-	stripped := removeMovieTagBlock(existing)
-	insertAt := strings.LastIndex(stripped, "</Tags>")
-	if insertAt < 0 {
-		return fresh
-	}
-	return stripped[:insertAt] + freshBlock + stripped[insertAt:]
+	stripped := removeElements(existing, func(fileLevel bool, e simpleEl) bool {
+		if fileLevel {
+			return isManagedElement(e)
+		}
+		return isDebandElement(e) || isRatingElement(e)
+	})
+	return insertFileLevelElements(stripped, freshEls), nil
 }

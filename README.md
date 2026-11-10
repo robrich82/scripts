@@ -17,7 +17,7 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 
 - Go 1.27.3, golangci-lint and govulncheck, pinned in `mise.toml`: run `mise install`.
   - A linter `go install`ed into `go env GOBIN` shadows the pinned one; delete it there.
-- [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
+- [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`, `mkvextract`) — required by mkv-audit, mkv-movie, mkv-tvshow
 - [ExifTool](https://exiftool.org/) (`exiftool` on PATH) — used by mkv-music's audio timestamp sync
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
 
@@ -397,8 +397,7 @@ the next `mkv-movie --all` writes the new `LAW_RATING` tag and pushes it to Plex
 ### Dependencies
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
-- `mkvpropedit` — writes metadata to MKV files (optional; a warning is shown if missing)
-- `mkvextract` — required for `--deband-only` mode (part of MKVToolNix)
+- `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files whose metadata hasn't been written yet are skipped, timestamps included; Plex updates still run)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; stream selection is applied for these accounts too
 
@@ -409,7 +408,7 @@ Stream selection is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_T
 The cached "already applied" value records the language given to every configured account (`ja|alt=ja|alt2=en`), so adding a token re-applies on the next run rather than being skipped because the language itself did not change.
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
-> platforms the internal header is still updated if `mkvpropedit` is available.
+> platforms the internal header is still updated if `mkvpropedit` and `mkvextract` are available.
 
 ### Configuration
 
@@ -617,6 +616,7 @@ runs. You can ignore a single episode, a whole season, or the entire show.
 
 - TMDB API (requires `TMDB_API_KEY` environment variable)
 - `mkvpropedit` — applies metadata edits
+- `mkvextract` — reads the existing tags so writing new ones keeps the rest; an episode whose tags it can't read isn't updated (part of MKVToolNix)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to push NZ ratings and set per-show audio language in Plex
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; the audio language is set for these accounts too
 

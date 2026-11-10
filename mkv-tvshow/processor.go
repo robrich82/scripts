@@ -589,14 +589,23 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 		args = append(args, "--set", "date="+dateStr)
 	}
 
-	// Write tags XML to a temp file.
+	// Write the tags, merged into the file's existing ones, to a temp file.
 	var tagsPath string
 	if xml := buildTagXML(summary, tmdbID, dateStr, rating, deband); xml != "" {
-		var err error
-		tagsPath, err = p.mkv.WriteTempTags(xml)
-		if err == nil {
-			args = append(args, "--tags", "all:"+tagsPath)
+		existing, err := p.mkv.ExtractTags(filePath)
+		if err != nil {
+			fmt.Printf("  [!] Failed to extract tags: %v\n", err)
+			return false
 		}
+		if xml, err = mergeEpisodeTags(existing, xml); err != nil {
+			fmt.Printf("  [!] Failed to merge tags: %v\n", err)
+			return false
+		}
+		if tagsPath, err = p.mkv.WriteTempTags(xml); err != nil {
+			fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
+			return false
+		}
+		args = append(args, "--tags", "all:"+tagsPath)
 	}
 
 	// Delete existing image attachments before adding the new poster.
@@ -826,7 +835,13 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 		return false
 	}
 
-	tagsPath, err := p.mkv.WriteTempTags(updateRatingInXML(currentXML, rating))
+	updatedXML, err := updateRatingInXML(currentXML, rating)
+	if err != nil {
+		fmt.Printf("  [!] Failed to update tags: %v\n", err)
+		return false
+	}
+
+	tagsPath, err := p.mkv.WriteTempTags(updatedXML)
 	if err != nil {
 		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
 		return false
@@ -882,7 +897,11 @@ func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
 		return false
 	}
 
-	updatedXML := updateDebandInXML(currentXML, deband)
+	updatedXML, err := updateDebandInXML(currentXML, deband)
+	if err != nil {
+		fmt.Printf("  [!] Failed to update tags: %v\n", err)
+		return false
+	}
 
 	tagsPath, err := p.mkv.WriteTempTags(updatedXML)
 	if err != nil {

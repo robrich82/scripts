@@ -25,7 +25,8 @@ type TMDBMovieClient interface {
 	GetMovieDetails(tmdbID string) (MovieDetails, error)
 }
 
-// MKVApplier applies metadata to an MKV file via mkvpropedit in a single call.
+// MKVApplier applies metadata to an MKV file via mkvpropedit in a single call,
+// reading the existing tags with mkvextract first so they are kept.
 type MKVApplier interface {
 	// Apply sets the title, date header, tags, and poster on filePath.
 	// Pass empty strings to skip individual fields.
@@ -35,17 +36,36 @@ type MKVApplier interface {
 }
 
 type realMKVApplier struct {
-	path    string
-	extract string // mkvextract path; "" disables tag-preserving merge
+	path        string
+	extractTags func(filePath string) (string, error)
 }
 
+// newRealMKVApplier needs mkvextract as well as mkvpropedit: writing tags
+// without reading the existing ones first would delete them.
 func newRealMKVApplier() (*realMKVApplier, error) {
-	path, err := exec.LookPath("mkvpropedit")
-	if err != nil {
-		return nil, err
+	tagger := newRealMKVTagger()
+	if !tagger.Available() {
+		return nil, errors.New("mkvpropedit or mkvextract not found in PATH")
 	}
-	extract, _ := exec.LookPath("mkvextract") // best-effort; merge is skipped if absent
-	return &realMKVApplier{path: path, extract: extract}, nil
+	return &realMKVApplier{path: tagger.mkvpropedit, extractTags: tagger.ExtractTags}, nil
+}
+
+// mergedTagsFile writes the tags at tagsPath, merged into filePath's existing
+// tags, to a new temp file and returns its path.
+func (a *realMKVApplier) mergedTagsFile(filePath, tagsPath string) (string, error) {
+	fresh, err := os.ReadFile(tagsPath)
+	if err != nil {
+		return "", err
+	}
+	existing, err := a.extractTags(filePath)
+	if err != nil {
+		return "", err
+	}
+	merged, err := mergeMovieTags(existing, string(fresh))
+	if err != nil {
+		return "", err
+	}
+	return writeTempTagFile(merged)
 }
 
 func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath string) error {
@@ -65,22 +85,12 @@ func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath st
 		}
 	}
 	if tagsPath != "" {
-		effectiveTags := tagsPath
-		// Merge the tool-managed movie-level tags into the file's existing tags
-		// so that "--tags all:" doesn't wipe per-track statistics tags (or any
-		// other tags this tool doesn't manage). Falls back to the fresh document
-		// when mkvextract is unavailable or extraction/merge fails.
-		if a.extract != "" {
-			if fresh, rerr := os.ReadFile(tagsPath); rerr == nil {
-				if existing, eerr := extractMKVTags(a.extract, filePath); eerr == nil {
-					if mp, werr := writeTempTagFile(mergeMovieTags(existing, string(fresh))); werr == nil {
-						defer os.Remove(mp)
-						effectiveTags = mp
-					}
-				}
-			}
+		merged, err := a.mergedTagsFile(filePath, tagsPath)
+		if err != nil {
+			return fmt.Errorf("tags: %w", err)
 		}
-		args = append(args, "--tags", "all:"+effectiveTags)
+		defer os.Remove(merged)
+		args = append(args, "--tags", "all:"+merged)
 	}
 	if posterPath != "" {
 		args = append(args,
@@ -366,6 +376,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			tagsPath, err = writeTempTagFile(xml)
 			if err != nil {
 				fmt.Printf("[ERR]     %s: write tags: %v\n", basename, err)
+				return ResultError
 			}
 		}
 		if url := details.PosterURL(); url != "" {
@@ -388,6 +399,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	// Both are independent of needsApply so corrected cache entries are always propagated.
 	var langSet string
 	var langAltSuffix string
+	ratingPushed := false
 	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet() {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
 		if plexErr != nil {
@@ -409,6 +421,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					fmt.Printf("  [!] Plex rating update failed: %v\n", err)
 				} else {
 					cache.SetPlexRating(tmdbID, rating)
+					ratingPushed = true
 				}
 			}
 			if plexStreamsNeedSet() {
@@ -433,6 +446,20 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 	if posterPath != "" {
 		os.Remove(posterPath)
+	}
+
+	// No tags were written to this untagged file, so don't backdate it or
+	// report it updated. Tagged files fall through for timestamp fixes.
+	if applier == nil && !cache.IsMetaApplied(filePath, tmdbID) {
+		fmt.Printf("[SKIP]    %s (mkvpropedit/mkvextract not found; file not changed)", basename)
+		if ratingPushed {
+			fmt.Printf(" (Plex rating: %s)", rating)
+		}
+		if langSet != "" {
+			fmt.Printf(" (Plex lang: %s%s)", langSet, langAltSuffix)
+		}
+		fmt.Println()
+		return ResultSkipped
 	}
 
 	// 8. Restore timestamps — mkvpropedit updates mtime as a side effect.
@@ -641,7 +668,11 @@ func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer F
 		return false
 	}
 
-	updatedXML := updateDebandInXML(currentXML, deband)
+	updatedXML, err := updateDebandInXML(currentXML, deband)
+	if err != nil {
+		fmt.Printf("  [!] Failed to update tags: %v\n", err)
+		return false
+	}
 
 	tagsPath, err := tagger.WriteTempTags(updatedXML)
 	if err != nil {
