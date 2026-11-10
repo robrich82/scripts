@@ -589,9 +589,14 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 		args = append(args, "--set", "date="+dateStr)
 	}
 
-	// Write tags XML to a temp file.
+	// Write tags XML to a temp file, merged into the file's existing tags so
+	// "--tags all:" keeps per-track tags. Without mkvextract the fresh
+	// document is applied on its own.
 	var tagsPath string
 	if xml := buildTagXML(summary, tmdbID, dateStr, rating, deband); xml != "" {
+		if existing, err := p.mkv.ExtractTags(filePath); err == nil {
+			xml = mergeEpisodeTags(existing, xml)
+		}
 		var err error
 		tagsPath, err = p.mkv.WriteTempTags(xml)
 		if err == nil {

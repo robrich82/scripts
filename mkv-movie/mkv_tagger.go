@@ -101,13 +101,37 @@ func (r *realMKVTagger) Cleanup(paths ...string) {
 	}
 }
 
+// leafChildren matches the leaf elements mkvextract may write inside a
+// <Simple> besides <Name> (<String>, <TagLanguageIETF>, <TagDefault>, …).
+const leafChildren = `(?:\s*<\w+>[^<]*</\w+>)*`
+
+// simpleElementRe returns a pattern for a leaf <Simple> element called name,
+// in the compact form buildMovieTagXML writes or the indented form mkvextract
+// writes (which adds <TagLanguageIETF> after the value).
+func simpleElementRe(name string) string {
+	return `<Simple>\s*<Name>\s*` + name + `\s*</Name>` + leafChildren + `\s*</Simple>`
+}
+
 // debandElementRe matches a DEBAND Simple element in Matroska tag XML.
-var debandElementRe = regexp.MustCompile(`(?s)<Simple>\s*<Name>\s*DEBAND\s*</Name>\s*<String>[^<]*</String>\s*</Simple>`)
+var debandElementRe = regexp.MustCompile(simpleElementRe("DEBAND"))
+
+// countryRatingElementRe matches the COUNTRY Simple element with its nested
+// LAW_RATING.
+var countryRatingElementRe = regexp.MustCompile(`<Simple>\s*<Name>\s*COUNTRY\s*</Name>` + leafChildren +
+	`\s*` + simpleElementRe("LAW_RATING") + leafChildren + `\s*</Simple>`)
+
+// managedElementRes match every element buildMovieTagXML writes, so a merge
+// can replace them without touching anything else in the file-level tags.
+var managedElementRes = []*regexp.Regexp{
+	regexp.MustCompile(simpleElementRe(`(?:DATE|YEAR|SUMMARY|TMDB_ID)`)),
+	countryRatingElementRe,
+	debandElementRe,
+}
 
 // updateDebandInXML adds or removes the DEBAND tag element from a Matroska
 // tags XML string. If deband is false the element is removed; if true it is
-// inserted before the closing </Tag>. When the XML has no existing <Tag>
-// block and deband is true, a minimal tag block is returned.
+// inserted into the file-level tag block. When the XML has no <Tags> document
+// and deband is true, a minimal tag block is returned.
 func updateDebandInXML(tagsXML string, deband bool) string {
 	updated := debandElementRe.ReplaceAllString(tagsXML, "")
 
@@ -117,67 +141,70 @@ func updateDebandInXML(tagsXML string, deband bool) string {
 
 	const debandEl = "<Simple><Name>DEBAND</Name><String>true</String></Simple>"
 
-	// Insert into the movie-level (TargetTypeValue 50) tag block. Using the last
-	// </Tag> in the document could nest DEBAND inside a per-track statistics tag
-	// instead, where downstream tools reading movie-level tags wouldn't find it.
-	if pos := movieTagCloseIndex(updated); pos >= 0 {
-		return updated[:pos] + debandEl + updated[pos:]
-	}
-
-	// No movie-level block, but other (per-track) tags may exist — add a
-	// movie-level block before </Tags> rather than discarding them.
-	newTag := "<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>" + debandEl + "</Tag>"
-	if idx := strings.LastIndex(updated, "</Tags>"); idx >= 0 {
-		return updated[:idx] + newTag + updated[idx:]
+	if xml, ok := insertFileLevelElements(updated, debandEl); ok {
+		return xml
 	}
 
 	// No existing tag block — build minimal XML from scratch.
 	return buildMovieTagXML("", "", "", RatingNone, true)
 }
 
-// targetTypeValue50Re matches the movie-level target marker in Matroska tag XML.
-var targetTypeValue50Re = regexp.MustCompile(`<TargetTypeValue>\s*50\s*</TargetTypeValue>`)
+// tagBlockRe matches one <Tag> element; Matroska tags don't nest <Tag>.
+var tagBlockRe = regexp.MustCompile(`(?s)<Tag>.*?</Tag>`)
 
-// movieTagCloseIndex returns the index of the </Tag> that closes the movie-level
-// (TargetTypeValue 50) tag block, or -1 if there is no such block.
-func movieTagCloseIndex(xml string) int {
-	m := targetTypeValue50Re.FindStringIndex(xml)
+// targetsRe matches a <Tag>'s <Targets>, capturing its contents.
+var targetsRe = regexp.MustCompile(`(?s)<Targets\s*/>|<Targets>(.*?)</Targets>`)
+
+var targetTypeValueRe = regexp.MustCompile(`<TargetTypeValue>\s*(\d+)\s*</TargetTypeValue>`)
+
+// isFileLevelTag reports whether a <Tag> block applies to the whole file: no
+// track, edition, chapter or attachment UID, and TargetTypeValue 50 or none.
+// mkvextract omits the default 50 and writes <Targets />.
+func isFileLevelTag(block string) bool {
+	m := targetsRe.FindStringSubmatch(block)
 	if m == nil {
-		return -1
+		return true
 	}
-	rel := strings.Index(xml[m[1]:], "</Tag>")
-	if rel < 0 {
-		return -1
+	if strings.Contains(m[1], "UID>") {
+		return false
 	}
-	return m[1] + rel
+	v := targetTypeValueRe.FindStringSubmatch(m[1])
+	return v == nil || v[1] == "50"
 }
 
-// removeMovieTagBlock strips the entire movie-level (TargetTypeValue 50) <Tag>
-// block from xml, leaving any per-track tag blocks intact. Returns xml unchanged
-// when there is no movie-level block.
-func removeMovieTagBlock(xml string) string {
-	m := targetTypeValue50Re.FindStringIndex(xml)
-	if m == nil {
-		return xml
+// fileLevelTagCloseIndex returns the index of the </Tag> that closes the
+// first file-level tag block, or -1 if there is none.
+func fileLevelTagCloseIndex(xml string) int {
+	for _, loc := range tagBlockRe.FindAllStringIndex(xml, -1) {
+		if isFileLevelTag(xml[loc[0]:loc[1]]) {
+			return loc[1] - len("</Tag>")
+		}
 	}
-	open := strings.LastIndex(xml[:m[0]], "<Tag>")
-	if open < 0 {
-		return xml
-	}
-	closeRel := strings.Index(xml[m[1]:], "</Tag>")
-	if closeRel < 0 {
-		return xml
-	}
-	end := m[1] + closeRel + len("</Tag>")
-	return xml[:open] + xml[end:]
+	return -1
 }
 
-// mergeMovieTags combines the file's existing tag XML (from mkvextract, possibly
-// empty) with a freshly built tag document (buildMovieTagXML output). The tool's
-// movie-level tags replace any previous movie-level block, while per-track tags
-// present in existing (e.g. mkvmerge's _STATISTICS_* tags) are preserved. This
-// avoids the data loss of applying the fresh document with "--tags all:", which
-// would otherwise drop every tag not represented in it.
+// insertFileLevelElements adds els to the first file-level tag block of
+// tagsXML. Inserting before the last </Tag> instead could nest them in a
+// per-track statistics tag, where Plex doesn't read them. With no file-level
+// block but other tags present, a new block is added before </Tags>. Returns
+// false when tagsXML has no <Tags> document at all.
+func insertFileLevelElements(tagsXML, els string) (string, bool) {
+	if pos := fileLevelTagCloseIndex(tagsXML); pos >= 0 {
+		return tagsXML[:pos] + els + tagsXML[pos:], true
+	}
+	if idx := strings.LastIndex(tagsXML, "</Tags>"); idx >= 0 {
+		newTag := "<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>" + els + "</Tag>"
+		return tagsXML[:idx] + newTag + tagsXML[idx:], true
+	}
+	return "", false
+}
+
+// mergeMovieTags combines the file's existing tag XML (from mkvextract,
+// possibly empty) with a freshly built document (buildMovieTagXML output). The
+// elements this tool manages are removed from the file-level blocks and the
+// fresh ones inserted, so per-track tags such as mkvmerge's _STATISTICS_* and
+// file-level tags from other tools survive. Applying fresh alone with
+// "--tags all:" would delete every tag it doesn't contain.
 func mergeMovieTags(existing, fresh string) string {
 	fresh = strings.TrimSpace(fresh)
 	if fresh == "" {
@@ -186,17 +213,24 @@ func mergeMovieTags(existing, fresh string) string {
 	if strings.TrimSpace(existing) == "" || !strings.Contains(existing, "<Tags") {
 		return fresh
 	}
-	open := strings.Index(fresh, "<Tags>")
-	closeIdx := strings.LastIndex(fresh, "</Tags>")
+	open := strings.Index(fresh, "</Targets>")
+	closeIdx := strings.LastIndex(fresh, "</Tag>")
 	if open < 0 || closeIdx < 0 {
 		return fresh
 	}
-	freshBlock := fresh[open+len("<Tags>") : closeIdx]
+	freshEls := fresh[open+len("</Targets>") : closeIdx]
 
-	stripped := removeMovieTagBlock(existing)
-	insertAt := strings.LastIndex(stripped, "</Tags>")
-	if insertAt < 0 {
-		return fresh
+	stripped := tagBlockRe.ReplaceAllStringFunc(existing, func(block string) string {
+		if !isFileLevelTag(block) {
+			return block
+		}
+		for _, re := range managedElementRes {
+			block = re.ReplaceAllString(block, "")
+		}
+		return block
+	})
+	if merged, ok := insertFileLevelElements(stripped, freshEls); ok {
+		return merged
 	}
-	return stripped[:insertAt] + freshBlock + stripped[insertAt:]
+	return fresh
 }

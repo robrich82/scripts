@@ -22,6 +22,7 @@ type fakeMKVRunner struct {
 	cleaned        []string
 	extractTagsXML string
 	extractTagsErr error
+	writtenXML     []string
 }
 
 type applyCall struct {
@@ -43,7 +44,8 @@ func (f *fakeMKVRunner) Apply(filePath string, extraArgs []string) (string, int,
 	return f.applyResult, f.applyRC, f.applyErr
 }
 
-func (f *fakeMKVRunner) WriteTempTags(_ string) (string, error) {
+func (f *fakeMKVRunner) WriteTempTags(xml string) (string, error) {
+	f.writtenXML = append(f.writtenXML, xml)
 	return f.tagsPath, f.tagsErr
 }
 
