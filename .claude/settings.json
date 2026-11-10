@@ -1,19 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(make vet)",
-      "Bash(make vet-linux)",
-      "Bash(make test)",
-      "Bash(mise exec -- make vet)",
-      "Bash(mise exec -- make vet-linux)",
-      "Bash(mise exec -- make test)",
       "Bash(go vet ./...)",
-      "Bash(golangci-lint run ./...)",
       "Bash(golangci-lint fmt --diff ./...)",
-      "Bash(mise exec -- golangci-lint run ./...)",
       "Bash(gofmt -l .)",
       "Bash(git fetch origin -q)",
       "Bash(git fetch -q origin)",
+      "PowerShell(go vet ./...)",
+      "PowerShell(golangci-lint fmt --diff ./...)",
+      "PowerShell(gofmt -l .)",
+      "PowerShell(git fetch origin -q)",
+      "PowerShell(git fetch -q origin)",
       "Skill(build)",
       "Skill(check)"
     ]
