@@ -101,11 +101,17 @@ func (r *realMKVTagger) Cleanup(paths ...string) {
 // file but accepts this.
 const emptyTagsDoc = "<Tags></Tags>"
 
-// checkTagsDoc rejects XML without a closing </Tags>. mkvpropedit would apply
-// a self-closed <Tags/> as "no tags" and reject a truncated document.
+// checkTagsDoc rejects XML that doesn't end with </Tags>. mkvpropedit would
+// apply a self-closed <Tags/> as "no tags" and reject a truncated document.
 func checkTagsDoc(tagsXML string) error {
-	if !strings.Contains(tagsXML, "</Tags>") {
-		return fmt.Errorf("not a Matroska tags document: %.80q", tagsXML)
+	trimmed := strings.TrimSpace(tagsXML)
+	if !strings.HasSuffix(trimmed, "</Tags>") {
+		// The tail shows where it went wrong; the head is mkvextract's header.
+		tail := []rune(trimmed)
+		if len(tail) > 80 {
+			tail = tail[len(tail)-80:]
+		}
+		return fmt.Errorf("not a Matroska tags document, ends with %q", string(tail))
 	}
 	return nil
 }
@@ -204,9 +210,9 @@ func removeElements(tagsXML string, drop func(fileLevel bool, e simpleEl) bool) 
 	})
 }
 
-// replaceElement removes every top-level element that match selects and, if
-// el is not empty, adds el to the file-level tag block. Blank input is treated
-// as a file with no tags.
+// replaceElement removes every top-level element for which match returns
+// true and, if el is not empty, adds el to the file-level tag block. Blank
+// input is treated as a file with no tags.
 func replaceElement(tagsXML string, match func(simpleEl) bool, el string) (string, error) {
 	if strings.TrimSpace(tagsXML) == "" {
 		tagsXML = emptyTagsDoc

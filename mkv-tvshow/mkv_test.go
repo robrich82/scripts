@@ -318,8 +318,6 @@ func TestUpdateDebandInXML_NoTagBlock_AddsDebandOnly(t *testing.T) {
 	}
 }
 
-// mkvpropedit rejects an empty tags file, so an untagged file gets an empty
-// <Tags> document.
 func TestUpdateDebandInXML_NoTagBlock_DebandFalse_ReturnsEmptyTagsDoc(t *testing.T) {
 	if got := debandXML(t, "", false); got != emptyTagsDoc {
 		t.Errorf("got %q, want %q", got, emptyTagsDoc)

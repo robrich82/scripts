@@ -25,7 +25,8 @@ type TMDBMovieClient interface {
 	GetMovieDetails(tmdbID string) (MovieDetails, error)
 }
 
-// MKVApplier applies metadata to an MKV file via mkvpropedit in a single call.
+// MKVApplier applies metadata to an MKV file via mkvpropedit in a single call,
+// reading the existing tags with mkvextract first so they are kept.
 type MKVApplier interface {
 	// Apply sets the title, date header, tags, and poster on filePath.
 	// Pass empty strings to skip individual fields.
@@ -443,6 +444,13 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 	if posterPath != "" {
 		os.Remove(posterPath)
+	}
+
+	// Backdating an untagged file would put it behind the default cutoff, so it
+	// would stay untagged once MKVToolNix is installed.
+	if needsApply && applier == nil {
+		fmt.Printf("[SKIP]    %s (mkvpropedit/mkvextract not found; file not changed)\n", basename)
+		return ResultSkipped
 	}
 
 	// 8. Restore timestamps — mkvpropedit updates mtime as a side effect.

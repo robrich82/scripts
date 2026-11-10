@@ -186,6 +186,24 @@ func TestProcessFile_AlreadyApplied_MtimeCurrent_OK(t *testing.T) {
 	}
 }
 
+func TestProcessFile_NoApplier_LeavesFileAlone(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	timer := &fakeFileTimer{ctimeNeedsUpdate: true}
+	cache := makeCache(t)
+
+	result := processFile(path, tmdb, nil, timer, nil, cache, nil, false)
+	if result != ResultSkipped {
+		t.Errorf("got %v, want ResultSkipped", result)
+	}
+	if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
+		t.Errorf("timestamps changed with no applier: mtime %v, ctime %v", timer.setTimesCalls, timer.setCreationTimeCalls)
+	}
+	if cache.IsMetaApplied(path, "12345") {
+		t.Error("file marked applied with no applier")
+	}
+}
+
 func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	past := time.Date(2010, 1, 1, 0, 0, 0, 0, time.Local)

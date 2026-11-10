@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -24,10 +25,7 @@ const mkvextractXML = "\ufeff<?xml version=\"1.0\"?>\r\n<Tags>\r\n  <Tag>\r\n   
 	"    <Simple>\r\n      <Name>_STATISTICS_TAGS</Name>\r\n      <String>BPS</String>\r\n      <TagLanguageIETF>und</TagLanguageIETF>\r\n    </Simple>\r\n" +
 	"  </Tag>\r\n</Tags>\r\n"
 
-// legacyXML is what older versions left behind. A season block comes first.
-// mkv-movie appended a file-level block on every apply; mkv-tvshow's rating-
-// and deband-only updates put COUNTRY and DEBAND in the last block, which
-// could be a per-track one.
+// legacyXML is what older versions left behind, with a season block first.
 const legacyXML = `<Tags>` +
 	`<Tag><Targets><TargetTypeValue>60</TargetTypeValue></Targets><Simple><Name>DATE</Name><String>2019</String></Simple></Tag>` +
 	`<Tag><Targets /><Simple><Name>ENCODER</Name><String>Lavf</String></Simple><Simple><Name>SUMMARY</Name><String>old1</String></Simple></Tag>` +
@@ -96,6 +94,8 @@ const countryAfterRatingXML = `<Tags><Tag><Targets /><Simple><Name>COUNTRY</Name
 // reject (truncated), so the tag edits refuse them.
 var notTagsDocs = []string{
 	"<Tags/>",
+	"<!-- </Tags> --><Tags/>",
+	"<Tags/><!-- </Tags> -->",
 	`<Tags><Tag><Targets /><Simple><Name>X</Name><String>1</String></Simple></Tag>`,
 	"garbage",
 }
@@ -124,6 +124,15 @@ func TestTagEdits_NotTagsDocument_Error(t *testing.T) {
 		if _, err := mergeMovieTags(in, fresh); err == nil {
 			t.Errorf("mergeMovieTags(%q): want error", in)
 		}
+	}
+}
+
+// The error quotes the tail: mkvextract's header fills the start.
+func TestCheckTagsDoc_ErrorQuotesTail(t *testing.T) {
+	in := "<?xml version=\"1.0\"?>" + strings.Repeat(" ", 100) + "<Tags><Tag>truncated"
+	err := checkTagsDoc(in)
+	if err == nil || !strings.Contains(err.Error(), "truncated") || strings.Contains(err.Error(), "xml version") {
+		t.Errorf("error = %v, want the tail quoted", err)
 	}
 }
 
@@ -339,6 +348,22 @@ func TestRealMKVApplier_Apply_ExtractFails_ReturnsError(t *testing.T) {
 	}
 }
 
+// Without mkvextract the applier can't keep existing tags, so it isn't built.
+func TestNewRealMKVApplier_NoMkvextract_Error(t *testing.T) {
+	dir := t.TempDir()
+	name := "mkvpropedit"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	if _, err := newRealMKVApplier(); err == nil {
+		t.Error("newRealMKVApplier succeeded with only mkvpropedit in PATH")
+	}
+}
+
 func TestRealMKVApplier_Apply_MergeFails_ReturnsError(t *testing.T) {
 	fresh := freshTagsFile(t, buildMovieTagXML("new", "7", "", RatingNone, false))
 	a := &realMKVApplier{extractTags: func(string) (string, error) { return "<Tags/>", nil }}
@@ -462,7 +487,7 @@ func TestRealMKVApplier_LegacyDuplicateBlocks_ApplySucceeds(t *testing.T) {
 func TestRealMKVTagger_DebandOnOff_NoEmptyBlock(t *testing.T) {
 	dir := t.TempDir()
 	statsOnly := muxTestMKV(t, dir, "stats.mkv", "--no-global-tags")
-	untagged := muxTestMKV(t, dir, "untagged.mkv", "--no-global-tags", "--disable-track-statistics-tags")
+	untagged := muxTestMKV(t, dir, "untagged.mkv", "--no-global-tags", "--disable-track-statistics-tags", "-T")
 	tagger := newRealMKVTagger()
 
 	if !applyDebandOnlyFile(statsOnly, true, tagger, &fakeFileTimer{}) || !applyDebandOnlyFile(statsOnly, false, tagger, &fakeFileTimer{}) {

@@ -46,10 +46,7 @@ const mkvextractXML = "\ufeff<?xml version=\"1.0\"?>\r\n<Tags>\r\n  <Tag>\r\n   
 	"    <Simple>\r\n      <Name>_STATISTICS_TAGS</Name>\r\n      <String>BPS</String>\r\n      <TagLanguageIETF>und</TagLanguageIETF>\r\n    </Simple>\r\n" +
 	"  </Tag>\r\n</Tags>\r\n"
 
-// legacyXML is what older versions left behind. A season block comes first.
-// mkv-movie appended a file-level block on every apply; mkv-tvshow's rating-
-// and deband-only updates put COUNTRY and DEBAND in the last block, which
-// could be a per-track one.
+// legacyXML is what older versions left behind, with a season block first.
 const legacyXML = `<Tags>` +
 	`<Tag><Targets><TargetTypeValue>60</TargetTypeValue></Targets><Simple><Name>DATE</Name><String>2019</String></Simple></Tag>` +
 	`<Tag><Targets /><Simple><Name>ENCODER</Name><String>Lavf</String></Simple><Simple><Name>SUMMARY</Name><String>old1</String></Simple></Tag>` +
@@ -116,6 +113,8 @@ const countryAfterRatingXML = `<Tags><Tag><Targets /><Simple><Name>COUNTRY</Name
 // reject (truncated), so the tag edits refuse them.
 var notTagsDocs = []string{
 	"<Tags/>",
+	"<!-- </Tags> --><Tags/>",
+	"<Tags/><!-- </Tags> -->",
 	`<Tags><Tag><Targets /><Simple><Name>X</Name><String>1</String></Simple></Tag>`,
 	"garbage",
 }
@@ -146,6 +145,15 @@ func TestTagEdits_NotTagsDocument_Error(t *testing.T) {
 		if _, err := mergeEpisodeTags(in, fresh); err == nil {
 			t.Errorf("mergeEpisodeTags(%q): want error", in)
 		}
+	}
+}
+
+// The error quotes the tail: mkvextract's header fills the start.
+func TestCheckTagsDoc_ErrorQuotesTail(t *testing.T) {
+	in := "<?xml version=\"1.0\"?>" + strings.Repeat(" ", 100) + "<Tags><Tag>truncated"
+	err := checkTagsDoc(in)
+	if err == nil || !strings.Contains(err.Error(), "truncated") || strings.Contains(err.Error(), "xml version") {
+		t.Errorf("error = %v, want the tail quoted", err)
 	}
 }
 
@@ -411,6 +419,17 @@ func TestApplyDebandOnlyMKV_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
 	}
 }
 
+func TestApplyDebandOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+	if p.applyDebandOnlyMKV(debandTestFile(t), true) {
+		t.Error("applyDebandOnlyMKV succeeded, want failure")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("mkvpropedit ran %d times, want 0", len(runner.calls))
+	}
+}
+
 func TestApplyRatingOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
@@ -538,7 +557,7 @@ func TestRealMKVRunner_LegacyDuplicateBlocks_ApplySucceeds(t *testing.T) {
 func TestRealMKVRunner_DebandOnOff_NoEmptyBlock(t *testing.T) {
 	dir := t.TempDir()
 	statsOnly, runner := muxTestMKV(t, dir, "stats.mkv", "--no-global-tags")
-	untagged, _ := muxTestMKV(t, dir, "untagged.mkv", "--no-global-tags", "--disable-track-statistics-tags")
+	untagged, _ := muxTestMKV(t, dir, "untagged.mkv", "--no-global-tags", "--disable-track-statistics-tags", "-T")
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 
 	if !p.applyDebandOnlyMKV(statsOnly, true) || !p.applyDebandOnlyMKV(statsOnly, false) {
