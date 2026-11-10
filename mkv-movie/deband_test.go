@@ -48,10 +48,11 @@ func TestUpdateDebandInXML_NoTagBlock_DebandTrue_BuildsMinimalXML(t *testing.T) 
 	}
 }
 
-func TestUpdateDebandInXML_NoTagBlock_DebandFalse_ReturnsEmpty(t *testing.T) {
-	result := updateDebandInXML("", false)
-	if result != "" {
-		t.Errorf("expected empty string when no tags and deband=false, got: %s", result)
+// mkvpropedit rejects an empty tags file, so an untagged file gets an empty
+// <Tags> document.
+func TestUpdateDebandInXML_NoTagBlock_DebandFalse_ReturnsEmptyTagsDoc(t *testing.T) {
+	if got := updateDebandInXML("", false); got != emptyTagsDoc {
+		t.Errorf("got %q, want %q", got, emptyTagsDoc)
 	}
 }
 
@@ -72,7 +73,7 @@ func TestUpdateDebandInXML_InsertsIntoMovieBlockNotTrack(t *testing.T) {
 
 func TestMergeMovieTags_EmptyExisting_ReturnsFresh(t *testing.T) {
 	fresh := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>2020</String></Simple></Tag></Tags>`
-	if got := mergeMovieTags("", fresh); got != fresh {
+	if got, err := mergeMovieTags("", fresh); err != nil || got != fresh {
 		t.Errorf("expected fresh doc returned, got %s", got)
 	}
 }
@@ -83,7 +84,10 @@ func TestMergeMovieTags_PreservesTrackTagsReplacesMovieBlock(t *testing.T) {
 		`<Tag><Targets><TargetTypeValue>60</TargetTypeValue><TrackUID>111</TrackUID></Targets><Simple><Name>BPS</Name><String>5000000</String></Simple></Tag>` +
 		`</Tags>`
 	fresh := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>2020</String></Simple></Tag></Tags>`
-	got := mergeMovieTags(existing, fresh)
+	got, err := mergeMovieTags(existing, fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(got, "<Name>BPS</Name>") {
 		t.Errorf("per-track statistics tag should be preserved: %s", got)
 	}

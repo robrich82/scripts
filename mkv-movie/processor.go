@@ -35,8 +35,8 @@ type MKVApplier interface {
 }
 
 type realMKVApplier struct {
-	path    string
-	extract string // mkvextract path; "" disables tag-preserving merge
+	path        string
+	extractTags func(filePath string) (string, error)
 }
 
 func newRealMKVApplier() (*realMKVApplier, error) {
@@ -44,8 +44,25 @@ func newRealMKVApplier() (*realMKVApplier, error) {
 	if err != nil {
 		return nil, err
 	}
-	extract, _ := exec.LookPath("mkvextract") // best-effort; merge is skipped if absent
-	return &realMKVApplier{path: path, extract: extract}, nil
+	return &realMKVApplier{path: path, extractTags: newRealMKVTagger().ExtractTags}, nil
+}
+
+// mergedTagsFile writes the tags at tagsPath, merged into filePath's existing
+// tags, to a new temp file and returns its path.
+func (a *realMKVApplier) mergedTagsFile(filePath, tagsPath string) (string, error) {
+	fresh, err := os.ReadFile(tagsPath)
+	if err != nil {
+		return "", err
+	}
+	existing, err := a.extractTags(filePath)
+	if err != nil {
+		return "", err
+	}
+	merged, err := mergeMovieTags(existing, string(fresh))
+	if err != nil {
+		return "", err
+	}
+	return writeTempTagFile(merged)
 }
 
 func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath string) error {
@@ -65,22 +82,12 @@ func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath st
 		}
 	}
 	if tagsPath != "" {
-		effectiveTags := tagsPath
-		// Merge the tool-managed movie-level tags into the file's existing tags
-		// so that "--tags all:" doesn't wipe per-track statistics tags (or any
-		// other tags this tool doesn't manage). Falls back to the fresh document
-		// when mkvextract is unavailable or extraction/merge fails.
-		if a.extract != "" {
-			if fresh, rerr := os.ReadFile(tagsPath); rerr == nil {
-				if existing, eerr := extractMKVTags(a.extract, filePath); eerr == nil {
-					if mp, werr := writeTempTagFile(mergeMovieTags(existing, string(fresh))); werr == nil {
-						defer os.Remove(mp)
-						effectiveTags = mp
-					}
-				}
-			}
+		merged, err := a.mergedTagsFile(filePath, tagsPath)
+		if err != nil {
+			return fmt.Errorf("tags: %w", err)
 		}
-		args = append(args, "--tags", "all:"+effectiveTags)
+		defer os.Remove(merged)
+		args = append(args, "--tags", "all:"+merged)
 	}
 	if posterPath != "" {
 		args = append(args,

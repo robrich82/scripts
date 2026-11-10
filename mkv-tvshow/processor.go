@@ -589,19 +589,23 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 		args = append(args, "--set", "date="+dateStr)
 	}
 
-	// Write tags XML to a temp file, merged into the file's existing tags so
-	// "--tags all:" keeps per-track tags. Without mkvextract the fresh
-	// document is applied on its own.
+	// Write the tags, merged into the file's existing ones, to a temp file.
 	var tagsPath string
 	if xml := buildTagXML(summary, tmdbID, dateStr, rating, deband); xml != "" {
-		if existing, err := p.mkv.ExtractTags(filePath); err == nil {
-			xml = mergeEpisodeTags(existing, xml)
+		existing, err := p.mkv.ExtractTags(filePath)
+		if err != nil {
+			fmt.Printf("  [!] Failed to extract tags: %v\n", err)
+			return false
 		}
-		var err error
-		tagsPath, err = p.mkv.WriteTempTags(xml)
-		if err == nil {
-			args = append(args, "--tags", "all:"+tagsPath)
+		if xml, err = mergeEpisodeTags(existing, xml); err != nil {
+			fmt.Printf("  [!] Failed to merge tags: %v\n", err)
+			return false
 		}
+		if tagsPath, err = p.mkv.WriteTempTags(xml); err != nil {
+			fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
+			return false
+		}
+		args = append(args, "--tags", "all:"+tagsPath)
 	}
 
 	// Delete existing image attachments before adding the new poster.

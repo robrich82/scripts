@@ -164,77 +164,135 @@ func (r *realMKVRunner) ExtractTags(filePath string) (string, error) {
 	return string(data), nil
 }
 
-// leafChildren matches the leaf elements mkvextract may write inside a
-// <Simple> besides <Name> (<String>, <TagLanguageIETF>, <TagDefault>, …).
-const leafChildren = `(?:\s*<\w+>[^<]*</\w+>)*`
+// emptyTagsDoc is a tags document with no tags. mkvpropedit rejects an empty
+// file but accepts this.
+const emptyTagsDoc = "<Tags></Tags>"
 
-// simpleElementRe returns a pattern for a leaf <Simple> element called name,
-// in the compact form buildTagXML writes or the indented form mkvextract
-// writes (which adds <TagLanguageIETF> after the value).
-func simpleElementRe(name string) string {
-	return `<Simple>\s*<Name>\s*` + name + `\s*</Name>` + leafChildren + `\s*</Simple>`
+// simpleTagRe matches the opening and closing tags of <Simple> elements.
+var simpleTagRe = regexp.MustCompile(`</?Simple>`)
+
+// topLevelSimples returns the [start, end) spans of the <Simple> elements that
+// are direct children of a <Tag> block, skipping nested ones.
+func topLevelSimples(block string) [][2]int {
+	var spans [][2]int
+	depth, start := 0, 0
+	for _, loc := range simpleTagRe.FindAllStringIndex(block, -1) {
+		if block[loc[0]+1] != '/' {
+			if depth == 0 {
+				start = loc[0]
+			}
+			depth++
+			continue
+		}
+		if depth == 0 {
+			continue // stray </Simple>
+		}
+		depth--
+		if depth == 0 {
+			spans = append(spans, [2]int{start, loc[1]})
+		}
+	}
+	return spans
 }
 
-// debandElementRe matches a DEBAND Simple element in Matroska tag XML.
-var debandElementRe = regexp.MustCompile(simpleElementRe("DEBAND"))
+var (
+	simpleNameRe   = regexp.MustCompile(`<Name>\s*([^<]*?)\s*</Name>`)
+	simpleStringRe = regexp.MustCompile(`<String>\s*([^<]*?)\s*</String>`)
+)
 
-// countryRatingElementRe matches the COUNTRY Simple element with its nested
-// LAW_RATING.
-var countryRatingElementRe = regexp.MustCompile(`<Simple>\s*<Name>\s*COUNTRY\s*</Name>` + leafChildren +
-	`\s*` + simpleElementRe("LAW_RATING") + leafChildren + `\s*</Simple>`)
-
-// managedElementRes match every element buildTagXML writes, so a merge can
-// replace them without touching anything else in the file-level tags.
-var managedElementRes = []*regexp.Regexp{
-	regexp.MustCompile(simpleElementRe(`(?:DATE|YEAR|SUMMARY|TMDB_ID)`)),
-	countryRatingElementRe,
-	debandElementRe,
+// simpleNameValue returns the <Name> and <String> of a <Simple> element,
+// ignoring those of any <Simple> nested in it.
+func simpleNameValue(el string) (name, value string) {
+	head := el[len("<Simple>"):]
+	if i := strings.Index(head, "<Simple>"); i >= 0 {
+		head = head[:i]
+	}
+	if m := simpleNameRe.FindStringSubmatch(head); m != nil {
+		name = m[1]
+	}
+	if m := simpleStringRe.FindStringSubmatch(head); m != nil {
+		value = m[1]
+	}
+	return name, value
 }
 
-// updateDebandInXML adds or removes the DEBAND tag element from a Matroska
-// tags XML string. If deband is false the element is removed; if true it is
-// inserted into the file-level tag block. When the XML has no <Tags> document
-// and deband is true, a minimal tag block is returned.
+// isDebandElement reports whether a <Simple> is the DEBAND element.
+func isDebandElement(name, _ string) bool { return name == "DEBAND" }
+
+// isRatingElement reports whether a <Simple> is the NZ COUNTRY element that
+// holds LAW_RATING.
+func isRatingElement(name, value string) bool { return name == "COUNTRY" && value == "NZ" }
+
+// isManagedElement reports whether a <Simple> is one this tool writes.
+func isManagedElement(name, value string) bool {
+	switch name {
+	case "DATE", "YEAR", "SUMMARY", "TMDB_ID", "DEBAND":
+		return true
+	}
+	return isRatingElement(name, value)
+}
+
+// removeElements deletes from every <Tag> block the top-level <Simple>
+// elements that drop selects, then deletes each <Tag> left with no <Simple>,
+// which mkvpropedit would reject.
+func removeElements(tagsXML string, drop func(fileLevel bool, name, value string) bool) string {
+	return tagBlockRe.ReplaceAllStringFunc(tagsXML, func(block string) string {
+		fileLevel := isFileLevelTag(block)
+		spans := topLevelSimples(block)
+		kept := len(spans)
+		for i := len(spans) - 1; i >= 0; i-- {
+			s := spans[i]
+			if name, value := simpleNameValue(block[s[0]:s[1]]); drop(fileLevel, name, value) {
+				block = strings.TrimRight(block[:s[0]], " \t\r\n") + block[s[1]:]
+				kept--
+			}
+		}
+		if kept == 0 {
+			return ""
+		}
+		return block
+	})
+}
+
+// replaceElement removes every top-level element that match selects and, if
+// el is not empty, adds el to the file-level tag block.
+func replaceElement(tagsXML string, match func(name, value string) bool, el string) string {
+	if strings.TrimSpace(tagsXML) == "" {
+		tagsXML = emptyTagsDoc
+	}
+	updated := removeElements(tagsXML, func(_ bool, name, value string) bool { return match(name, value) })
+	if el == "" {
+		return updated
+	}
+	if xml, ok := insertFileLevelElements(updated, el); ok {
+		return xml
+	}
+	// Not a tags document: leave it for mkvpropedit to reject.
+	return updated
+}
+
+// updateDebandInXML removes the DEBAND element from a Matroska tags XML string
+// and, if deband is true, adds it to the file-level tag block.
 func updateDebandInXML(tagsXML string, deband bool) string {
-	updated := debandElementRe.ReplaceAllString(tagsXML, "")
-
-	if !deband {
-		return updated
+	var el string
+	if deband {
+		el = "<Simple><Name>DEBAND</Name><String>true</String></Simple>"
 	}
-
-	const debandEl = "<Simple><Name>DEBAND</Name><String>true</String></Simple>"
-
-	if xml, ok := insertFileLevelElements(updated, debandEl); ok {
-		return xml
-	}
-
-	// No tag block present — build minimal XML from scratch.
-	return buildTagXML("", "", "", RatingNone, true)
+	return replaceElement(tagsXML, isDebandElement, el)
 }
 
-// updateRatingInXML adds or replaces the COUNTRY/LAW_RATING nested tag element
-// in a Matroska tags XML string. If rating is RatingNone the element is removed;
-// otherwise it is inserted into the file-level tag block. All other tag
-// elements (DEBAND, SUMMARY, TMDB_ID, etc.) are preserved. When the XML has no
-// <Tags> document and rating is non-empty, a minimal tag block is returned.
+// updateRatingInXML removes the NZ COUNTRY/LAW_RATING element from a Matroska
+// tags XML string and, unless rating is RatingNone, adds the new one to the
+// file-level tag block.
 func updateRatingInXML(tagsXML string, rating NZRating) string {
-	updated := countryRatingElementRe.ReplaceAllString(tagsXML, "")
-
-	if rating == RatingNone {
-		return updated
+	var el string
+	if rating != RatingNone {
+		el = fmt.Sprintf(
+			"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
+				"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>",
+			rating)
 	}
-
-	ratingEl := fmt.Sprintf(
-		"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
-			"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>",
-		rating)
-
-	if xml, ok := insertFileLevelElements(updated, ratingEl); ok {
-		return xml
-	}
-
-	// No tag block present — build minimal XML from scratch.
-	return buildTagXML("", "", "", rating, false)
+	return replaceElement(tagsXML, isRatingElement, el)
 }
 
 // tagBlockRe matches one <Tag> element; Matroska tags don't nest <Tag>.
@@ -274,8 +332,8 @@ func fileLevelTagCloseIndex(xml string) int {
 // insertFileLevelElements adds els to the first file-level tag block of
 // tagsXML. Inserting before the last </Tag> instead could nest them in a
 // per-track statistics tag, where Plex doesn't read them. With no file-level
-// block but other tags present, a new block is added before </Tags>. Returns
-// false when tagsXML has no <Tags> document at all.
+// block, a new one is added before </Tags>. Returns false when tagsXML has no
+// </Tags>.
 func insertFileLevelElements(tagsXML, els string) (string, bool) {
 	if pos := fileLevelTagCloseIndex(tagsXML); pos >= 0 {
 		return tagsXML[:pos] + els + tagsXML[pos:], true
@@ -287,37 +345,39 @@ func insertFileLevelElements(tagsXML, els string) (string, bool) {
 	return "", false
 }
 
-// mergeEpisodeTags combines the file's existing tag XML (from mkvextract,
-// possibly empty) with a freshly built document (buildTagXML output). The
-// elements this tool manages are removed from the file-level blocks and the
-// fresh ones inserted, so per-track tags such as mkvmerge's _STATISTICS_* and
-// file-level tags from other tools survive. Applying fresh alone with
-// "--tags all:" would delete every tag it doesn't contain.
-func mergeEpisodeTags(existing, fresh string) string {
+// mergeEpisodeTags combines the file's existing tag XML (from mkvextract, empty when
+// the file has none) with a freshly built document (buildTagXML output), because
+// "--tags all:" replaces every tag in the file. The tool's elements are
+// removed from the file-level blocks, plus DEBAND and the NZ rating from any
+// block (older versions could put them in a per-track one), and the fresh
+// elements go into the first file-level block. Everything else survives, such
+// as mkvmerge's per-track _STATISTICS_* tags.
+func mergeEpisodeTags(existing, fresh string) (string, error) {
 	fresh = strings.TrimSpace(fresh)
-	if fresh == "" || strings.TrimSpace(existing) == "" || !strings.Contains(existing, "<Tags") {
-		return fresh
+	if fresh == "" {
+		return existing, nil
 	}
-	open := strings.Index(fresh, "</Targets>")
-	closeIdx := strings.LastIndex(fresh, "</Tag>")
-	if open < 0 || closeIdx < 0 {
-		return fresh
+	if strings.TrimSpace(existing) == "" {
+		return fresh, nil
 	}
-	freshEls := fresh[open+len("</Targets>") : closeIdx]
+	targetsEnd := strings.Index(fresh, "</Targets>")
+	tagEnd := strings.LastIndex(fresh, "</Tag>")
+	if targetsEnd < 0 || tagEnd < targetsEnd {
+		return "", fmt.Errorf("fresh tags have no <Tag> block: %q", fresh)
+	}
+	freshEls := fresh[targetsEnd+len("</Targets>") : tagEnd]
 
-	stripped := tagBlockRe.ReplaceAllStringFunc(existing, func(block string) string {
-		if !isFileLevelTag(block) {
-			return block
+	stripped := removeElements(existing, func(fileLevel bool, name, value string) bool {
+		if fileLevel {
+			return isManagedElement(name, value)
 		}
-		for _, re := range managedElementRes {
-			block = re.ReplaceAllString(block, "")
-		}
-		return block
+		return isDebandElement(name, value) || isRatingElement(name, value)
 	})
-	if merged, ok := insertFileLevelElements(stripped, freshEls); ok {
-		return merged
+	merged, ok := insertFileLevelElements(stripped, freshEls)
+	if !ok {
+		return "", fmt.Errorf("existing tags are not a <Tags> document")
 	}
-	return fresh
+	return merged, nil
 }
 
 // xmlEscape replaces XML special characters so they are safe inside tag values.

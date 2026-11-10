@@ -17,7 +17,7 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 
 - Go 1.27.3, golangci-lint and govulncheck, pinned in `mise.toml`: run `mise install`.
   - A linter `go install`ed into `go env GOBIN` shadows the pinned one; delete it there.
-- [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`) — required by mkv-audit, mkv-movie, mkv-tvshow
+- [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`, `mkvextract`) — required by mkv-audit, mkv-movie, mkv-tvshow
 - [ExifTool](https://exiftool.org/) (`exiftool` on PATH) — used by mkv-music's audio timestamp sync
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
 
@@ -398,7 +398,7 @@ the next `mkv-movie --all` writes the new `LAW_RATING` tag and pushes it to Plex
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
 - `mkvpropedit` — writes metadata to MKV files (optional; a warning is shown if missing)
-- `mkvextract` — required for `--deband-only` mode (part of MKVToolNix)
+- `mkvextract` — reads the existing tags so writing new ones keeps the rest; a file whose tags it can't read isn't updated (part of MKVToolNix)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; stream selection is applied for these accounts too
 
@@ -617,6 +617,7 @@ runs. You can ignore a single episode, a whole season, or the entire show.
 
 - TMDB API (requires `TMDB_API_KEY` environment variable)
 - `mkvpropedit` — applies metadata edits
+- `mkvextract` — reads the existing tags so writing new ones keeps the rest; an episode whose tags it can't read isn't updated (part of MKVToolNix)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to push NZ ratings and set per-show audio language in Plex
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; the audio language is set for these accounts too
 
