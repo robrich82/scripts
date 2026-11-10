@@ -25,9 +25,12 @@ In a worktree, run `make` and these skills from the worktree directory, and give
 
 CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml` or `.golangci.yml` change). Each job runs the equivalent of `make vet`, `make vet-linux` and `make test`, plus govulncheck, which only fails the weekly run.
 
-Hooks in `.claude/settings.json` run `gofmt -w` on every edited `.go` file and block direct `go build`, in sessions started at the repo root.
-- The block is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
-- They need `jq` on PATH. Without it every Bash and PowerShell call is refused until Claude Code restarts from a shell that has it.
+Hooks in `.claude/settings.json`, in sessions started at the repo root:
+- Run `gofmt -w` on every edited `.go` file.
+- Block direct `go build`. This is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
+- Before an `Edit`/`Write` to a tool's live config (`configs/<tool>/…` or `%APPDATA%\<tool>\…`), copy the file to `%LOCALAPPDATA%\claude-config-backups\<tool>\` with a timestamp suffix, keeping the newest 20. Shell writes skip this.
+- Refuse `Read` of `openapi.json`; use the `plex-api` skill.
+- They need `jq` on PATH. Without it every Bash, PowerShell, Edit and Write call is refused until Claude Code restarts from a shell that has it.
 - After changing a hook, run `sh .claude/hooks/test.sh` from the repo root.
 
 ## Architecture

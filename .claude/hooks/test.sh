@@ -182,5 +182,57 @@ for input in '{}' "$(jq -n --arg f "$tmp/bad.go" '{tool_input: {file_path: $f}}'
 done
 rm -rf "$tmp"
 
+# block-openapi-read: refuses openapi.json by either separator, passes everything else.
+readcheck() { # readcheck <want rc> <file_path>
+  jq -n --arg f "$2" '{tool_input: {file_path: $f}}' | sh "$dir/block-openapi-read.sh" 2>/dev/null
+  rc=$?
+  [ "$rc" = "$1" ] || fail "block-openapi-read want rc $1 got $rc for: $2"
+}
+readcheck 2 'C:\Users\x\scripts\openapi.json'
+readcheck 2 '/c/Users/x/scripts/openapi.json'
+readcheck 0 'C:\Users\x\scripts\openapi.json.bak'
+readcheck 0 'C:\Users\x\scripts\my-openapi.json'
+readcheck 0 'C:\Users\x\scripts\README.md'
+
+# backup-config: copies a module's live config aside, via the real path or a junction.
+tmp=$(mktemp -d)
+mkdir -p "$tmp/proj/mkv-movie" "$tmp/proj/configs" "$tmp/roam/mkv-movie/sub" "$tmp/roam/other"
+touch "$tmp/proj/mkv-movie/go.mod"
+printf 'v1' > "$tmp/roam/mkv-movie/sub/data.json"
+printf 'x' > "$tmp/roam/other/data.json"
+if command -v cygpath >/dev/null 2>&1; then
+  MSYS_NO_PATHCONV=1 cmd /c mklink /J "$(cygpath -w "$tmp/proj/configs/mkv-movie")" "$(cygpath -w "$tmp/roam/mkv-movie")" >/dev/null
+else
+  ln -s "$tmp/roam/mkv-movie" "$tmp/proj/configs/mkv-movie"
+fi
+backup() { # backup <want rc> <file_path>
+  out=$(jq -n --arg f "$2" '{tool_input: {file_path: $f}}' |
+    APPDATA="$tmp/roam" LOCALAPPDATA="$tmp/local" CLAUDE_PROJECT_DIR="$tmp/proj" sh "$dir/backup-config.sh" 2>&1)
+  rc=$?
+  [ "$rc" = "$1" ] || fail "backup-config want rc $1 got $rc for $2: $out"
+}
+count() { ls -1 "$tmp/local/claude-config-backups/$1".[0-9]* 2>/dev/null | wc -l | tr -d ' '; }
+backup 0 "$tmp/roam/mkv-movie/sub/data.json"
+[ "$(count mkv-movie/sub/data.json)" = 1 ] || fail 'backup-config did not back up via the real path'
+backup 0 "$tmp/proj/configs/mkv-movie/sub/data.json"
+[ "$(count mkv-movie/sub/data.json)" = 2 ] || fail 'backup-config did not back up via the junction (same second must not overwrite)'
+[ "$(cat "$(ls -1 "$tmp/local/claude-config-backups/mkv-movie/sub/data.json".[0-9]* | head -1)")" = v1 ] || fail 'backup-config copy has the wrong content'
+backup 0 "$tmp/roam/other/data.json"
+[ -e "$tmp/local/claude-config-backups/other" ] && fail 'backup-config backed up a dir that is not a module'
+backup 0 "$tmp/roam/mkv-movie/new.json"
+[ -e "$tmp/local/claude-config-backups/mkv-movie/new.json".[0-9]* ] 2>/dev/null && fail 'backup-config backed up a file that does not exist'
+backup 0 "$tmp/proj/mkv-movie/go.mod"
+i=0
+while [ "$i" -lt 25 ]; do printf 'old' > "$tmp/local/claude-config-backups/mkv-movie/sub/data.json.20000101-0000$(printf '%02d' "$i")"; i=$((i + 1)); done
+backup 0 "$tmp/roam/mkv-movie/sub/data.json"
+[ "$(count mkv-movie/sub/data.json)" = 20 ] || fail "backup-config kept $(count mkv-movie/sub/data.json) backups, want 20"
+[ -e "$tmp/local/claude-config-backups/mkv-movie/sub/data.json.20000101-000000" ] && fail 'backup-config pruned the newest instead of the oldest'
+for input in 'not json'; do
+  printf '%s' "$input" | sh "$dir/backup-config.sh" 2>/dev/null
+  rc=$?
+  [ "$rc" = 2 ] || fail "backup-config want rc 2 got $rc for input: $input"
+done
+rm -rf "$tmp"
+
 [ "$fails" = 0 ] || { echo "$fails failed"; exit 1; }
 echo PASS
