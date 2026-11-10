@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -243,6 +244,23 @@ func TestProcessFile_NoApplier_ReportsPlexPush(t *testing.T) {
 	}
 	if !strings.Contains(out, "[SKIP]") || !strings.Contains(out, "Plex rating: R16") {
 		t.Errorf("output doesn't report the Plex push:\n%s", out)
+	}
+}
+
+func TestProcessFile_PlexLookupError_Reported(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	cache := makeCache(t)
+	cache.Set("12345", RatingR16)
+	plex := &fakePlexMovieClient{findTitleErr: errors.New("dial tcp: connection refused")}
+	rr := newMovieRatingResolver(nil, cache, false, false, plex, func(string) (string, error) { return "", nil })
+
+	out := captureStdout(t, func() { processFile(path, tmdb, &fakeApplier{}, &fakeFileTimer{}, rr, cache, nil, false) })
+	if !strings.Contains(out, "Plex lookup failed") || !strings.Contains(out, "connection refused") {
+		t.Errorf("output doesn't report the Plex lookup error:\n%s", out)
+	}
+	if _, ok := cache.GetPlexRating("12345"); ok {
+		t.Error("Plex rating cached after a failed lookup")
 	}
 }
 

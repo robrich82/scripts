@@ -438,6 +438,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					}
 				}
 			}
+		} else {
+			fmt.Printf("  [!] Plex lookup failed – rating and streams not pushed: %v\n", plexErr)
 		}
 	}
 
