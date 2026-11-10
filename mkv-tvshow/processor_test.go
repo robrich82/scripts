@@ -388,6 +388,9 @@ func TestApplyMKV_ExistingCovers_ReplacedByNewPoster(t *testing.T) {
 			if idx < 0 {
 				idx = slices.Index(args, "--attachment-name")
 			}
+			if idx < 0 {
+				t.Fatalf("no attachment args in: %v", args)
+			}
 			if got := strings.Join(args[idx:], " "); got != tc.want {
 				t.Errorf("attachment args = %q; want %q", got, tc.want)
 			}

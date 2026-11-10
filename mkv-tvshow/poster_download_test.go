@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,9 @@ func TestDownloadPoster(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			if filepath.Clean(filepath.Dir(path)) != filepath.Clean(dir) {
+				t.Errorf("poster written to %q; want it in %q", path, dir)
 			}
 			got, _ := os.ReadFile(path)
 			if string(got) != tc.body {

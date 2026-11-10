@@ -17,7 +17,9 @@ import (
 const httpTimeout = 30 * time.Second
 
 const tmdbAPIBase = "https://api.themoviedb.org/3"
-const tmdbImageBase = "https://image.tmdb.org/t/p/w500"
+
+// tmdbImageBase is a var so tests can point poster downloads at a local server.
+var tmdbImageBase = "https://image.tmdb.org/t/p/w500"
 
 // MovieDetails holds the full metadata fetched from TMDB for a movie.
 type MovieDetails struct {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -53,10 +54,39 @@ func TestDownloadPoster(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
+			if filepath.Clean(filepath.Dir(path)) != filepath.Clean(dir) {
+				t.Errorf("poster written to %q; want it in %q", path, dir)
+			}
 			got, _ := os.ReadFile(path)
 			if string(got) != tc.body {
 				t.Errorf("poster content = %q; want %q", got, tc.body)
 			}
 		})
+	}
+}
+
+func TestProcessFile_PosterDownloadFails_WarnsAndKeepsCover(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	orig := tmdbImageBase
+	tmdbImageBase = srv.URL
+	t.Cleanup(func() { tmdbImageBase = orig })
+
+	details := testDetails()
+	details.PosterPath = "/poster.jpg"
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: details}
+	applier := &fakeApplier{}
+
+	out := captureStdout(t, func() {
+		processFile(path, tmdb, applier, &fakeFileTimer{}, nil, makeCache(t), nil, false)
+	})
+	if !strings.Contains(out, "Poster download failed; cover unchanged: unexpected status 503") {
+		t.Errorf("missing poster warning:\n%s", out)
+	}
+	if len(applier.calls) != 1 || applier.calls[0].posterPath != "" {
+		t.Errorf("applier calls = %+v; want one call with no poster", applier.calls)
 	}
 }
