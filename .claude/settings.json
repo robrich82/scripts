@@ -1,4 +1,20 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(go vet ./...)",
+      "Bash(golangci-lint fmt --diff ./...)",
+      "Bash(gofmt -l .)",
+      "Bash(git fetch origin -q)",
+      "Bash(git fetch -q origin)",
+      "PowerShell(go vet ./...)",
+      "PowerShell(golangci-lint fmt --diff ./...)",
+      "PowerShell(gofmt -l .)",
+      "PowerShell(git fetch origin -q)",
+      "PowerShell(git fetch -q origin)",
+      "Skill(build)",
+      "Skill(check)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -7,6 +23,24 @@
           {
             "type": "command",
             "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-go-build.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/backup-config.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-openapi-read.sh\""
           }
         ]
       }
