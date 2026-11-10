@@ -9,7 +9,7 @@ All code in this project should be written in Go where possible.
 After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `make vet` or `make vet-linux` before committing.
 
 ## README
-When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change.
+When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change. `/finish` runs the `readme-drift-checker` agent to catch what was missed.
 
 ## Build, Test & Lint
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
@@ -37,7 +37,8 @@ Hooks in `.claude/settings.json`, in sessions started at the repo root:
 
 Six independent tools, each its own Go module (`package main`) with its own `go.mod` — there is no shared library module. Consequences:
 
-- **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other, so run the `twin-port-checker` agent after changing either.
+- **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other.
+- **Other code is shared across tools, not just the twins**: `--clean` pruning, offline-drive detection and walk/stat error handling recur, and bugs in them have been fixed one tool at a time. Run the `twin-port-checker` agent after changing any tool; it checks both the twins and these shared shapes.
 - Adding a new tool means updating every Makefile target (`all`, `test`, `vet`, `vet-linux`, `vuln`, `.PHONY`), the README tools table, and possibly a `configs/` junction (see the `configs-symlink` skill).
 
 Common shape of each tool:
