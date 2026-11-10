@@ -46,8 +46,8 @@ const nestedXML = `<Tags><Tag><Targets />` +
 	`<Simple><Name>LAW_RATING</Name><String>M</String></Simple></Simple>` +
 	`</Tag></Tags>`
 
-// movieBlock returns the first file-level <Tag> block of xml.
-func movieBlock(t *testing.T, xml string) string {
+// fileLevelBlock returns the first file-level <Tag> block of xml.
+func fileLevelBlock(t *testing.T, xml string) string {
 	t.Helper()
 	for _, loc := range tagBlockRe.FindAllStringIndex(xml, -1) {
 		if block := xml[loc[0]:loc[1]]; isFileLevelTag(block) {
@@ -67,6 +67,123 @@ func mustMerge(t *testing.T, existing, fresh string) string {
 	return got
 }
 
+func debandXML(t *testing.T, in string, deband bool) string {
+	t.Helper()
+	got, err := updateDebandInXML(in, deband)
+	if err != nil {
+		t.Fatalf("updateDebandInXML: %v", err)
+	}
+	return got
+}
+
+// freshTagsFile writes xml to a temp tags file removed when the test ends.
+func freshTagsFile(t *testing.T, xml string) string {
+	t.Helper()
+	path, err := writeTempTagFile(xml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+	return path
+}
+
+// countryAfterRatingXML is an NZ rating with <String> after the nested
+// LAW_RATING, an order other tools may write and mkvextract keeps.
+const countryAfterRatingXML = `<Tags><Tag><Targets /><Simple><Name>COUNTRY</Name>` +
+	`<Simple><Name>LAW_RATING</Name><String>M</String></Simple><String>NZ</String></Simple></Tag></Tags>`
+
+// notTagsDocs are inputs mkvpropedit would apply as "no tags" (<Tags/>) or
+// reject (truncated), so the tag edits refuse them.
+var notTagsDocs = []string{
+	"<Tags/>",
+	`<Tags><Tag><Targets /><Simple><Name>X</Name><String>1</String></Simple></Tag>`,
+	"garbage",
+}
+
+func TestMergeMovieTags_StringAfterNestedRating_Replaced(t *testing.T) {
+	got := mustMerge(t, countryAfterRatingXML, buildMovieTagXML("", "", "", RatingR16, false))
+	if n := strings.Count(got, "LAW_RATING"); n != 1 || strings.Contains(got, ">M<") {
+		t.Errorf("old rating kept beside the new one:\n%s", got)
+	}
+}
+
+func TestMergeMovieTags_NZCountryWithoutRating_Kept(t *testing.T) {
+	in := `<Tags><Tag><Targets /><Simple><Name>COUNTRY</Name><String>NZ</String></Simple></Tag></Tags>`
+	got := mustMerge(t, in, buildMovieTagXML("", "", "", RatingR16, false))
+	if n := strings.Count(got, "<Name>COUNTRY</Name>"); n != 2 {
+		t.Errorf("COUNTRY count = %d, want 2 (another tool's NZ country kept)", n)
+	}
+}
+
+func TestTagEdits_NotTagsDocument_Error(t *testing.T) {
+	fresh := buildMovieTagXML("s", "", "", RatingM, false)
+	for _, in := range notTagsDocs {
+		if _, err := updateDebandInXML(in, true); err == nil {
+			t.Errorf("updateDebandInXML(%q): want error", in)
+		}
+		if _, err := mergeMovieTags(in, fresh); err == nil {
+			t.Errorf("mergeMovieTags(%q): want error", in)
+		}
+	}
+}
+
+// A block whose <Simple> elements the scanner can't see isn't one this tool
+// emptied, so it is left alone.
+func TestUpdateDebandInXML_UnrecognisedBlock_Kept(t *testing.T) {
+	in := `<Tags><Tag><Targets /><Simple lang="x"><Name>X</Name></Simple></Tag></Tags>`
+	if got := debandXML(t, in, false); got != in {
+		t.Errorf("got %q, want input unchanged", got)
+	}
+}
+
+func TestMergeMovieTags_FreshWithoutTag_Errors(t *testing.T) {
+	if _, err := mergeMovieTags(trackOnlyXML, emptyTagsDoc); err == nil {
+		t.Error("want an error for fresh tags with no <Tag> block")
+	}
+}
+
+func TestMergeMovieTags_EmptyExisting_ReturnsFresh(t *testing.T) {
+	fresh := buildMovieTagXML("", "", "2020-01-01", RatingNone, false)
+	if got := mustMerge(t, "", fresh); got != fresh {
+		t.Errorf("got %q, want %q", got, fresh)
+	}
+}
+
+func TestMergeMovieTags_PreservesTrackTagsReplacesMovieBlock(t *testing.T) {
+	existing := `<Tags>` +
+		`<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>1999</String></Simple></Tag>` +
+		`<Tag><Targets><TargetTypeValue>60</TargetTypeValue><TrackUID>111</TrackUID></Targets><Simple><Name>BPS</Name><String>5000000</String></Simple></Tag>` +
+		`</Tags>`
+	got := mustMerge(t, existing, buildMovieTagXML("", "", "2020-01-01", RatingNone, false))
+	if !strings.Contains(got, "<Name>BPS</Name>") || !strings.Contains(got, ">2020<") || strings.Contains(got, ">1999<") {
+		t.Errorf("want BPS kept and YEAR 1999 replaced by 2020:\n%s", got)
+	}
+	if n := strings.Count(got, "<TargetTypeValue>50</TargetTypeValue>"); n != 1 {
+		t.Errorf("want exactly one movie-level block, got %d:\n%s", n, got)
+	}
+}
+
+func TestApplyDebandOnlyFile_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
+	tagger := &fakeMKVTagger{available: true,
+		extractedXML: `<Tags><Tag><Targets /><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`}
+	if !applyDebandOnlyFile(makeTempMKVNamed(t, "Movie.2020.mkv"), false, tagger, &fakeFileTimer{}) {
+		t.Fatal("applyDebandOnlyFile failed")
+	}
+	if tagger.writtenXML != emptyTagsDoc {
+		t.Errorf("written tags = %q, want %q", tagger.writtenXML, emptyTagsDoc)
+	}
+}
+
+func TestApplyDebandOnlyFile_NotTagsDocument_DoesNotApply(t *testing.T) {
+	tagger := &fakeMKVTagger{available: true, extractedXML: "<Tags/>"}
+	if applyDebandOnlyFile(makeTempMKVNamed(t, "Movie.2020.mkv"), true, tagger, &fakeFileTimer{}) {
+		t.Error("applyDebandOnlyFile succeeded, want failure")
+	}
+	if len(tagger.appliedPaths) != 0 {
+		t.Errorf("ApplyTags called with %v, want no call", tagger.appliedPaths)
+	}
+}
+
 // assertNoEmptyTag fails if any <Tag> has no top-level <Simple>, which
 // mkvpropedit rejects.
 func assertNoEmptyTag(t *testing.T, xml string) {
@@ -79,26 +196,26 @@ func assertNoEmptyTag(t *testing.T, xml string) {
 }
 
 func TestUpdateDebandInXML_MkvextractOutput_RemovesDeband(t *testing.T) {
-	if got := updateDebandInXML(mkvextractXML, false); strings.Contains(got, "DEBAND") {
+	if got := debandXML(t, mkvextractXML, false); strings.Contains(got, "DEBAND") {
 		t.Errorf("DEBAND not removed:\n%s", got)
 	}
 }
 
 func TestUpdateDebandInXML_MkvextractOutput_NoDuplicate(t *testing.T) {
-	if n := strings.Count(updateDebandInXML(mkvextractXML, true), "DEBAND"); n != 1 {
+	if n := strings.Count(debandXML(t, mkvextractXML, true), "DEBAND"); n != 1 {
 		t.Errorf("DEBAND count = %d, want 1", n)
 	}
 }
 
 func TestUpdateDebandInXML_OnThenOff_DropsEmptiedBlock(t *testing.T) {
-	got := updateDebandInXML(updateDebandInXML(trackOnlyXML, true), false)
+	got := debandXML(t, debandXML(t, trackOnlyXML, true), false)
 	if got != trackOnlyXML {
 		t.Errorf("got %q, want %q", got, trackOnlyXML)
 	}
 }
 
 func TestUpdateDebandInXML_LegacyTrackBlockDeband_Removed(t *testing.T) {
-	got := updateDebandInXML(legacyXML, false)
+	got := debandXML(t, legacyXML, false)
 	if strings.Contains(got, "DEBAND") || strings.Contains(got, "<TrackUID>12<") {
 		t.Errorf("track-block DEBAND or its emptied block kept:\n%s", got)
 	}
@@ -145,7 +262,7 @@ func TestMergeMovieTags_LegacyBlocks_CleanedAndEmptiedDropped(t *testing.T) {
 		}
 	}
 	// Fresh elements go into the first file-level block, not the season block.
-	if block := movieBlock(t, got); !strings.Contains(block, "ENCODER") || !strings.Contains(block, ">new<") {
+	if block := fileLevelBlock(t, got); !strings.Contains(block, "ENCODER") || !strings.Contains(block, ">new<") {
 		t.Errorf("fresh tags not merged into the ENCODER block:\n%s", got)
 	}
 	for name, want := range map[string]int{"SUMMARY": 1, "TMDB_ID": 1, "YEAR": 1, "DATE": 2, "LAW_RATING": 1, "_STATISTICS_TAGS": 1} {
@@ -178,7 +295,7 @@ func TestMergeMovieTags_OnlyTopLevelNZElementsReplaced(t *testing.T) {
 
 func TestMergeMovieTags_NoFileLevelBlock_AddsOne(t *testing.T) {
 	got := mustMerge(t, trackOnlyXML, buildMovieTagXML("s", "", "", RatingNone, false))
-	if !strings.Contains(movieBlock(t, got), ">s<") || !strings.Contains(got, "_STATISTICS_TAGS") {
+	if !strings.Contains(fileLevelBlock(t, got), ">s<") || !strings.Contains(got, "_STATISTICS_TAGS") {
 		t.Errorf("want a new file-level block beside the track tags:\n%s", got)
 	}
 }
@@ -196,11 +313,7 @@ func TestMergeMovieTags_ExistingNotTagsDocument_Errors(t *testing.T) {
 }
 
 func TestRealMKVApplier_MergedTagsFile_MergesIntoExtractedTags(t *testing.T) {
-	fresh, err := writeTempTagFile(buildMovieTagXML("new", "7", "", RatingNone, false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(fresh) })
+	fresh := freshTagsFile(t, buildMovieTagXML("new", "7", "", RatingNone, false))
 	a := &realMKVApplier{extractTags: func(string) (string, error) { return mkvextractXML, nil }}
 
 	merged, err := a.mergedTagsFile("film.mkv", fresh)
@@ -219,17 +332,18 @@ func TestRealMKVApplier_MergedTagsFile_MergesIntoExtractedTags(t *testing.T) {
 
 // Applying the fresh tags alone would delete every other tag in the file.
 func TestRealMKVApplier_Apply_ExtractFails_ReturnsError(t *testing.T) {
-	fresh, err := writeTempTagFile(buildMovieTagXML("new", "7", "", RatingNone, false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(fresh) })
-	a := &realMKVApplier{
-		path:        filepath.Join(t.TempDir(), "never-run"),
-		extractTags: func(string) (string, error) { return "", errors.New("mkvextract not found in PATH") },
-	}
+	fresh := freshTagsFile(t, buildMovieTagXML("new", "7", "", RatingNone, false))
+	a := &realMKVApplier{extractTags: func(string) (string, error) { return "", errors.New("mkvextract not found in PATH") }}
 	if err := a.Apply("film.mkv", "Film", "", fresh, ""); err == nil || !strings.Contains(err.Error(), "mkvextract") {
 		t.Errorf("Apply error = %v, want the extraction failure", err)
+	}
+}
+
+func TestRealMKVApplier_Apply_MergeFails_ReturnsError(t *testing.T) {
+	fresh := freshTagsFile(t, buildMovieTagXML("new", "7", "", RatingNone, false))
+	a := &realMKVApplier{extractTags: func(string) (string, error) { return "<Tags/>", nil }}
+	if err := a.Apply("film.mkv", "Film", "", fresh, ""); err == nil || !strings.Contains(err.Error(), "not a Matroska tags document") {
+		t.Errorf("Apply error = %v, want the merge failure", err)
 	}
 }
 
@@ -282,12 +396,7 @@ func assertNameCounts(t *testing.T, tags string, want map[string]int) {
 
 func applyMovieTags(t *testing.T, applier *realMKVApplier, movie, xml string) {
 	t.Helper()
-	tagsPath, err := writeTempTagFile(xml)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(tagsPath) })
-	if err := applier.Apply(movie, "Film", "2020-01-02", tagsPath, ""); err != nil {
+	if err := applier.Apply(movie, "Film", "2020-01-02", freshTagsFile(t, xml), ""); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 }

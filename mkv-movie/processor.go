@@ -39,12 +39,14 @@ type realMKVApplier struct {
 	extractTags func(filePath string) (string, error)
 }
 
+// newRealMKVApplier needs mkvextract as well as mkvpropedit: writing tags
+// without reading the existing ones first would delete them.
 func newRealMKVApplier() (*realMKVApplier, error) {
-	path, err := exec.LookPath("mkvpropedit")
-	if err != nil {
-		return nil, err
+	tagger := newRealMKVTagger()
+	if !tagger.Available() {
+		return nil, errors.New("mkvpropedit or mkvextract not found in PATH")
 	}
-	return &realMKVApplier{path: path, extractTags: newRealMKVTagger().ExtractTags}, nil
+	return &realMKVApplier{path: tagger.mkvpropedit, extractTags: tagger.ExtractTags}, nil
 }
 
 // mergedTagsFile writes the tags at tagsPath, merged into filePath's existing
@@ -373,6 +375,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			tagsPath, err = writeTempTagFile(xml)
 			if err != nil {
 				fmt.Printf("[ERR]     %s: write tags: %v\n", basename, err)
+				return ResultError
 			}
 		}
 		if url := details.PosterURL(); url != "" {
@@ -648,7 +651,11 @@ func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer F
 		return false
 	}
 
-	updatedXML := updateDebandInXML(currentXML, deband)
+	updatedXML, err := updateDebandInXML(currentXML, deband)
+	if err != nil {
+		fmt.Printf("  [!] Failed to update tags: %v\n", err)
+		return false
+	}
 
 	tagsPath, err := tagger.WriteTempTags(updatedXML)
 	if err != nil {

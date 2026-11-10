@@ -13,7 +13,7 @@ import (
 
 func TestUpdateDebandInXML_AddWhenNotPresent(t *testing.T) {
 	xml := `<Tags><Tag><Targets></Targets><Simple><Name>TMDB_ID</Name><String>42</String></Simple></Tag></Tags>`
-	result := updateDebandInXML(xml, true)
+	result := debandXML(t, xml, true)
 	if !strings.Contains(result, "<Name>DEBAND</Name>") {
 		t.Errorf("expected DEBAND element in output: %s", result)
 	}
@@ -24,7 +24,7 @@ func TestUpdateDebandInXML_AddWhenNotPresent(t *testing.T) {
 
 func TestUpdateDebandInXML_RemoveWhenPresent(t *testing.T) {
 	xml := `<Tags><Tag><Targets></Targets><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`
-	result := updateDebandInXML(xml, false)
+	result := debandXML(t, xml, false)
 	if strings.Contains(result, "DEBAND") {
 		t.Errorf("expected DEBAND element removed, got: %s", result)
 	}
@@ -32,14 +32,14 @@ func TestUpdateDebandInXML_RemoveWhenPresent(t *testing.T) {
 
 func TestUpdateDebandInXML_PreservesOtherElements(t *testing.T) {
 	xml := `<Tags><Tag><Targets></Targets><Simple><Name>TMDB_ID</Name><String>99</String></Simple><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`
-	result := updateDebandInXML(xml, false)
+	result := debandXML(t, xml, false)
 	if !strings.Contains(result, "TMDB_ID") {
 		t.Errorf("TMDB_ID should be preserved after deband removal: %s", result)
 	}
 }
 
 func TestUpdateDebandInXML_NoTagBlock_DebandTrue_BuildsMinimalXML(t *testing.T) {
-	result := updateDebandInXML("", true)
+	result := debandXML(t, "", true)
 	if !strings.Contains(result, "<Tags>") {
 		t.Errorf("expected Tags wrapper in fallback XML: %s", result)
 	}
@@ -51,7 +51,7 @@ func TestUpdateDebandInXML_NoTagBlock_DebandTrue_BuildsMinimalXML(t *testing.T) 
 // mkvpropedit rejects an empty tags file, so an untagged file gets an empty
 // <Tags> document.
 func TestUpdateDebandInXML_NoTagBlock_DebandFalse_ReturnsEmptyTagsDoc(t *testing.T) {
-	if got := updateDebandInXML("", false); got != emptyTagsDoc {
+	if got := debandXML(t, "", false); got != emptyTagsDoc {
 		t.Errorf("got %q, want %q", got, emptyTagsDoc)
 	}
 }
@@ -61,44 +61,11 @@ func TestUpdateDebandInXML_InsertsIntoMovieBlockNotTrack(t *testing.T) {
 		`<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>2020</String></Simple></Tag>` +
 		`<Tag><Targets><TrackUID>111</TrackUID></Targets><Simple><Name>BPS</Name><String>1</String></Simple></Tag>` +
 		`</Tags>`
-	result := updateDebandInXML(xml, true)
+	result := debandXML(t, xml, true)
 	di := strings.Index(result, "DEBAND")
 	bi := strings.Index(result, "<Name>BPS</Name>")
 	if di < 0 || bi < 0 || di > bi {
 		t.Errorf("DEBAND should land in the movie-level block, before the track tag: %s", result)
-	}
-}
-
-// --- mergeMovieTags tests ---
-
-func TestMergeMovieTags_EmptyExisting_ReturnsFresh(t *testing.T) {
-	fresh := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>2020</String></Simple></Tag></Tags>`
-	if got, err := mergeMovieTags("", fresh); err != nil || got != fresh {
-		t.Errorf("expected fresh doc returned, got %s", got)
-	}
-}
-
-func TestMergeMovieTags_PreservesTrackTagsReplacesMovieBlock(t *testing.T) {
-	existing := `<Tags>` +
-		`<Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>1999</String></Simple></Tag>` +
-		`<Tag><Targets><TargetTypeValue>60</TargetTypeValue><TrackUID>111</TrackUID></Targets><Simple><Name>BPS</Name><String>5000000</String></Simple></Tag>` +
-		`</Tags>`
-	fresh := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>YEAR</Name><String>2020</String></Simple></Tag></Tags>`
-	got, err := mergeMovieTags(existing, fresh)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "<Name>BPS</Name>") {
-		t.Errorf("per-track statistics tag should be preserved: %s", got)
-	}
-	if !strings.Contains(got, "<String>2020</String>") {
-		t.Errorf("fresh YEAR should be present: %s", got)
-	}
-	if strings.Contains(got, "<String>1999</String>") {
-		t.Errorf("old movie-level YEAR should be replaced: %s", got)
-	}
-	if n := strings.Count(got, "<TargetTypeValue>50</TargetTypeValue>"); n != 1 {
-		t.Errorf("expected exactly one movie-level block, got %d: %s", n, got)
 	}
 }
 

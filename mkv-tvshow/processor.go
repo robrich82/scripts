@@ -835,7 +835,13 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 		return false
 	}
 
-	tagsPath, err := p.mkv.WriteTempTags(updateRatingInXML(currentXML, rating))
+	updatedXML, err := updateRatingInXML(currentXML, rating)
+	if err != nil {
+		fmt.Printf("  [!] Failed to update tags: %v\n", err)
+		return false
+	}
+
+	tagsPath, err := p.mkv.WriteTempTags(updatedXML)
 	if err != nil {
 		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
 		return false
@@ -891,7 +897,11 @@ func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
 		return false
 	}
 
-	updatedXML := updateDebandInXML(currentXML, deband)
+	updatedXML, err := updateDebandInXML(currentXML, deband)
+	if err != nil {
+		fmt.Printf("  [!] Failed to update tags: %v\n", err)
+		return false
+	}
 
 	tagsPath, err := p.mkv.WriteTempTags(updatedXML)
 	if err != nil {

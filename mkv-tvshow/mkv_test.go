@@ -143,7 +143,7 @@ func TestBuildTagXML_DebandFalse_OmitsDEBAND(t *testing.T) {
 
 func TestUpdateRatingInXML_AddsRatingToExistingTag(t *testing.T) {
 	input := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`
-	out := updateRatingInXML(input, RatingM)
+	out := ratingXML(t, input, RatingM)
 	if !strings.Contains(out, "LAW_RATING") {
 		t.Errorf("expected LAW_RATING in output: %s", out)
 	}
@@ -156,7 +156,7 @@ func TestUpdateRatingInXML_ReplacesExistingRating(t *testing.T) {
 	input := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>` +
 		`<Simple><Name>COUNTRY</Name><String>NZ</String><Simple><Name>LAW_RATING</Name><String>PG</String></Simple></Simple>` +
 		`</Tag></Tags>`
-	out := updateRatingInXML(input, RatingM)
+	out := ratingXML(t, input, RatingM)
 	if strings.Count(out, "LAW_RATING") != 1 {
 		t.Errorf("expected exactly one LAW_RATING: %s", out)
 	}
@@ -169,14 +169,14 @@ func TestUpdateRatingInXML_RatingNone_RemovesExistingRating(t *testing.T) {
 	input := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>` +
 		`<Simple><Name>COUNTRY</Name><String>NZ</String><Simple><Name>LAW_RATING</Name><String>M</String></Simple></Simple>` +
 		`</Tag></Tags>`
-	out := updateRatingInXML(input, RatingNone)
+	out := ratingXML(t, input, RatingNone)
 	if strings.Contains(out, "LAW_RATING") || strings.Contains(out, "COUNTRY") {
 		t.Errorf("LAW_RATING/COUNTRY should be removed when RatingNone: %s", out)
 	}
 }
 
 func TestUpdateRatingInXML_EmptyXML_BuildsFromScratch(t *testing.T) {
-	out := updateRatingInXML("", RatingR16)
+	out := ratingXML(t, "", RatingR16)
 	if !strings.Contains(out, "LAW_RATING") {
 		t.Errorf("expected LAW_RATING in scratch-built output: %s", out)
 	}
@@ -277,7 +277,7 @@ const existingTagsXML = `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValu
 	`</Tag></Tags>`
 
 func TestUpdateDebandInXML_AddToExistingTags(t *testing.T) {
-	result := updateDebandInXML(existingTagsXML, true)
+	result := debandXML(t, existingTagsXML, true)
 	if !strings.Contains(result, "<Simple><Name>DEBAND</Name><String>true</String></Simple>") {
 		t.Errorf("DEBAND element not added: %s", result)
 	}
@@ -289,7 +289,7 @@ func TestUpdateDebandInXML_AddToExistingTags(t *testing.T) {
 func TestUpdateDebandInXML_RemoveDebandFromExistingTags(t *testing.T) {
 	xml := existingTagsXML[:len(existingTagsXML)-len("</Tag></Tags>")] +
 		`<Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`
-	result := updateDebandInXML(xml, false)
+	result := debandXML(t, xml, false)
 	if strings.Contains(result, "DEBAND") {
 		t.Errorf("DEBAND element not removed: %s", result)
 	}
@@ -302,14 +302,14 @@ func TestUpdateDebandInXML_PrettyPrintedXML(t *testing.T) {
 	// mkvextract outputs indented XML; verify the regex handles whitespace.
 	pretty := "<Tags>\n  <Tag>\n    <Targets>\n      <TargetTypeValue>50</TargetTypeValue>\n    </Targets>\n" +
 		"    <Simple>\n      <Name>DEBAND</Name>\n      <String>true</String>\n    </Simple>\n  </Tag>\n</Tags>"
-	result := updateDebandInXML(pretty, false)
+	result := debandXML(t, pretty, false)
 	if strings.Contains(result, "DEBAND") {
 		t.Errorf("DEBAND not removed from pretty-printed XML: %s", result)
 	}
 }
 
 func TestUpdateDebandInXML_NoTagBlock_AddsDebandOnly(t *testing.T) {
-	result := updateDebandInXML("", true)
+	result := debandXML(t, "", true)
 	if !strings.Contains(result, "DEBAND") {
 		t.Errorf("expected DEBAND in minimal XML: %s", result)
 	}
@@ -321,7 +321,7 @@ func TestUpdateDebandInXML_NoTagBlock_AddsDebandOnly(t *testing.T) {
 // mkvpropedit rejects an empty tags file, so an untagged file gets an empty
 // <Tags> document.
 func TestUpdateDebandInXML_NoTagBlock_DebandFalse_ReturnsEmptyTagsDoc(t *testing.T) {
-	if got := updateDebandInXML("", false); got != emptyTagsDoc {
+	if got := debandXML(t, "", false); got != emptyTagsDoc {
 		t.Errorf("got %q, want %q", got, emptyTagsDoc)
 	}
 }

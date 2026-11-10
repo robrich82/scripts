@@ -95,11 +95,12 @@ func main() {
 	}
 	tmdb := newTMDBMovieSource(tmdbKey)
 
-	applier, err := newRealMKVApplier()
-	if err != nil {
-		// mkvpropedit is optional — metadata will not be written.
-		fmt.Fprintln(os.Stderr, "Warning: 'mkvpropedit' not found. MKV metadata will not be updated.")
-		applier = nil
+	// A nil *realMKVApplier stored in the interface would be non-nil and panic.
+	var applier MKVApplier
+	if a, err := newRealMKVApplier(); err == nil {
+		applier = a
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated.\n", err)
 	}
 
 	plexURL := os.Getenv("PLEX_URL")

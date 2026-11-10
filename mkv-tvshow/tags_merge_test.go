@@ -68,8 +68,8 @@ const nestedXML = `<Tags><Tag><Targets />` +
 	`<Simple><Name>LAW_RATING</Name><String>M</String></Simple></Simple>` +
 	`</Tag></Tags>`
 
-// episodeBlock returns the first file-level <Tag> block of xml.
-func episodeBlock(t *testing.T, xml string) string {
+// fileLevelBlock returns the first file-level <Tag> block of xml.
+func fileLevelBlock(t *testing.T, xml string) string {
 	t.Helper()
 	for _, loc := range tagBlockRe.FindAllStringIndex(xml, -1) {
 		if block := xml[loc[0]:loc[1]]; isFileLevelTag(block) {
@@ -89,6 +89,81 @@ func mustMerge(t *testing.T, existing, fresh string) string {
 	return got
 }
 
+func debandXML(t *testing.T, in string, deband bool) string {
+	t.Helper()
+	got, err := updateDebandInXML(in, deband)
+	if err != nil {
+		t.Fatalf("updateDebandInXML: %v", err)
+	}
+	return got
+}
+
+func ratingXML(t *testing.T, in string, rating NZRating) string {
+	t.Helper()
+	got, err := updateRatingInXML(in, rating)
+	if err != nil {
+		t.Fatalf("updateRatingInXML: %v", err)
+	}
+	return got
+}
+
+// countryAfterRatingXML is an NZ rating with <String> after the nested
+// LAW_RATING, an order other tools may write and mkvextract keeps.
+const countryAfterRatingXML = `<Tags><Tag><Targets /><Simple><Name>COUNTRY</Name>` +
+	`<Simple><Name>LAW_RATING</Name><String>M</String></Simple><String>NZ</String></Simple></Tag></Tags>`
+
+// notTagsDocs are inputs mkvpropedit would apply as "no tags" (<Tags/>) or
+// reject (truncated), so the tag edits refuse them.
+var notTagsDocs = []string{
+	"<Tags/>",
+	`<Tags><Tag><Targets /><Simple><Name>X</Name><String>1</String></Simple></Tag>`,
+	"garbage",
+}
+
+func TestUpdateRatingInXML_StringAfterNestedRating_Replaced(t *testing.T) {
+	got := ratingXML(t, countryAfterRatingXML, RatingR16)
+	if n := strings.Count(got, "LAW_RATING"); n != 1 || strings.Contains(got, ">M<") {
+		t.Errorf("old rating kept beside the new one:\n%s", got)
+	}
+}
+
+func TestUpdateRatingInXML_NZCountryWithoutRating_Kept(t *testing.T) {
+	in := `<Tags><Tag><Targets /><Simple><Name>COUNTRY</Name><String>NZ</String></Simple></Tag></Tags>`
+	if n := strings.Count(ratingXML(t, in, RatingR16), "<Name>COUNTRY</Name>"); n != 2 {
+		t.Errorf("COUNTRY count = %d, want 2 (another tool's NZ country kept)", n)
+	}
+}
+
+func TestTagEdits_NotTagsDocument_Error(t *testing.T) {
+	fresh := buildTagXML("s", "", "", RatingM, false)
+	for _, in := range notTagsDocs {
+		if _, err := updateDebandInXML(in, true); err == nil {
+			t.Errorf("updateDebandInXML(%q): want error", in)
+		}
+		if _, err := updateRatingInXML(in, RatingM); err == nil {
+			t.Errorf("updateRatingInXML(%q): want error", in)
+		}
+		if _, err := mergeEpisodeTags(in, fresh); err == nil {
+			t.Errorf("mergeEpisodeTags(%q): want error", in)
+		}
+	}
+}
+
+// A block whose <Simple> elements the scanner can't see isn't one this tool
+// emptied, so it is left alone.
+func TestUpdateDebandInXML_UnrecognisedBlock_Kept(t *testing.T) {
+	in := `<Tags><Tag><Targets /><Simple lang="x"><Name>X</Name></Simple></Tag></Tags>`
+	if got := debandXML(t, in, false); got != in {
+		t.Errorf("got %q, want input unchanged", got)
+	}
+}
+
+func TestMergeEpisodeTags_FreshWithoutTag_Errors(t *testing.T) {
+	if _, err := mergeEpisodeTags(trackStatsXML, emptyTagsDoc); err == nil {
+		t.Error("want an error for fresh tags with no <Tag> block")
+	}
+}
+
 // assertNoEmptyTag fails if any <Tag> has no top-level <Simple>, which
 // mkvpropedit rejects.
 func assertNoEmptyTag(t *testing.T, xml string) {
@@ -101,8 +176,8 @@ func assertNoEmptyTag(t *testing.T, xml string) {
 }
 
 func TestUpdateDebandInXML_InsertsIntoFileLevelBlockNotTrackBlock(t *testing.T) {
-	got := updateDebandInXML(trackStatsXML, true)
-	if !strings.Contains(episodeBlock(t, got), "DEBAND") {
+	got := debandXML(t, trackStatsXML, true)
+	if !strings.Contains(fileLevelBlock(t, got), "DEBAND") {
 		t.Errorf("DEBAND not in the file-level block:\n%s", got)
 	}
 	if strings.Count(got, "DEBAND") != 1 {
@@ -111,22 +186,22 @@ func TestUpdateDebandInXML_InsertsIntoFileLevelBlockNotTrackBlock(t *testing.T) 
 }
 
 func TestUpdateDebandInXML_OnThenOff_DropsEmptiedBlock(t *testing.T) {
-	got := updateDebandInXML(updateDebandInXML(trackOnlyXML, true), false)
+	got := debandXML(t, debandXML(t, trackOnlyXML, true), false)
 	if got != trackOnlyXML {
 		t.Errorf("got %q, want %q", got, trackOnlyXML)
 	}
 }
 
 func TestUpdateRatingInXML_InsertsIntoFileLevelBlockNotTrackBlock(t *testing.T) {
-	got := updateRatingInXML(trackStatsXML, RatingR16)
-	if !strings.Contains(episodeBlock(t, got), "LAW_RATING") {
+	got := ratingXML(t, trackStatsXML, RatingR16)
+	if !strings.Contains(fileLevelBlock(t, got), "LAW_RATING") {
 		t.Errorf("LAW_RATING not in the file-level block:\n%s", got)
 	}
 }
 
 func TestUpdateRatingInXML_OnlyTrackTags_AddsFileLevelBlock(t *testing.T) {
-	got := updateRatingInXML(trackOnlyXML, RatingM)
-	if !strings.Contains(episodeBlock(t, got), "LAW_RATING") {
+	got := ratingXML(t, trackOnlyXML, RatingM)
+	if !strings.Contains(fileLevelBlock(t, got), "LAW_RATING") {
 		t.Errorf("LAW_RATING not in a new file-level block:\n%s", got)
 	}
 	if !strings.Contains(got, "_STATISTICS_TAGS") {
@@ -137,23 +212,23 @@ func TestUpdateRatingInXML_OnlyTrackTags_AddsFileLevelBlock(t *testing.T) {
 func TestUpdateRatingInXML_RemovingOnlyTag_LeavesEmptyTagsDoc(t *testing.T) {
 	only := `<Tags><Tag><Targets /><Simple><Name>COUNTRY</Name><String>NZ</String>` +
 		`<Simple><Name>LAW_RATING</Name><String>M</String></Simple></Simple></Tag></Tags>`
-	if got := updateRatingInXML(only, RatingNone); got != emptyTagsDoc {
+	if got := ratingXML(t, only, RatingNone); got != emptyTagsDoc {
 		t.Errorf("got %q, want %q", got, emptyTagsDoc)
 	}
 }
 
 func TestUpdateRatingInXML_LegacyTrackBlockRating_Moved(t *testing.T) {
-	got := updateRatingInXML(legacyXML, RatingR16)
+	got := ratingXML(t, legacyXML, RatingR16)
 	if n := strings.Count(got, "LAW_RATING"); n != 1 {
 		t.Errorf("LAW_RATING count = %d, want 1:\n%s", n, got)
 	}
-	if !strings.Contains(episodeBlock(t, got), "R16") {
+	if !strings.Contains(fileLevelBlock(t, got), "R16") {
 		t.Errorf("new rating not in the file-level block:\n%s", got)
 	}
 }
 
 func TestUpdateRatingInXML_KeepsOtherCountries(t *testing.T) {
-	got := updateRatingInXML(nestedXML, RatingR13)
+	got := ratingXML(t, nestedXML, RatingR13)
 	for _, want := range []string{">PG<", ">1990<", ">R13<"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q missing:\n%s", want, got)
@@ -165,17 +240,17 @@ func TestUpdateRatingInXML_KeepsOtherCountries(t *testing.T) {
 }
 
 func TestUpdateDebandInXML_MkvextractOutput_RemovesDeband(t *testing.T) {
-	if got := updateDebandInXML(mkvextractXML, false); strings.Contains(got, "DEBAND") {
+	if got := debandXML(t, mkvextractXML, false); strings.Contains(got, "DEBAND") {
 		t.Errorf("DEBAND not removed:\n%s", got)
 	}
 }
 
 func TestUpdateRatingInXML_MkvextractOutput_ReplacesRating(t *testing.T) {
-	got := updateRatingInXML(mkvextractXML, RatingR16)
+	got := ratingXML(t, mkvextractXML, RatingR16)
 	if n := strings.Count(got, "LAW_RATING"); n != 1 {
 		t.Errorf("LAW_RATING count = %d, want 1:\n%s", n, got)
 	}
-	if !strings.Contains(episodeBlock(t, got), "R16") {
+	if !strings.Contains(fileLevelBlock(t, got), "R16") {
 		t.Errorf("new rating not in the file-level block:\n%s", got)
 	}
 }
@@ -230,7 +305,7 @@ func TestMergeEpisodeTags_LegacyBlocks_CleanedAndEmptiedDropped(t *testing.T) {
 		}
 	}
 	// Fresh elements go into the first file-level block, not the season block.
-	if block := episodeBlock(t, got); !strings.Contains(block, "ENCODER") || !strings.Contains(block, ">new<") {
+	if block := fileLevelBlock(t, got); !strings.Contains(block, "ENCODER") || !strings.Contains(block, ">new<") {
 		t.Errorf("fresh tags not merged into the ENCODER block:\n%s", got)
 	}
 	for name, want := range map[string]int{"SUMMARY": 1, "TMDB_ID": 1, "YEAR": 1, "DATE": 2, "LAW_RATING": 1, "_STATISTICS_TAGS": 1} {
@@ -263,7 +338,7 @@ func TestMergeEpisodeTags_OnlyTopLevelNZElementsReplaced(t *testing.T) {
 
 func TestMergeEpisodeTags_NoFileLevelBlock_AddsOne(t *testing.T) {
 	got := mustMerge(t, trackOnlyXML, buildTagXML("s", "", "", RatingNone, false))
-	if !strings.Contains(episodeBlock(t, got), ">s<") || !strings.Contains(got, "_STATISTICS_TAGS") {
+	if !strings.Contains(fileLevelBlock(t, got), ">s<") || !strings.Contains(got, "_STATISTICS_TAGS") {
 		t.Errorf("want a new file-level block beside the track tags:\n%s", got)
 	}
 }
@@ -278,12 +353,6 @@ func TestMergeEpisodeTags_NoExistingTags_ReturnsFresh(t *testing.T) {
 func TestMergeEpisodeTags_EmptyFresh_ReturnsExisting(t *testing.T) {
 	if got := mustMerge(t, trackStatsXML, ""); got != trackStatsXML {
 		t.Errorf("got %q, want existing unchanged", got)
-	}
-}
-
-func TestMergeEpisodeTags_ExistingNotTagsDocument_Errors(t *testing.T) {
-	if _, err := mergeEpisodeTags("garbage", buildTagXML("s", "", "", RatingNone, false)); err == nil {
-		t.Error("want an error rather than replacing every tag")
 	}
 }
 
@@ -313,6 +382,40 @@ func TestApplyMKV_ExtractFails_DoesNotApply(t *testing.T) {
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	if p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false) {
 		t.Error("applyMKV succeeded, want failure")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("mkvpropedit ran %d times, want 0", len(runner.calls))
+	}
+}
+
+func TestApplyMKV_MergeFails_DoesNotApply(t *testing.T) {
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+	if p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false) {
+		t.Error("applyMKV succeeded, want failure")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("mkvpropedit ran %d times, want 0", len(runner.calls))
+	}
+}
+
+func TestApplyDebandOnlyMKV_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml",
+		extractTagsXML: `<Tags><Tag><Targets /><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+	if !p.applyDebandOnlyMKV(debandTestFile(t), false) {
+		t.Fatal("applyDebandOnlyMKV failed")
+	}
+	if len(runner.writtenXML) != 1 || runner.writtenXML[0] != emptyTagsDoc {
+		t.Errorf("written tags = %q, want [%q]", runner.writtenXML, emptyTagsDoc)
+	}
+}
+
+func TestApplyRatingOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
+	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
+	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+	if p.applyRatingOnlyMKV(debandTestFile(t), RatingM) {
+		t.Error("applyRatingOnlyMKV succeeded, want failure")
 	}
 	if len(runner.calls) != 0 {
 		t.Errorf("mkvpropedit ran %d times, want 0", len(runner.calls))

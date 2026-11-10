@@ -223,6 +223,25 @@ func TestProcessFile_NotApplied_AppliesMetadata(t *testing.T) {
 	}
 }
 
+// Applying without the tags would mark the file applied and never write them.
+func TestProcessFile_TagsTempFileFails_ErrorWithoutApply(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	missing := filepath.Join(t.TempDir(), "missing")
+	for _, env := range []string{"TMP", "TEMP", "TMPDIR"} {
+		t.Setenv(env, missing)
+	}
+	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
+	applier := &fakeApplier{}
+	cache := makeCache(t)
+
+	if got := processFile(path, tmdb, applier, &fakeFileTimer{}, nil, cache, nil, false); got != ResultError {
+		t.Errorf("got %v, want ResultError", got)
+	}
+	if len(applier.calls) != 0 || cache.IsMetaApplied(path, "12345") {
+		t.Errorf("Apply calls = %d, meta applied = %v; want neither", len(applier.calls), cache.IsMetaApplied(path, "12345"))
+	}
+}
+
 func TestProcessFile_AppliedButMtimeWrong_FixesTimestamps(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
 	// mtime is wrong even though metadata was already applied.
