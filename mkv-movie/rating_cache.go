@@ -23,6 +23,7 @@ type movieRatingCacheData struct {
 	MetaApplied    map[string]string `json:"meta_applied,omitempty"`    // absFilePath → tmdbID (full metadata written)
 	PlexRatings    map[string]string `json:"plex_ratings,omitempty"`    // tmdbID → rating last pushed to Plex
 	StreamsApplied map[string]string `json:"streams_applied,omitempty"` // tmdbID → audio lang tag when streams were last set
+	Files          map[string]string `json:"files,omitempty"`           // absFilePath → tmdbID, for --clean and --reset-rating
 }
 
 // LoadMovieRatingCache loads the cache from path. If the file does not exist an
@@ -37,6 +38,7 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 			MetaApplied:    make(map[string]string),
 			PlexRatings:    make(map[string]string),
 			StreamsApplied: make(map[string]string),
+			Files:          make(map[string]string),
 		},
 	}
 	b, err := os.ReadFile(path)
@@ -67,6 +69,15 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	if c.data.StreamsApplied == nil {
 		c.data.StreamsApplied = make(map[string]string)
 	}
+	if c.data.Files == nil {
+		c.data.Files = make(map[string]string)
+	}
+	// Caches written before "files" existed map files to IDs only through meta_applied.
+	for path, id := range c.data.MetaApplied {
+		if _, ok := c.data.Files[path]; !ok && id != "" {
+			c.data.Files[path] = id
+		}
+	}
 	return c, nil
 }
 
@@ -94,6 +105,13 @@ func (c *MovieRatingCache) SetTMDBID(key, id string) {
 	c.data.TMDBIDs[key] = id
 }
 
+// SetFileTMDBID records that the file at filePath is the movie tmdbID.
+func (c *MovieRatingCache) SetFileTMDBID(filePath, tmdbID string) {
+	if tmdbID != "" {
+		c.data.Files[filePath] = tmdbID
+	}
+}
+
 // IsMetaApplied returns true if the file at filePath already has full metadata
 // from the given TMDB ID written to it.
 func (c *MovieRatingCache) IsMetaApplied(filePath, tmdbID string) bool {
@@ -103,6 +121,7 @@ func (c *MovieRatingCache) IsMetaApplied(filePath, tmdbID string) bool {
 // MarkMetaApplied records that filePath has had its full metadata written from tmdbID.
 func (c *MovieRatingCache) MarkMetaApplied(filePath, tmdbID string) {
 	c.data.MetaApplied[filePath] = tmdbID
+	c.SetFileTMDBID(filePath, tmdbID)
 }
 
 // GetPlexRating returns the rating that was last successfully pushed to Plex
@@ -135,27 +154,44 @@ func (c *MovieRatingCache) SetStreamsApplied(tmdbID, lang string) {
 	}
 }
 
-// CleanStalePaths removes Applied and MetaApplied entries whose file paths no
-// longer exist on disk. Returns the counts of entries removed from each map.
-func (c *MovieRatingCache) CleanStalePaths() (applied, metaApplied int) {
-	for path := range c.data.Applied {
-		if pathGone(path) {
-			delete(c.data.Applied, path)
-			applied++
+// CleanStalePaths removes the entries for files that no longer exist on disk,
+// then every TMDB-ID-keyed entry (rating, title:YEAR lookup, Plex state) that
+// no remaining file maps to. Files on an offline drive count as present.
+// Returns the number of path entries and of movie entries removed.
+func (c *MovieRatingCache) CleanStalePaths() (paths, movies int) {
+	for _, m := range []map[string]string{c.data.Files, c.data.Applied, c.data.MetaApplied} {
+		for path := range m {
+			if pathGone(path) {
+				delete(m, path)
+				paths++
+			}
 		}
 	}
-	for path := range c.data.MetaApplied {
-		if pathGone(path) {
-			delete(c.data.MetaApplied, path)
-			metaApplied++
+
+	known := make(map[string]bool, len(c.data.Files))
+	for _, id := range c.data.Files {
+		known[id] = true
+	}
+	for _, m := range []map[string]string{c.data.Movies, c.data.PlexRatings, c.data.StreamsApplied} {
+		for id := range m {
+			if !known[id] {
+				delete(m, id)
+				movies++
+			}
 		}
 	}
-	return
+	for key, id := range c.data.TMDBIDs {
+		if !known[id] {
+			delete(c.data.TMDBIDs, key)
+			movies++
+		}
+	}
+	return paths, movies
 }
 
 // FindTMDBIDByQuery returns all (tmdbID, displayKey) pairs matching query.
 // Query may be a direct TMDB ID present in Movies, or a case-insensitive substring
-// of a "title (YEAR)" key in TMDBIDs. Falls back to substring matching Movies keys.
+// of a "title:YEAR" key in TMDBIDs. Falls back to substring matching Movies keys.
 func (c *MovieRatingCache) FindTMDBIDByQuery(query string) [][2]string {
 	var matches [][2]string
 	seen := make(map[string]bool)
@@ -167,7 +203,7 @@ func (c *MovieRatingCache) FindTMDBIDByQuery(query string) [][2]string {
 		seen[query] = true
 	}
 
-	// Substring match in TMDBIDs ("title (YEAR)" → tmdbID).
+	// Substring match in TMDBIDs ("title:YEAR" → tmdbID).
 	for titleKey, id := range c.data.TMDBIDs {
 		if strings.Contains(strings.ToLower(titleKey), lq) && !seen[id] {
 			matches = append(matches, [2]string{id, titleKey})
@@ -193,7 +229,7 @@ func (c *MovieRatingCache) ResetForTMDBID(tmdbID string) []string {
 	delete(c.data.Movies, tmdbID)
 	delete(c.data.PlexRatings, tmdbID)
 	var paths []string
-	for path, id := range c.data.MetaApplied {
+	for path, id := range c.data.Files {
 		if id == tmdbID {
 			delete(c.data.Applied, path)
 			delete(c.data.MetaApplied, path)
@@ -203,13 +239,14 @@ func (c *MovieRatingCache) ResetForTMDBID(tmdbID string) []string {
 	return paths
 }
 
-// Save writes the cache to disk.
+// Save writes the cache to disk atomically, so an interrupted write keeps the
+// previous contents.
 func (c *MovieRatingCache) Save() error {
 	b, err := json.MarshalIndent(c.data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("rating cache: marshal: %w", err)
 	}
-	if err := os.WriteFile(c.path, b, 0644); err != nil {
+	if err := atomicWriteFile(c.path, b); err != nil {
 		return fmt.Errorf("rating cache: write %s: %w", c.path, err)
 	}
 	return nil

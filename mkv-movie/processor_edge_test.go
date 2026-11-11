@@ -303,12 +303,13 @@ func TestWalkAndProcess_MultipleFiles_CountsAll(t *testing.T) {
 
 func TestWalkAndProcess_SavesCache(t *testing.T) {
 	dir := t.TempDir()
+	writeMovieFile(t, dir, "Inception.2010.mkv")
 	cacheFile := filepath.Join(t.TempDir(), "cache.json")
 	cache, err := LoadMovieRatingCache(cacheFile)
 	if err != nil {
 		t.Fatalf("LoadMovieRatingCache: %v", err)
 	}
-	// Seed a rating; walkAndProcess must call cache.Save().
+	// Seed a rating; walkAndProcess must call cache.Save() after the file.
 	cache.Set("test", RatingG)
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
