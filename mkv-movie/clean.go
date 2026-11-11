@@ -19,19 +19,19 @@ func runClean() {
 		os.Exit(1)
 	}
 
-	applied, metaApplied := cache.CleanStalePaths()
-	total := applied + metaApplied
+	paths, movies := cache.CleanStalePaths()
+	total := paths + movies
 
 	if total == 0 {
 		fmt.Println("Cache is clean; nothing to remove.")
 		return
 	}
 
-	if applied > 0 {
-		fmt.Printf("Removed %d stale applied-rating entr%s.\n", applied, es(applied))
+	if paths > 0 {
+		fmt.Printf("Removed %d stale file entr%s.\n", paths, es(paths))
 	}
-	if metaApplied > 0 {
-		fmt.Printf("Removed %d stale meta-applied entr%s.\n", metaApplied, es(metaApplied))
+	if movies > 0 {
+		fmt.Printf("Removed %d entr%s for movies no longer on disk.\n", movies, es(movies))
 	}
 
 	if err := cache.Save(); err != nil {

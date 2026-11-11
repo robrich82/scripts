@@ -299,6 +299,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			return ResultError
 		}
 	}
+	cache.SetFileTMDBID(filePath, tmdbID)
 
 	// 3. Parse release date.
 	if details.ReleaseDate == "" {
@@ -664,14 +665,16 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 		case ResultError:
 			stats.Errors++
 		}
+		// Save after each file so an interrupted run keeps the ratings and
+		// TMDB IDs resolved so far.
+		if cache != nil {
+			if err := cache.Save(); err != nil {
+				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
+			}
+		}
 		fmt.Println()
 		return nil
 	})
-	if cache != nil {
-		if err := cache.Save(); err != nil {
-			fmt.Printf("[!] Failed to save rating cache: %v\n", err)
-		}
-	}
 	return stats
 }
 
