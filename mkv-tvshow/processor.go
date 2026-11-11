@@ -167,7 +167,9 @@ func (p *Processor) Run() Stats {
 		mainPoster := ""
 		showFirstAirDate := ""
 		if !p.cfg.RatingsOnly {
-			if details, err := p.tmdb.GetShow(showID); err == nil {
+			if details, err := p.tmdb.GetShow(showID); err != nil {
+				fmt.Printf("[!] TMDB show lookup failed for %s (show poster and first air date unavailable): %v\n", showFolder, err)
+			} else {
 				if details.PosterPath != "" {
 					mainPoster = tmdbImageBase + details.PosterPath
 				}
@@ -224,35 +226,31 @@ func (p *Processor) Run() Stats {
 
 						// Fetch season data for poster.
 						if posterSeason != 0 {
-							cKey := fmt.Sprintf("%s_S%d", showID, posterSeason)
-							if _, ok := seasonCache[cKey]; !ok {
-								if sr, err := p.tmdb.GetSeason(showID, posterSeason); err == nil {
-									seasonCache[cKey] = sr
-								}
+							sr, err := p.seasonData(seasonCache, showID, posterSeason)
+							if err != nil {
+								p.failTMDBLookup(&stats, filePath, file, err)
+								continue
 							}
-							if sr, ok := seasonCache[cKey]; ok && sr.PosterPath != "" {
+							if sr.PosterPath != "" {
 								posterURL = tmdbImageBase + sr.PosterPath
 							}
 						}
 
 						// Fetch episode metadata when an episode reference is specified.
 						if epNum > 0 {
-							cKey := fmt.Sprintf("%s_S%d", showID, epSeason)
-							if _, ok := seasonCache[cKey]; !ok {
-								if sr, err := p.tmdb.GetSeason(showID, epSeason); err == nil {
-									seasonCache[cKey] = sr
-								}
+							sr, err := p.seasonData(seasonCache, showID, epSeason)
+							if err != nil {
+								p.failTMDBLookup(&stats, filePath, file, err)
+								continue
 							}
-							if sr, ok := seasonCache[cKey]; ok {
-								for _, ep := range sr.Episodes {
-									if ep.EpisodeNumber == epNum {
-										if ep.AirDate != "" {
-											relDate = ep.AirDate + "T00:00:00Z"
-											stampDate = relDate
-										}
-										summary = ep.Overview
-										break
+							for _, ep := range sr.Episodes {
+								if ep.EpisodeNumber == epNum {
+									if ep.AirDate != "" {
+										relDate = ep.AirDate + "T00:00:00Z"
+										stampDate = relDate
 									}
+									summary = ep.Overview
+									break
 								}
 							}
 						}
@@ -325,32 +323,29 @@ func (p *Processor) Run() Stats {
 			// Full processing mode: fetch season data and apply all metadata.
 			var relDate, stampDate, posterURL, summary string
 			posterURL = mainPoster
-			cKey := fmt.Sprintf("%s_S%d", currID, tmdbSeason)
-			if _, ok := seasonCache[cKey]; !ok {
-				if sr, err := p.tmdb.GetSeason(currID, tmdbSeason); err == nil {
-					seasonCache[cKey] = sr
-				}
+			sr, err := p.seasonData(seasonCache, currID, tmdbSeason)
+			if err != nil {
+				p.failTMDBLookup(&stats, filePath, file, err)
+				continue
 			}
-			var prevDate, srAirDate string
-			if sr, ok := seasonCache[cKey]; ok {
-				if sr.PosterPath != "" {
-					posterURL = tmdbImageBase + sr.PosterPath
-				}
-				for _, ep := range sr.Episodes {
-					if ep.EpisodeNumber == tmdbEpisode {
-						summary = ep.Overview
-						if ep.AirDate != "" {
-							relDate = ep.AirDate + "T00:00:00Z"
-							stampDate = relDate // real date: safe to stamp filesystem
-						}
-						break
-					}
+			var prevDate string
+			if sr.PosterPath != "" {
+				posterURL = tmdbImageBase + sr.PosterPath
+			}
+			for _, ep := range sr.Episodes {
+				if ep.EpisodeNumber == tmdbEpisode {
+					summary = ep.Overview
 					if ep.AirDate != "" {
-						prevDate = ep.AirDate
+						relDate = ep.AirDate + "T00:00:00Z"
+						stampDate = relDate // real date: safe to stamp filesystem
 					}
+					break
 				}
-				srAirDate = sr.AirDate
+				if ep.AirDate != "" {
+					prevDate = ep.AirDate
+				}
 			}
+			srAirDate := sr.AirDate
 
 			// Manual date overrides all TMDB-derived dates.
 			epKey := fmt.Sprintf("S%02dE%02d", sNum, eNum)
@@ -1163,12 +1158,47 @@ func (p *Processor) resolveOriginalLang(tmdbID string) string {
 		return lang
 	}
 	if p.tmdb != nil {
-		if details, err := p.tmdb.GetShow(tmdbID); err == nil && details.OriginalLanguage != "" {
+		details, err := p.tmdb.GetShow(tmdbID)
+		if err != nil {
+			fmt.Printf("  [!] TMDB show lookup failed for ID %s (original language unknown): %v\n", tmdbID, err)
+		} else if details.OriginalLanguage != "" {
 			p.sessionOriginalLang[tmdbID] = details.OriginalLanguage
 			return details.OriginalLanguage
 		}
 	}
 	return ""
+}
+
+// seasonData returns a TMDB season, caching it in cache. A season TMDB doesn't
+// have is reported once and is an empty result. Any other error is returned
+// and not cached, so the next episode tries again.
+func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, season int) (SeasonResult, error) {
+	key := fmt.Sprintf("%s_S%d", showID, season)
+	if sr, ok := cache[key]; ok {
+		return sr, nil
+	}
+	sr, err := p.tmdb.GetSeason(showID, season)
+	if errors.Is(err, errTMDBNotFound) {
+		// TMDB's 404 is the same for a missing season and a wrong show ID
+		// (e.g. a typo in a manual_data override), so say which was asked for.
+		fmt.Printf("  [i] TMDB has no season %d for show ID %s; tagging without episode data\n", season, showID)
+		sr, err = SeasonResult{}, nil
+	}
+	if err != nil {
+		return SeasonResult{}, fmt.Errorf("show ID %s season %d: %w", showID, season, err)
+	}
+	cache[key] = sr
+	return sr, nil
+}
+
+// failTMDBLookup reports a failed TMDB season lookup for file and leaves it
+// untagged rather than writing partial metadata. The retry list brings it back
+// on the next run even once it falls before the cutoff.
+func (p *Processor) failTMDBLookup(stats *Stats, filePath, file string, err error) {
+	fmt.Printf("  [!] TMDB season lookup failed: %v\n", err)
+	fmt.Printf("  [X] Failed: %s\n", file)
+	p.retryList.Add(filePath)
+	stats.Failed++
 }
 
 // RunLanguageOnly iterates all shows in the rating cache and applies the Plex
