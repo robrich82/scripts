@@ -1,6 +1,6 @@
 module mkv-music
 
-go 1.27.3
+go 1.27.4
 
 require (
 	go.senan.xyz/taglib v0.15.0
