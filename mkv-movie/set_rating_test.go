@@ -51,6 +51,10 @@ func TestPlanSetRating_ResolvesCachedMoviesAndReportsUnknown(t *testing.T) {
 	if len(unknown) != 1 || unknown[0] != "Unprocessed (2020).mkv" {
 		t.Errorf("unknown = %v, want [Unprocessed (2020).mkv]", unknown)
 	}
+	// Each resolved file is mapped to its movie, so --clean keeps the override.
+	if got := cache.data.Files[filepath.Join(dir, "Coco (2017).mkv")]; got != "354912" {
+		t.Errorf("files[Coco] = %q; want 354912", got)
+	}
 }
 
 func TestPlanSetRating_DeduplicatesFilesSharingATMDBID(t *testing.T) {
