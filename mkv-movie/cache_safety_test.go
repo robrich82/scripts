@@ -33,6 +33,8 @@ func TestRunClean_PrunesMoviesNoFileMapsTo(t *testing.T) {
 		cache.SetPlexRating(id, RatingPG)
 		cache.SetStreamsApplied(id, "en")
 	}
+	cache.SetTMDBID("Gonzo:2020", "2") // a second key: listed once, by the first key
+	cache.SetPlexRating("4", RatingPG) // no title:YEAR key to name it by
 	cache.SetFileTMDBID(kept, "1")
 	cache.MarkMetaApplied(gone, "2")
 	if err := cache.Save(); err != nil {
@@ -45,7 +47,7 @@ func TestRunClean_PrunesMoviesNoFileMapsTo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]bool{"1": true, "2": false, "3": false} {
+	for id, want := range map[string]bool{"1": true, "2": false, "3": false, "4": false} {
 		if _, ok := cache.Get(id); ok != want {
 			t.Errorf("movies has %s = %v, want %v", id, ok, want)
 		}
@@ -56,15 +58,20 @@ func TestRunClean_PrunesMoviesNoFileMapsTo(t *testing.T) {
 			t.Errorf("streams_applied has %s = %v, want %v", id, ok, want)
 		}
 	}
-	if cache.GetTMDBID("Kept:2020") != "1" || cache.GetTMDBID("Gone:2020") != "" || cache.GetTMDBID("Orphan:2001") != "" {
+	if len(cache.data.TMDBIDs) != 1 || cache.GetTMDBID("Kept:2020") != "1" {
 		t.Errorf("tmdb_ids = %v; want only Kept:2020", cache.data.TMDBIDs)
 	}
 	if _, ok := cache.data.Files[gone]; ok {
 		t.Error("files still has the vanished file")
 	}
-	// 1 vanished path in files + 1 in meta_applied; movies 2 and 3 in four maps each.
-	if !strings.Contains(out, "Removed 2 stale file entries") || !strings.Contains(out, "Removed 8 entries for movies no longer on disk") {
-		t.Errorf("unexpected --clean summary:\n%s", out)
+	// The vanished file is in both files and meta_applied but counts once.
+	for _, want := range []string{
+		"Removed 1 file no longer on disk.",
+		"Plex state of 3 movies no file on disk maps to:\n  Gone (2020)\n  Orphan (2001)\n  TMDB ID 4\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--clean summary lacks %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -87,8 +94,8 @@ func TestLoadMovieRatingCache_BackfillsFilesFromMetaApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paths, movies := cache.CleanStalePaths(); paths != 0 || movies != 0 {
-		t.Errorf("CleanStalePaths removed %d paths, %d movies; want nothing", paths, movies)
+	if files, movies := cache.CleanStalePaths(); len(files) != 0 || len(movies) != 0 {
+		t.Errorf("CleanStalePaths removed files %v, movies %v; want nothing", files, movies)
 	}
 	if got, _ := cache.Get("1"); got != RatingM {
 		t.Errorf("rating = %q; want M kept", got)
@@ -113,15 +120,33 @@ func TestResetForTMDBID_UsesFileMap(t *testing.T) {
 	}
 }
 
+// Save writes a new file and renames it over the old one, rather than
+// rewriting the old file in place: a hard link to the old file keeps the old bytes.
 func TestMovieRatingCache_SaveIsAtomic(t *testing.T) {
 	dir := t.TempDir()
 	cachePath := filepath.Join(dir, "movie_rating_cache.json")
 	cache, _ := LoadMovieRatingCache(cachePath)
+	cache.Set("1", RatingPG)
+	if err := cache.Save(); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkDir := t.TempDir()
+	link := filepath.Join(linkDir, "old.json")
+	if err := os.Link(cachePath, link); err != nil {
+		t.Skipf("hard links unsupported here: %v", err)
+	}
+
 	cache.Set("1", RatingM)
-	for range 2 {
-		if err := cache.Save(); err != nil {
-			t.Fatal(err)
-		}
+	if err := cache.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := os.ReadFile(link); string(got) != string(old) {
+		t.Errorf("the old file was rewritten in place:\n%s", got)
 	}
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 {
@@ -180,6 +205,81 @@ func TestWalkAndProcess_SavesAfterEachFile(t *testing.T) {
 	if len(tmdb.sawSaved) != 1 || !tmdb.sawSaved[0] {
 		t.Errorf("Alpha's TMDB ID on disk while Beta was processed: %v; want saved", tmdb.sawSaved)
 	}
+	// The last file's save comes after it is processed, and each file is mapped
+	// to its ID even with no applier (so nothing is meta-applied).
+	onDisk, err := LoadMovieRatingCache(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := onDisk.GetTMDBID("Beta:2002"); got != "202" {
+		t.Errorf("Beta's TMDB ID on disk = %q; want 202", got)
+	}
+	for name, id := range map[string]string{"Alpha (2001).mkv": "101", "Beta (2002).mkv": "202"} {
+		if got := onDisk.data.Files[filepath.Join(dir, name)]; got != id {
+			t.Errorf("files[%s] = %q; want %s", name, got, id)
+		}
+	}
+}
+
+// stubTMDB finds every movie as ID "1" and calls onSearch first.
+type stubTMDB struct{ onSearch func(title string) }
+
+func (s stubTMDB) SearchAndFetch(title, year string) (string, MovieDetails, error) {
+	s.onSearch(title)
+	return "1", MovieDetails{Title: title, ReleaseDate: year + "-01-01"}, nil
+}
+
+func (stubTMDB) GetMovieDetails(string) (MovieDetails, error) {
+	return MovieDetails{}, nil
+}
+
+// A save that keeps failing is reported once, not after every file, and again
+// at the end of the run.
+func TestWalkAndProcess_PersistentSaveFailureReportedOnce(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"Alpha (2001).mkv", "Beta (2002).mkv", "Gamma (2003).mkv"} {
+		writeMovieFile(t, dir, name)
+	}
+	cache, _ := LoadMovieRatingCache(filepath.Join(t.TempDir(), "missing", "movie_rating_cache.json"))
+
+	out := captureStdout(t, func() {
+		walkAndProcess(dir, stubTMDB{onSearch: func(string) {}}, nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
+	})
+
+	if n := strings.Count(out, "Failed to save rating cache"); n != 1 {
+		t.Errorf("save failure printed %d times; want once:\n%s", n, out)
+	}
+	if !strings.Contains(out, "The rating cache was not saved") {
+		t.Errorf("no end-of-run warning:\n%s", out)
+	}
+}
+
+// Once a save succeeds again, the run says so and gives no end-of-run warning.
+func TestWalkAndProcess_SaveRecovers(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"Alpha (2001).mkv", "Beta (2002).mkv"} {
+		writeMovieFile(t, dir, name)
+	}
+	cfg := filepath.Join(t.TempDir(), "missing")
+	cache, _ := LoadMovieRatingCache(filepath.Join(cfg, "movie_rating_cache.json"))
+	tmdb := stubTMDB{onSearch: func(title string) {
+		if title == "Beta" {
+			if err := os.MkdirAll(cfg, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}}
+
+	out := captureStdout(t, func() {
+		walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
+	})
+
+	if !strings.Contains(out, "Failed to save rating cache") || !strings.Contains(out, "[i] Rating cache saved.") {
+		t.Errorf("want a failure then a recovery notice:\n%s", out)
+	}
+	if strings.Contains(out, "The rating cache was not saved") {
+		t.Errorf("end-of-run warning after a successful save:\n%s", out)
+	}
 }
 
 // TestRunMainHelper is the child side of runMain: it runs main() with the
@@ -229,8 +329,8 @@ func TestMain_CorruptRatingCache_Exits(t *testing.T) {
 	if err == nil {
 		t.Fatalf("run with a corrupt cache succeeded:\n%s", out)
 	}
-	if !strings.Contains(string(out), "Error loading movie_rating_cache.json") {
-		t.Errorf("missing load error:\n%s", out)
+	if !strings.Contains(string(out), "Error loading movie_rating_cache.json") || !strings.Contains(string(out), "Restore it from a backup") {
+		t.Errorf("missing load error or recovery hint:\n%s", out)
 	}
 	if strings.Contains(string(out), "Scanning") {
 		t.Errorf("run continued past the load error:\n%s", out)

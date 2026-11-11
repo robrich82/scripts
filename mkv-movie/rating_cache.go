@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -25,6 +26,9 @@ type movieRatingCacheData struct {
 	StreamsApplied map[string]string `json:"streams_applied,omitempty"` // tmdbID → audio lang tag when streams were last set
 	Files          map[string]string `json:"files,omitempty"`           // absFilePath → tmdbID, for --clean and --reset-rating
 }
+
+// cacheRecoveryHint follows a movie_rating_cache.json load error.
+const cacheRecoveryHint = "Restore it from a backup, or delete it to start over (every rating will be asked for again)."
 
 // LoadMovieRatingCache loads the cache from path. If the file does not exist an
 // empty cache is returned. Any other read/parse error is returned as an error.
@@ -157,13 +161,15 @@ func (c *MovieRatingCache) SetStreamsApplied(tmdbID, lang string) {
 // CleanStalePaths removes the entries for files that no longer exist on disk,
 // then every TMDB-ID-keyed entry (rating, title:YEAR lookup, Plex state) that
 // no remaining file maps to. Files on an offline drive count as present.
-// Returns the number of path entries and of movie entries removed.
-func (c *MovieRatingCache) CleanStalePaths() (paths, movies int) {
+// Returns the removed file paths and the removed movies, each named by its
+// title:YEAR lookup key where one is cached, both sorted.
+func (c *MovieRatingCache) CleanStalePaths() (files, movies []string) {
+	removedPaths := make(map[string]bool)
 	for _, m := range []map[string]string{c.data.Files, c.data.Applied, c.data.MetaApplied} {
 		for path := range m {
-			if pathGone(path) {
+			if removedPaths[path] || pathGone(path) {
 				delete(m, path)
-				paths++
+				removedPaths[path] = true
 			}
 		}
 	}
@@ -172,21 +178,48 @@ func (c *MovieRatingCache) CleanStalePaths() (paths, movies int) {
 	for _, id := range c.data.Files {
 		known[id] = true
 	}
+	names := make(map[string]string) // removed tmdbID → display name
+	for key, id := range c.data.TMDBIDs {
+		if !known[id] {
+			delete(c.data.TMDBIDs, key)
+			if prev, ok := names[id]; !ok || key < prev {
+				names[id] = key
+			}
+		}
+	}
 	for _, m := range []map[string]string{c.data.Movies, c.data.PlexRatings, c.data.StreamsApplied} {
 		for id := range m {
 			if !known[id] {
 				delete(m, id)
-				movies++
+				if _, ok := names[id]; !ok {
+					names[id] = ""
+				}
 			}
 		}
 	}
-	for key, id := range c.data.TMDBIDs {
-		if !known[id] {
-			delete(c.data.TMDBIDs, key)
-			movies++
-		}
+
+	for path := range removedPaths {
+		files = append(files, path)
 	}
-	return paths, movies
+	for id, key := range names {
+		movies = append(movies, movieDisplayName(id, key))
+	}
+	slices.Sort(files)
+	slices.Sort(movies)
+	return files, movies
+}
+
+// movieDisplayName renders a title:YEAR key as "Title (YEAR)", or names the
+// movie by tmdbID when no key is cached.
+func movieDisplayName(tmdbID, key string) string {
+	if key == "" {
+		return "TMDB ID " + tmdbID
+	}
+	i := strings.LastIndex(key, ":")
+	if i < 0 || i == len(key)-1 {
+		return strings.TrimSuffix(key, ":")
+	}
+	return fmt.Sprintf("%s (%s)", key[:i], key[i+1:])
 }
 
 // FindTMDBIDByQuery returns all (tmdbID, displayKey) pairs matching query.

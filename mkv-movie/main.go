@@ -108,7 +108,7 @@ func main() {
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading movie_rating_cache.json: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading movie_rating_cache.json: %v\n%s\n", err, cacheRecoveryHint)
 		os.Exit(1)
 	}
 

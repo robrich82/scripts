@@ -618,6 +618,7 @@ func extractYear(filename string) string {
 // walkAndProcess walks root for .mkv files and processes each one.
 func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, force bool, cutoff time.Time) Stats {
 	var stats Stats
+	var saveErr error // the last save's error; only the first in a run of failures is printed
 	// The callback never returns an error, so neither does WalkDir.
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -650,13 +651,21 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 		// Save after each file so an interrupted run keeps the ratings and
 		// TMDB IDs resolved so far.
 		if cache != nil {
-			if err := cache.Save(); err != nil {
-				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
+			err := cache.Save()
+			switch {
+			case err != nil && saveErr == nil:
+				fmt.Printf("[!] Failed to save rating cache: %v\n    Retrying after each file; until a save succeeds, this run's ratings are kept in memory only.\n", err)
+			case err == nil && saveErr != nil:
+				fmt.Println("[i] Rating cache saved.")
 			}
+			saveErr = err
 		}
 		fmt.Println()
 		return nil
 	})
+	if saveErr != nil {
+		fmt.Printf("[!] The rating cache was not saved, so this run's ratings and TMDB IDs are lost: %v\n", saveErr)
+	}
 	return stats
 }
 
