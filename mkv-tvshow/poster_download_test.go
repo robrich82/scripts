@@ -25,7 +25,9 @@ func TestDownloadPoster(t *testing.T) {
 		body    string
 		wantErr string
 	}{
-		{"ok", http.StatusOK, "jpegdata", ""},
+		{"jpeg", http.StatusOK, "\xff\xd8\xff\xe0\x00\x10JFIF\x00jpegdata", ""},
+		{"png", http.StatusOK, "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", ""},
+		{"html page served with 200", http.StatusOK, "<!DOCTYPE html><html><body>Sign in to Wi-Fi</body></html>", "not an image"},
 		{"server error", http.StatusServiceUnavailable, "busy", "unexpected status 503"},
 		{"empty body", http.StatusOK, "", "empty response body"},
 	}
