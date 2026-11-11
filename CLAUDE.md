@@ -21,6 +21,7 @@ In a worktree, run `make` and these skills from the worktree directory, and give
 - `make test` — `go test ./...` per module.
 - `make vuln` — `govulncheck` per module (needs network).
 - `make clean` — delete `dist/`.
+- `make openapi` — refresh `openapi.json` from the Plex docs page (needs `curl`, `jq` and network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
 
 CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml` or `.golangci.yml` change). Each job runs the equivalent of `make vet`, `make vet-linux` and `make test`, plus govulncheck, which only fails the weekly run.
@@ -53,4 +54,4 @@ Cross-tool coupling: mkv-audit's track trimming reads `manual_data.json` from `%
 Environment: `TMDB_API_KEY` (mkv-movie, mkv-tvshow; optional for mkv-audit), `PLEX_URL`, `PLEX_TOKEN` (optional Plex integration in mkv-movie, mkv-tvshow, mkv-music), `PLEX_ALT_TOKEN`, `PLEX_ALT2_TOKEN` (mkv-movie/mkv-tvshow: only per-account stream/language prefs use these), `GITHUB_PERSONAL_ACCESS_TOKEN` (sw-update rate limit).
 
 ## Plex API
-The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it through the `plex-api` skill when working with Plex API endpoints, request/response shapes, or authentication.
+The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it through the `plex-api` skill when working with Plex API endpoints, request/response shapes, or authentication. `.github/workflows/plex-openapi.yml` runs `make openapi` weekly and opens a PR when the spec changes.

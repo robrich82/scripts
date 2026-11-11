@@ -7,7 +7,7 @@ define NL
 
 endef
 
-.PHONY: all clean test vet vet-linux vuln $(MODULES)
+.PHONY: all clean test vet vet-linux vuln openapi $(MODULES)
 
 all: $(MODULES)
 
@@ -30,3 +30,12 @@ vuln:
 
 clean:
 	rm -rf dist
+
+# Plex has no download URL for the spec; it's embedded in the Redoc page as __redoc_state.
+# jq -e fails on no match, so a page layout change errors instead of emptying openapi.json.
+openapi:
+	curl -fsSL https://developer.plex.tv/pms/ \
+	  | sed -n 's/^[[:space:]]*const __redoc_state = \(.*\);[[:space:]]*$$/\1/p' \
+	  | jq -en 'input | .spec.data | select(.openapi and (.paths | length) > 0)' > openapi.json.tmp \
+	  || { rm -f openapi.json.tmp; echo "openapi: no spec found on developer.plex.tv/pms/" >&2; exit 1; }
+	mv openapi.json.tmp openapi.json

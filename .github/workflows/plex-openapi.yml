@@ -1,0 +1,57 @@
+name: Plex OpenAPI spec
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-26.04
+    env:
+      BRANCH: chore/plex-openapi
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - run: make openapi
+
+      # Skips when main already has this spec, or an open PR does. Checks the PR, not just
+      # the branch, so a push whose PR create failed or was closed gets a PR next run.
+      - name: Open or update PR
+        run: |
+          if git diff --quiet -- openapi.json; then
+            echo "openapi.json matches main"; exit 0
+          fi
+          state=$(gh pr view "$BRANCH" --json state -q .state 2>&1) || case $state in
+            *"o pull requests found"*) state=NONE ;;
+            *) echo "gh pr view failed: $state" >&2; exit 1 ;;
+          esac
+          if [ "$state" = OPEN ]; then
+            git fetch -q origin "$BRANCH"
+            if git diff --quiet FETCH_HEAD -- openapi.json; then
+              echo "openapi.json matches the open PR"; exit 0
+            fi
+          fi
+          version=$(jq -r '.info.version | sub("\\s+$"; "")' openapi.json)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git commit -qam "chore(plex-api): update OpenAPI spec to $version"
+          git push -f origin "$BRANCH"
+          title="chore(plex-api): update OpenAPI spec to $version"
+          if [ "$state" = OPEN ]; then
+            gh pr edit "$BRANCH" --title "$title"
+          else
+            gh pr create --base main --head "$BRANCH" --title "$title" \
+              --body "Weekly \`make openapi\` refresh from https://developer.plex.tv/pms/."
+          fi
