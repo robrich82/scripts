@@ -368,7 +368,7 @@ Flags:
 |------|-------------|
 | `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
 | `--all` | Process all files regardless of modification date |
-| `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values. A movie no source rates keeps its cached rating |
+| `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values. A source rating that differs from the cached one is shown for confirmation; a movie no source rates keeps its cached rating |
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--force` | Re-apply all metadata even if already cached |
 | `--clean` | Remove cache entries for movie files that no longer exist on disk, and the ratings, TMDB IDs and Plex state of movies no remaining file maps to (and lists them), then exit. Entries on an offline drive are kept |

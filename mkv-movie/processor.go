@@ -135,8 +135,8 @@ const (
 	ResultError
 )
 
-// MovieRatingResolver resolves an NZ content rating for a movie, trying
-// external sources, cache, and finally a user prompt.
+// MovieRatingResolver resolves an NZ content rating for a movie: from the
+// cache, else from external sources (confirmed by the user), else by prompting.
 type MovieRatingResolver struct {
 	sources          []RatingSource
 	cache            *MovieRatingCache
@@ -144,7 +144,7 @@ type MovieRatingResolver struct {
 	overwriteStreams bool
 	plex             PlexMovieClient // nil if not configured
 	prompter         func(string) (string, error)
-	sessionPrompted  map[string]NZRating // key → rating already prompted this run
+	sessionPrompted  map[string]NZRating // tmdbID → rating already settled this run
 }
 
 func newMovieRatingResolver(
@@ -190,10 +190,12 @@ func (r *MovieRatingResolver) ResolveMovieRating(tmdbID, title, year string) NZR
 	}
 
 	var suggested NZRating
+	sourceFailed := false
 	for _, src := range r.sources {
 		rating, err := src.FetchRating(tmdbID, title)
 		if err != nil {
 			fmt.Printf("  [!] %s rating error: %v\n", src.Name(), err)
+			sourceFailed = true
 			continue
 		}
 		if rating != RatingNone {
@@ -202,26 +204,43 @@ func (r *MovieRatingResolver) ResolveMovieRating(tmdbID, title, year string) NZR
 		}
 	}
 
-	if suggested == RatingNone && haveCached {
-		fmt.Printf("  [i] No source has a rating for %q; keeping cached %s\n", title, cached)
+	// --overwrite-ratings: keep the cached rating when no source disagrees with it.
+	if haveCached && (suggested == RatingNone || suggested == cached) {
+		switch {
+		case suggested == cached:
+		case sourceFailed:
+			fmt.Printf("  [i] No rating source answered for %q; keeping cached %s\n", title, cached)
+		default:
+			fmt.Printf("  [i] No source has a rating for %q; keeping cached %s\n", title, cached)
+		}
 		r.sessionPrompted[tmdbID] = cached
 		return cached
 	}
 
-	plexDefault := r.plexRatingDefault(tmdbID, title, year)
+	var plexDefault NZRating
+	if suggested == RatingNone {
+		plexDefault = r.plexRatingDefault(tmdbID, title, year)
+	}
 
 	var promptMsg string
+	blankDoes := "skip" // what a blank answer does, for the invalid-input re-prompt
 	switch {
 	case suggested != RatingNone:
+		was := ""
+		if haveCached {
+			was = fmt.Sprintf(" (cached: %s)", cached)
+		}
 		promptMsg = fmt.Sprintf(
-			"NZ rating for %q: %s — press enter to confirm, or enter a new rating (%s): ",
-			title, suggested, validRatings,
+			"NZ rating for %q: %s%s — press enter to confirm, or enter a new rating (%s): ",
+			title, suggested, was, validRatings,
 		)
+		blankDoes = "accept " + string(suggested)
 	case plexDefault != RatingNone:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
 			title, plexDefault, validRatings,
 		)
+		blankDoes = "use Plex's " + string(plexDefault)
 	default:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, or classificationoffice.govt.nz\nLeave blank to skip: ",
@@ -249,7 +268,7 @@ func (r *MovieRatingResolver) ResolveMovieRating(tmdbID, title, year string) NZR
 			r.cache.Set(tmdbID, rating)
 			break
 		}
-		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to skip: ", ans, validRatings)
+		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to %s: ", ans, validRatings, blankDoes)
 	}
 	r.sessionPrompted[tmdbID] = rating
 	return rating
@@ -280,6 +299,9 @@ func (r *MovieRatingResolver) plexRatingDefault(tmdbID, title, year string) NZRa
 	if err != nil {
 		fmt.Printf("  [!] Plex: rating fetch failed for %q: %v\n", title, err)
 		return RatingNone
+	}
+	if rating == RatingNone {
+		fmt.Printf("  [i] Plex: %q found but no NZ content rating is set\n", title)
 	}
 	return rating
 }
@@ -439,7 +461,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet() {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
 		if errors.Is(plexErr, ErrPlexMovieNotFound) {
-			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
+			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, releaseYear(details.ReleaseDate))
 		}
 		if errors.Is(plexErr, ErrPlexMovieNotFound) {
 			fmt.Printf("  [!] Not in Plex library – rating and streams not pushed\n")
@@ -806,14 +828,17 @@ func runDebandOnly(dir string, manualData map[string]MovieManualEntry, tagger MK
 	return stats
 }
 
+// stdinScanner is shared by every prompt: a scanner per prompt would read ahead
+// and drop the answers to later prompts when stdin is piped.
+var stdinScanner = bufio.NewScanner(os.Stdin)
+
 // stdinPrompter reads a line from stdin after printing prompt.
 func stdinPrompter(prompt string) (string, error) {
 	fmt.Print(prompt)
-	scanner := bufio.NewScanner(os.Stdin)
-	if scanner.Scan() {
-		return scanner.Text(), nil
+	if stdinScanner.Scan() {
+		return stdinScanner.Text(), nil
 	}
-	return "", scanner.Err()
+	return "", stdinScanner.Err()
 }
 
 // tmdbIDPattern matches a bare numeric TMDB ID or one embedded in a
