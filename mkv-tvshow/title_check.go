@@ -297,8 +297,8 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 		fmt.Printf("  [!] mkvpropedit error: %v\n", err)
 		return
 	}
-	if rc != 0 && !strings.Contains(combined, mkvpropeditSuccessMsg) {
-		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n", rc)
+	if !mkvpropeditWrote(rc) {
+		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
 		return
 	}
 

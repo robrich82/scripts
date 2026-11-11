@@ -13,7 +13,10 @@ import (
 )
 
 const tmdbImageBase = "https://image.tmdb.org/t/p/original"
-const mkvpropeditSuccessMsg = "The changes are written to the file. Done."
+
+// mkvpropeditWrote reports whether mkvpropedit wrote the file. Exit code 0 is
+// success, 1 means it wrote the changes but printed warnings, 2 is an error.
+func mkvpropeditWrote(rc int) bool { return rc == 0 || rc == 1 }
 
 // Config holds all runtime configuration for a processing run.
 type Config struct {
@@ -639,7 +642,7 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 		return false
 	}
 
-	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
+	success := mkvpropeditWrote(rc)
 	if !success {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
 	} else if rc != 0 {
@@ -855,7 +858,7 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 		fmt.Printf("  [!] subprocess error: %v\n", err)
 		return false
 	}
-	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
+	success := mkvpropeditWrote(rc)
 	if !success {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
 		return false
@@ -917,7 +920,7 @@ func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
 		fmt.Printf("  [!] subprocess error: %v\n", err)
 		return false
 	}
-	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
+	success := mkvpropeditWrote(rc)
 	if !success {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
 		return false

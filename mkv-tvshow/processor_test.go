@@ -315,7 +315,7 @@ func TestApplyMKV_MkvpropeditNotFound(t *testing.T) {
 func TestApplyMKV_Success_ArgsIncludeEditAndTitle(t *testing.T) {
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "tags.xml",
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
@@ -331,7 +331,7 @@ func TestApplyMKV_Success_ArgsIncludeEditAndTitle(t *testing.T) {
 }
 
 func TestApplyMKV_WithDate_SetsDateArg(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	p.applyMKV("show.mkv", "T", "", "", "2021-05-10T00:00:00Z", "", "", RatingNone, false)
 
@@ -344,7 +344,7 @@ func TestApplyMKV_WithDate_SetsDateArg(t *testing.T) {
 func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "t.xml",
 		posterPath:  "poster.jpg",
 	}
@@ -376,7 +376,7 @@ func TestApplyMKV_ExistingCovers_ReplacedByNewPoster(t *testing.T) {
 			runner := &fakeMKVRunner{
 				avail:       true,
 				attachments: tc.existing,
-				applyResult: mkvpropeditSuccessMsg,
+				applyResult: "Done.",
 				tagsPath:    "t.xml",
 				posterPath:  "poster.jpg",
 			}
@@ -413,7 +413,7 @@ func TestApplyMKV_ExistingCover_KeptWithoutNewPoster(t *testing.T) {
 			runner := &fakeMKVRunner{
 				avail:       true,
 				attachments: AttachmentInfo{HasJPEG: true, HasPNG: true},
-				applyResult: mkvpropeditSuccessMsg,
+				applyResult: "Done.",
 				tagsPath:    "t.xml",
 				posterErr:   tc.posterErr,
 			}
@@ -436,7 +436,7 @@ func TestApplyMKV_ExistingCover_KeptWithoutNewPoster(t *testing.T) {
 }
 
 func TestApplyMKV_Success_SetsTimestamps(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyRC: 0, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyRC: 0, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
 	p.applyMKV("show.mkv", "T", "", "", "2020-06-15T00:00:00Z", "2020-06-15T00:00:00Z", "", RatingNone, false)
@@ -457,7 +457,7 @@ func TestApplyMKV_Success_SetsTimestamps(t *testing.T) {
 }
 
 func TestApplyMKV_Failure_NoTimestamps(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyRC: 1, applyResult: "Error"}
+	runner := &fakeMKVRunner{avail: true, applyRC: 2, applyResult: "Error"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
 	p.applyMKV("show.mkv", "T", "", "", "2020-01-01T00:00:00Z", "2020-01-01T00:00:00Z", "", RatingNone, false)
@@ -503,7 +503,7 @@ func TestApplyDebandOnlyMKV_ExtractTagsFails(t *testing.T) {
 func TestApplyDebandOnlyMKV_StatError_DoesNotTag(t *testing.T) {
 	runner := &fakeMKVRunner{
 		avail:          true,
-		applyResult:    mkvpropeditSuccessMsg,
+		applyResult:    "Done.",
 		tagsPath:       "tags.xml",
 		extractTagsXML: `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`,
 	}
@@ -535,7 +535,7 @@ func TestApplyDebandOnlyMKV_Success_RestoresTimestamps(t *testing.T) {
 
 	runner := &fakeMKVRunner{
 		avail:          true,
-		applyResult:    mkvpropeditSuccessMsg,
+		applyResult:    "Done.",
 		tagsPath:       "tags.xml",
 		extractTagsXML: `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`,
 	}
@@ -556,7 +556,7 @@ func TestApplyDebandOnlyMKV_Success_RestoresTimestamps(t *testing.T) {
 func TestApplyDebandOnlyMKV_PassesUpdatedXMLToApply(t *testing.T) {
 	runner := &fakeMKVRunner{
 		avail:          true,
-		applyResult:    mkvpropeditSuccessMsg,
+		applyResult:    "Done.",
 		tagsPath:       "tags.xml",
 		extractTagsXML: `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`,
 	}
@@ -585,7 +585,7 @@ func TestApplyRatingOnlyMKV_RestoresTimestamps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
 	ok := p.applyRatingOnlyMKV(filePath, RatingR16)
@@ -615,7 +615,7 @@ func TestApplyRatingOnlyMKV_RatingNone_NoMkvpropedit(t *testing.T) {
 }
 
 func TestApplyRatingOnlyMKV_Failure_NoTimestampRestore(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyRC: 1, applyResult: "Error"}
+	runner := &fakeMKVRunner{avail: true, applyRC: 2, applyResult: "Error"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
 	ok := p.applyRatingOnlyMKV(debandTestFile(t), RatingPG)
@@ -644,7 +644,7 @@ func TestApplyRatingOnlyMKV_PreservesExistingDebandTag(t *testing.T) {
 		`<Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`
 	runner := &fakeMKVRunner{
 		avail:          true,
-		applyResult:    mkvpropeditSuccessMsg,
+		applyResult:    "Done.",
 		tagsPath:       "t.xml",
 		extractTagsXML: existingXML,
 	}
@@ -856,7 +856,7 @@ func TestApplyRatingOnlyMKV_AlreadyApplied_SkipsWrite(t *testing.T) {
 	// Pre-mark this file as already having R16 tags applied.
 	rc.MarkApplied(filePath, RatingR16)
 
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer, ratingCache: rc}
 
@@ -978,7 +978,7 @@ func TestProcessorRun_SuccessPath(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "t.xml",
 	}
 	p := newTestProcessor(t, dir, Config{
@@ -1030,7 +1030,7 @@ func TestProcessorRun_NoEpisodeDate_FallsBackToPreviousEpisode(t *testing.T) {
 			},
 		},
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
@@ -1063,7 +1063,7 @@ func TestProcessorRun_NoEpisodeDate_NoPrevious_FallsBackToSeasonDate(t *testing.
 			},
 		},
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
@@ -1096,7 +1096,7 @@ func TestProcessorRun_NoEpisodeDate_NoSeasonDate_FallsBackToShowDate(t *testing.
 			},
 		},
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, timer, emptyRetryList(t), emptyRatingCache(t), nil, nil, nil)
 
@@ -1127,7 +1127,7 @@ func TestProcessorRun_FallbackDate_AddsToRetryList(t *testing.T) {
 		showDetails:  ShowDetails{FirstAirDate: "2022-01-01"},
 		seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 1, AirDate: ""}}},
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
 	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil, nil)
 
@@ -1155,7 +1155,7 @@ func TestProcessorRun_RealDate_RemovesFromRetryList(t *testing.T) {
 			Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2023-05-01"}},
 		},
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
 	retryList.Add(mkvPath) // pre-populate as if a previous run used a fallback
 	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil, nil)
@@ -1190,7 +1190,7 @@ func TestProcessorRun_RetryList_BypassesCutoff(t *testing.T) {
 			Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2020-01-01"}},
 		},
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	retryList := emptyRetryList(t)
 	retryList.Add(mkvPath) // file is in retry list despite being old
 	p := NewProcessor(Config{MediaDir: dir, CutoffDate: time.Now(), ProcessAll: true}, cache, map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retryList, emptyRatingCache(t), nil, nil, nil)
@@ -1221,7 +1221,7 @@ func TestProcessorRun_ManualExtra_Processed(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "t.xml",
 	}
 	manualData := map[string]ManualEntry{
@@ -1271,7 +1271,7 @@ func TestProcessorRun_ManualExtra_EpisodeRef_UsesEpisodeData(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "t.xml",
 	}
 	manualData := map[string]ManualEntry{
@@ -1324,7 +1324,7 @@ func TestProcessorRun_ManualExtra_OpEdSuffix_FilenameTitle(t *testing.T) {
 	}
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "t.xml",
 	}
 	manualData := map[string]ManualEntry{
@@ -1376,7 +1376,7 @@ func TestProcessorRun_ManualExtra_EpisodePatternInName_TreatedAsExtra(t *testing
 	}
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "t.xml",
 	}
 	manualData := map[string]ManualEntry{
@@ -1432,7 +1432,7 @@ func TestProcessorRun_ManualExtra_EpisodeRef_NoSeason_DerivesSeasonFromEpisode(t
 	}
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "t.xml",
 	}
 	manualData := map[string]ManualEntry{
@@ -1480,7 +1480,7 @@ func TestProcessorRun_ManualExtra_EpisodeRef_DateOverridesEpisodeDate(t *testing
 	}
 	runner := &fakeMKVRunner{
 		avail:       true,
-		applyResult: mkvpropeditSuccessMsg,
+		applyResult: "Done.",
 		tagsPath:    "t.xml",
 	}
 	manualData := map[string]ManualEntry{
@@ -1557,7 +1557,7 @@ func TestProcessorRun_ManualDate_NoTMDBDate_SetsTimestamp(t *testing.T) {
 		showDetails:  ShowDetails{FirstAirDate: "2020-01-01"},
 		seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 3, AirDate: ""}}},
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	manualData := map[string]ManualEntry{
 		"My Show": {Dates: map[string]string{"S01E03": "2023-04-15"}},
@@ -1598,7 +1598,7 @@ func TestProcessorRun_ManualDate_OverridesTMDBDate(t *testing.T) {
 	tmdb := &fakeTMDB{
 		seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2022-06-01"}}},
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	manualData := map[string]ManualEntry{
 		"My Show": {Dates: map[string]string{"S01E01": "2022-12-25"}},
@@ -2004,7 +2004,7 @@ func containsAll(haystack []string, needles ...string) bool {
 }
 
 func TestApplyRatingOnlyMKV_StatError_DoesNotTag(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	rc := emptyRatingCache(t)
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}, ratingCache: rc}
 	path := filepath.Join(t.TempDir(), "missing.mkv")
@@ -2022,5 +2022,38 @@ func TestApplyRatingOnlyMKV_StatError_DoesNotTag(t *testing.T) {
 	}
 	if !strings.Contains(out, "not tagging") {
 		t.Errorf("output doesn't explain the skip:\n%s", out)
+	}
+}
+
+// mkvpropedit exits 1 when it wrote the changes but warned; only 2 is a failure.
+// Each apply path must treat a warning as success and set or restore timestamps.
+func TestApplyPaths_MkvpropeditWarningIsSuccess(t *testing.T) {
+	tags := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`
+	paths := map[string]func(p *Processor, file string) bool{
+		"applyMKV": func(p *Processor, file string) bool {
+			return p.applyMKV(file, "T", "", "", "2020-06-15T00:00:00Z", "2020-06-15T00:00:00Z", "", RatingNone, false)
+		},
+		"applyRatingOnlyMKV": func(p *Processor, file string) bool { return p.applyRatingOnlyMKV(file, RatingPG) },
+		"applyDebandOnlyMKV": func(p *Processor, file string) bool { return p.applyDebandOnlyMKV(file, true) },
+	}
+	for name, apply := range paths {
+		for _, tc := range []struct {
+			rc   int
+			want bool
+		}{{0, true}, {1, true}, {2, false}} {
+			t.Run(fmt.Sprintf("%s/rc=%d", name, tc.rc), func(t *testing.T) {
+				runner := &fakeMKVRunner{avail: true, applyRC: tc.rc, applyResult: "Warning: no attachment matched", tagsPath: "t.xml", extractTagsXML: tags}
+				timer := &captureFileTimer{}
+				p := &Processor{mkv: runner, timer: timer}
+				var ok bool
+				captureStdout(t, func() { ok = apply(p, debandTestFile(t)) })
+				if ok != tc.want {
+					t.Errorf("returned %v, want %v", ok, tc.want)
+				}
+				if stamped := len(timer.setTimesCalls) > 0; stamped != tc.want {
+					t.Errorf("timestamps set = %v, want %v", stamped, tc.want)
+				}
+			})
+		}
 	}
 }
