@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -346,7 +347,6 @@ func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 		applyResult: mkvpropeditSuccessMsg,
 		tagsPath:    "t.xml",
 		posterPath:  "poster.jpg",
-		posterOK:    true,
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone, false)
@@ -357,32 +357,81 @@ func TestApplyMKV_WithPoster_AddsAttachment(t *testing.T) {
 	}
 }
 
-func TestApplyMKV_NoPosterURL_NoAttachment(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml"}
-	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone, false)
+func TestApplyMKV_ExistingCovers_ReplacedByNewPoster(t *testing.T) {
+	const add = "--attachment-name cover.jpg --attachment-mime-type image/jpeg --add-attachment poster.jpg"
+	const delJPEG = "--delete-attachment mime-type:image/jpeg "
+	const delPNG = "--delete-attachment mime-type:image/png "
+	cases := []struct {
+		name     string
+		existing AttachmentInfo
+		want     string
+	}{
+		{"no cover", AttachmentInfo{}, add},
+		{"jpeg only", AttachmentInfo{HasJPEG: true}, delJPEG + add},
+		{"png only", AttachmentInfo{HasPNG: true}, delPNG + add},
+		{"jpeg and png", AttachmentInfo{HasJPEG: true, HasPNG: true}, delJPEG + delPNG + add},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeMKVRunner{
+				avail:       true,
+				attachments: tc.existing,
+				applyResult: mkvpropeditSuccessMsg,
+				tagsPath:    "t.xml",
+				posterPath:  "poster.jpg",
+			}
+			p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+			p.applyMKV("show.mkv", "T", "", "", "", "", "http://example.com/poster.jpg", RatingNone, false)
 
-	args := runner.calls[0].args
-	for _, a := range args {
-		if strings.Contains(a, "attachment") {
-			t.Errorf("unexpected attachment arg %q when no poster URL given", a)
-		}
+			args := runner.calls[0].args
+			idx := slices.Index(args, "--delete-attachment")
+			if idx < 0 {
+				idx = slices.Index(args, "--attachment-name")
+			}
+			if idx < 0 {
+				t.Fatalf("no attachment args in: %v", args)
+			}
+			if got := strings.Join(args[idx:], " "); got != tc.want {
+				t.Errorf("attachment args = %q; want %q", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestApplyMKV_ExistingJPEG_DeleteArgAdded(t *testing.T) {
-	runner := &fakeMKVRunner{
-		avail:       true,
-		attachments: AttachmentInfo{HasJPEG: true},
-		applyResult: mkvpropeditSuccessMsg,
-		tagsPath:    "t.xml",
+// An existing cover must survive when no replacement poster is available.
+func TestApplyMKV_ExistingCover_KeptWithoutNewPoster(t *testing.T) {
+	cases := []struct {
+		name, posterURL string
+		posterErr       error
+		wantWarning     bool
+	}{
+		{"no poster URL", "", nil, false},
+		{"download failed", "http://example.com/poster.jpg", errors.New("unexpected status 503"), true},
 	}
-	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	p.applyMKV("show.mkv", "T", "", "", "", "", "", RatingNone, false)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeMKVRunner{
+				avail:       true,
+				attachments: AttachmentInfo{HasJPEG: true, HasPNG: true},
+				applyResult: mkvpropeditSuccessMsg,
+				tagsPath:    "t.xml",
+				posterErr:   tc.posterErr,
+			}
+			p := &Processor{mkv: runner, timer: &captureFileTimer{}}
+			out := captureStdout(t, func() {
+				p.applyMKV("show.mkv", "T", "", "", "", "", tc.posterURL, RatingNone, false)
+			})
 
-	args := runner.calls[0].args
-	if !containsAll(args, "--delete-attachment", "mime-type:image/jpeg") {
-		t.Errorf("expected JPEG delete arg in: %v", args)
+			for _, a := range runner.calls[0].args {
+				if strings.Contains(a, "attachment") {
+					t.Errorf("unexpected attachment arg %q without a new poster: %v", a, runner.calls[0].args)
+				}
+			}
+			warned := strings.Contains(out, "Poster download failed; cover unchanged: unexpected status 503")
+			if warned != tc.wantWarning {
+				t.Errorf("warning printed = %v, want %v; output:\n%s", warned, tc.wantWarning, out)
+			}
+		})
 	}
 }
 

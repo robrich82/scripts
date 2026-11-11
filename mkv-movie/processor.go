@@ -380,7 +380,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			}
 		}
 		if url := details.PosterURL(); url != "" {
-			posterPath = downloadPoster(url)
+			if posterPath, err = downloadPoster(url); err != nil {
+				fmt.Printf("  [!] Poster download failed; cover unchanged: %v\n", err)
+			}
 		}
 	}
 
@@ -402,7 +404,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	ratingPushed := false
 	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet() {
 		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
-		if plexErr != nil {
+		if errors.Is(plexErr, ErrPlexMovieNotFound) {
 			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, year)
 		}
 		if errors.Is(plexErr, ErrPlexMovieNotFound) {
@@ -438,6 +440,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					}
 				}
 			}
+		} else {
+			fmt.Printf("  [!] Plex lookup failed – rating and streams not pushed: %v\n", plexErr)
 		}
 	}
 
@@ -548,28 +552,33 @@ func writeTempTagFile(xml string) (string, error) {
 }
 
 // downloadPoster fetches a poster image to a temp file and returns its path.
-// Returns "" on any failure.
-func downloadPoster(posterURL string) string {
+// A non-200 status or an empty body is an error.
+func downloadPoster(posterURL string) (string, error) {
 	client := &http.Client{Timeout: httpTimeout}
 	resp, err := client.Get(posterURL)
-	if err != nil || resp.StatusCode != 200 {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		return ""
+	if err != nil {
+		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %s", resp.Status)
+	}
 
 	f, err := os.CreateTemp("", "mkv-movie-poster-*.jpg")
 	if err != nil {
-		return ""
+		return "", err
 	}
 	defer f.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		os.Remove(f.Name())
-		return ""
+	n, err := io.Copy(f, resp.Body)
+	if err == nil && n == 0 {
+		err = errors.New("empty response body")
 	}
-	return f.Name()
+	if err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // xmlEscape replaces XML special characters so they are safe inside tag values.

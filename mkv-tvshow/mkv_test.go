@@ -18,7 +18,7 @@ type fakeMKVRunner struct {
 	tagsPath       string
 	tagsErr        error
 	posterPath     string
-	posterOK       bool
+	posterErr      error
 	cleaned        []string
 	extractTagsXML string
 	extractTagsErr error
@@ -49,8 +49,8 @@ func (f *fakeMKVRunner) WriteTempTags(xml string) (string, error) {
 	return f.tagsPath, f.tagsErr
 }
 
-func (f *fakeMKVRunner) DownloadPoster(_ string) (string, bool) {
-	return f.posterPath, f.posterOK
+func (f *fakeMKVRunner) DownloadPoster(_ string) (string, error) {
+	return f.posterPath, f.posterErr
 }
 
 func (f *fakeMKVRunner) Cleanup(paths ...string) {

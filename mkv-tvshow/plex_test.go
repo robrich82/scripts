@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -645,10 +646,10 @@ func TestHTTPPlexClient_RefreshLibraries_RefreshesShowSections(t *testing.T) {
 
 // --- RefreshMetadata tests ---
 
-func TestHTTPPlexClient_RefreshMetadata_CallsCorrectPath(t *testing.T) {
-	var gotPath string
+func TestHTTPPlexClient_RefreshMetadata_PutsCorrectPath(t *testing.T) {
+	var gotMethod, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		gotMethod, gotPath = r.Method, r.URL.Path
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -657,8 +658,24 @@ func TestHTTPPlexClient_RefreshMetadata_CallsCorrectPath(t *testing.T) {
 	if err := c.RefreshMetadata("42"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method = %q; want PUT", gotMethod)
+	}
 	if gotPath != "/library/metadata/42/refresh" {
 		t.Errorf("path = %q; want /library/metadata/42/refresh", gotPath)
+	}
+}
+
+func TestHTTPPlexClient_RefreshMetadata_Non2xxIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	err := c.RefreshMetadata("42")
+	if err == nil || !strings.Contains(err.Error(), "PUT") || !strings.Contains(err.Error(), "404") {
+		t.Errorf("err = %v; want a PUT 404 error", err)
 	}
 }
 
@@ -867,5 +884,32 @@ func TestAltPlexClients_ReadsBothTokens(t *testing.T) {
 	got = altPlexClients("http://plex")
 	if len(got) != 2 || got[0].name != "alt" || got[1].name != "alt2" {
 		t.Fatalf("both tokens set: got %+v; want alt then alt2", got)
+	}
+}
+
+// An error status with a JSON body would decode as an empty result: "show not
+// found" or "no rating" instead of an error.
+func TestHTTPPlexClient_ErrorStatus_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := newHTTPPlexClient(srv.URL, "secrettoken")
+
+	calls := map[string]func() error{
+		"FindShowByTMDBID": func() error { _, err := c.FindShowByTMDBID("1"); return err },
+		"GetContentRating": func() error { _, err := c.GetContentRating("1"); return err },
+		"GetSeasons":       func() error { _, err := c.GetSeasons("1"); return err },
+	}
+	for name, call := range calls {
+		err := call()
+		if err == nil || errors.Is(err, ErrPlexNotFound) {
+			t.Errorf("%s: err = %v, want a status error", name, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "secrettoken") {
+			t.Errorf("%s: error %q should name the status and not leak the token", name, err)
+		}
 	}
 }

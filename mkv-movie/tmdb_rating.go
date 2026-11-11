@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -16,7 +17,9 @@ import (
 const httpTimeout = 30 * time.Second
 
 const tmdbAPIBase = "https://api.themoviedb.org/3"
-const tmdbImageBase = "https://image.tmdb.org/t/p/w500"
+
+// tmdbImageBase is a var so tests can point poster downloads at a local server.
+var tmdbImageBase = "https://image.tmdb.org/t/p/w500"
 
 // MovieDetails holds the full metadata fetched from TMDB for a movie.
 type MovieDetails struct {
@@ -85,6 +88,22 @@ func (t *tmdbMovieSource) FetchRating(key, title string) (NZRating, error) {
 	return t.nzCertification(tmdbID)
 }
 
+// getTMDB performs a GET and rejects non-2xx responses. TMDB answers errors
+// (invalid api_key, rate-limit) with a JSON body that would otherwise decode
+// into an empty struct — indistinguishable from a genuine "no data" result.
+func (t *tmdbMovieSource) getTMDB(u string) (*http.Response, error) {
+	resp, err := t.httpClient.Get(u)
+	if err != nil {
+		return nil, redactAPIKey(err)
+	}
+	if resp.StatusCode/100 != 2 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		resp.Body.Close()
+		return nil, fmt.Errorf("TMDB request failed: status %s: %s", resp.Status, string(snippet))
+	}
+	return resp, nil
+}
+
 // SearchMovieID searches TMDB for title+year and returns the numeric TMDB ID
 // of the best match, or "" if nothing found. Exported for testing.
 func (t *tmdbMovieSource) SearchMovieID(title, year string) (string, error) {
@@ -98,9 +117,9 @@ func (t *tmdbMovieSource) searchMovie(title, year string) (string, error) {
 		u += "&year=" + url.QueryEscape(year)
 	}
 
-	resp, err := t.httpClient.Get(u)
+	resp, err := t.getTMDB(u)
 	if err != nil {
-		return "", redactAPIKey(err)
+		return "", err
 	}
 	defer resp.Body.Close()
 
@@ -128,9 +147,9 @@ func (t *tmdbMovieSource) nzCertification(tmdbID string) (NZRating, error) {
 	u := fmt.Sprintf("%s/movie/%s/release_dates?api_key=%s",
 		tmdbAPIBase, tmdbID, url.QueryEscape(t.apiKey))
 
-	resp, err := t.httpClient.Get(u)
+	resp, err := t.getTMDB(u)
 	if err != nil {
-		return RatingNone, redactAPIKey(err)
+		return RatingNone, err
 	}
 	defer resp.Body.Close()
 
@@ -180,9 +199,9 @@ func (t *tmdbMovieSource) GetMovieDetails(tmdbID string) (MovieDetails, error) {
 	u := fmt.Sprintf("%s/movie/%s?api_key=%s&language=en-US",
 		tmdbAPIBase, tmdbID, url.QueryEscape(t.apiKey))
 
-	resp, err := t.httpClient.Get(u)
+	resp, err := t.getTMDB(u)
 	if err != nil {
-		return MovieDetails{}, redactAPIKey(err)
+		return MovieDetails{}, err
 	}
 	defer resp.Body.Close()
 

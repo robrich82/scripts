@@ -174,9 +174,10 @@ func doPlexRequest(client *http.Client, req *http.Request, path string) (*http.R
 	return resp, nil
 }
 
-// RefreshMetadata implements PlexClient.
+// RefreshMetadata implements PlexClient. It sends a PUT, the only method the
+// Plex API defines for the item refresh endpoint.
 func (c *httpPlexClient) RefreshMetadata(ratingKey string) error {
-	resp, err := c.plexGet("/library/metadata/" + ratingKey + "/refresh")
+	resp, err := c.plexPut("/library/metadata/" + ratingKey + "/refresh")
 	if err != nil {
 		return fmt.Errorf("plex: refresh metadata %s: %w", ratingKey, err)
 	}

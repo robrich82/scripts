@@ -125,18 +125,33 @@ func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	}
 }
 
-// plexGet performs a GET request to path (relative to baseURL) with an
+// plexGet is plexRequest with GET.
+func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
+	return c.plexRequest(http.MethodGet, path)
+}
+
+// plexRequest sends method to path (relative to baseURL) with an
 // Accept: application/json header. The Plex token goes in a header, not the
 // URL, so transport errors (which print the URL) can't leak it.
-func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
+func (c *httpPlexClient) plexRequest(method, path string) (*http.Response, error) {
 	u := c.baseURL + path
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	req, err := http.NewRequest(method, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Plex-Token", c.token)
-	return c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	// Reject non-2xx so a 401/404/500 surfaces as an error instead of being
+	// decoded into a zero-value struct that looks like an empty success.
+	if resp.StatusCode/100 != 2 {
+		resp.Body.Close()
+		return nil, fmt.Errorf("plex: %s %s: unexpected status %s", method, path, resp.Status)
+	}
+	return resp, nil
 }
 
 // FindShowByTMDBID implements PlexClient.
@@ -531,11 +546,11 @@ func (c *httpPlexClient) RefreshLibraries() error {
 	return nil
 }
 
-// RefreshMetadata implements PlexClient. It sends a GET to the refresh
-// endpoint for a specific library item, causing Plex to re-read embedded
-// metadata from the files on disk.
+// RefreshMetadata implements PlexClient. It sends a PUT (the method the API
+// defines) to the refresh endpoint for a specific library item, causing Plex
+// to re-read embedded metadata from the files on disk.
 func (c *httpPlexClient) RefreshMetadata(ratingKey string) error {
-	resp, err := c.plexGet("/library/metadata/" + ratingKey + "/refresh")
+	resp, err := c.plexRequest(http.MethodPut, "/library/metadata/"+ratingKey+"/refresh")
 	if err != nil {
 		return fmt.Errorf("plex: refresh metadata %s: %w", ratingKey, err)
 	}
