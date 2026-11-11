@@ -447,25 +447,35 @@ func TestProcessFile_WithRating_TagsPathSet(t *testing.T) {
 
 // fakePlexMovieClient is a test double for PlexMovieClient.
 type fakePlexMovieClient struct {
-	findTMDBErr      error // nil means ErrPlexMovieNotFound
+	findTMDBErr      error
+	tmdbRatingKey    string // "" (and no findTMDBErr) means ErrPlexMovieNotFound
 	titleRatingKey   string
 	findTitleErr     error
 	contentRating    NZRating
+	ratingsByKey     map[string]NZRating // overrides contentRating when set
 	contentRatingErr error
+	titleLookups     [][2]string // (title, year) of each FindMovieByTitle call
 }
 
 func (f *fakePlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
 	if f.findTMDBErr != nil {
 		return "", f.findTMDBErr
 	}
+	if f.tmdbRatingKey != "" {
+		return f.tmdbRatingKey, nil
+	}
 	return "", ErrPlexMovieNotFound
 }
 
-func (f *fakePlexMovieClient) FindMovieByTitle(_, _ string) (string, error) {
+func (f *fakePlexMovieClient) FindMovieByTitle(title, year string) (string, error) {
+	f.titleLookups = append(f.titleLookups, [2]string{title, year})
 	return f.titleRatingKey, f.findTitleErr
 }
 
-func (f *fakePlexMovieClient) GetContentRating(_ string) (NZRating, error) {
+func (f *fakePlexMovieClient) GetContentRating(rk string) (NZRating, error) {
+	if f.ratingsByKey != nil {
+		return f.ratingsByKey[rk], f.contentRatingErr
+	}
 	return f.contentRating, f.contentRatingErr
 }
 
