@@ -15,14 +15,17 @@ func runClean() {
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading movie_rating_cache.json: %v\n%s\n", err, cacheRecoveryHint)
-		os.Exit(1)
+		exitOnCacheLoadError(err)
 	}
 
 	files, movies := cache.CleanStalePaths()
 	if len(files) == 0 && len(movies) == 0 {
 		fmt.Println("Cache is clean; nothing to remove.")
 		return
+	}
+	if err := cache.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving movie_rating_cache.json: %v\nNothing was removed.\n", err)
+		os.Exit(1)
 	}
 
 	if n := len(files); n > 0 {
@@ -34,12 +37,6 @@ func runClean() {
 			fmt.Printf("  %s\n", m)
 		}
 	}
-
-	if err := cache.Save(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving cache: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Println("Cache updated.")
 }
 
 func plural(n int) string {

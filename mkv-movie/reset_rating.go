@@ -15,8 +15,7 @@ func runResetRating(query string) {
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading rating cache: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError(err)
 	}
 
 	matches := cache.FindTMDBIDByQuery(query)

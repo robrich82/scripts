@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -27,8 +28,18 @@ type movieRatingCacheData struct {
 	Files          map[string]string `json:"files,omitempty"`           // absFilePath → tmdbID, for --clean and --reset-rating
 }
 
-// cacheRecoveryHint follows a movie_rating_cache.json load error.
-const cacheRecoveryHint = "Restore it from a backup, or delete it to start over (every rating will be asked for again)."
+// exitOnCacheLoadError reports a LoadMovieRatingCache error, with a fix that
+// suits it, and exits.
+func exitOnCacheLoadError(err error) {
+	hint := "Close any program that has it open, then try again."
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
+		hint = "It is corrupt: restore it from a backup if you have one, or delete it to start over (every rating will be asked for again)."
+	}
+	fmt.Fprintf(os.Stderr, "Error loading movie_rating_cache.json: %v\n%s\n", err, hint)
+	os.Exit(1)
+}
 
 // LoadMovieRatingCache loads the cache from path. If the file does not exist an
 // empty cache is returned. Any other read/parse error is returned as an error.
@@ -77,9 +88,9 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 		c.data.Files = make(map[string]string)
 	}
 	// Caches written before "files" existed map files to IDs only through meta_applied.
-	for path, id := range c.data.MetaApplied {
-		if _, ok := c.data.Files[path]; !ok && id != "" {
-			c.data.Files[path] = id
+	for file, id := range c.data.MetaApplied {
+		if _, ok := c.data.Files[file]; !ok && id != "" {
+			c.data.Files[file] = id
 		}
 	}
 	return c, nil
@@ -161,15 +172,18 @@ func (c *MovieRatingCache) SetStreamsApplied(tmdbID, lang string) {
 // CleanStalePaths removes the entries for files that no longer exist on disk,
 // then every TMDB-ID-keyed entry (rating, title:YEAR lookup, Plex state) that
 // no remaining file maps to. Files on an offline drive count as present.
-// Returns the removed file paths and the removed movies, each named by its
-// title:YEAR lookup key where one is cached, both sorted.
+// Returns the removed file paths and movie names (see movieDisplayName), sorted.
 func (c *MovieRatingCache) CleanStalePaths() (files, movies []string) {
-	removedPaths := make(map[string]bool)
+	gone := make(map[string]bool) // path → pathGone(path), checked once per path
 	for _, m := range []map[string]string{c.data.Files, c.data.Applied, c.data.MetaApplied} {
 		for path := range m {
-			if removedPaths[path] || pathGone(path) {
+			g, seen := gone[path]
+			if !seen {
+				g = pathGone(path)
+				gone[path] = g
+			}
+			if g {
 				delete(m, path)
-				removedPaths[path] = true
 			}
 		}
 	}
@@ -198,8 +212,10 @@ func (c *MovieRatingCache) CleanStalePaths() (files, movies []string) {
 		}
 	}
 
-	for path := range removedPaths {
-		files = append(files, path)
+	for path, g := range gone {
+		if g {
+			files = append(files, path)
+		}
 	}
 	for id, key := range names {
 		movies = append(movies, movieDisplayName(id, key))
@@ -209,17 +225,24 @@ func (c *MovieRatingCache) CleanStalePaths() (files, movies []string) {
 	return files, movies
 }
 
-// movieDisplayName renders a title:YEAR key as "Title (YEAR)", or names the
-// movie by tmdbID when no key is cached.
+// movieDisplayName renders a title:YEAR key as "Title (YEAR)" ("Title" with no
+// year). With no key it names the movie by tmdbID, unless that is itself a
+// legacy title:YEAR rating key.
 func movieDisplayName(tmdbID, key string) string {
 	if key == "" {
-		return "TMDB ID " + tmdbID
+		if !strings.Contains(tmdbID, ":") {
+			return "TMDB ID " + tmdbID
+		}
+		key = tmdbID
 	}
-	i := strings.LastIndex(key, ":")
-	if i < 0 || i == len(key)-1 {
-		return strings.TrimSuffix(key, ":")
+	title, year := key, ""
+	if i := strings.LastIndex(key, ":"); i >= 0 {
+		title, year = key[:i], key[i+1:]
 	}
-	return fmt.Sprintf("%s (%s)", key[:i], key[i+1:])
+	if year == "" {
+		return title
+	}
+	return title + " (" + year + ")"
 }
 
 // FindTMDBIDByQuery returns all (tmdbID, displayKey) pairs matching query.

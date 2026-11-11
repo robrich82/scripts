@@ -49,6 +49,8 @@ func planSetRating(dir string, cache *MovieRatingCache) (plans []setRatingPlan, 
 			unknown = append(unknown, basename)
 			return nil
 		}
+		// Record the mapping so --clean keeps this override; saved only if the user confirms.
+		cache.SetFileTMDBID(path, tmdbID)
 		if byID[tmdbID] {
 			return nil
 		}
@@ -95,8 +97,7 @@ func runSetRating(ratingStr, dir string, prompter func(string) (string, error)) 
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading rating cache: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError(err)
 	}
 
 	plans, unknown := planSetRating(dir, cache)

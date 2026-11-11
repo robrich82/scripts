@@ -14,7 +14,7 @@ func main() {
 	force := flag.Bool("force", false, "Re-apply all metadata even if already cached.")
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
-	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, then exit.")
+	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, and the cached ratings, TMDB IDs and Plex state of movies no remaining file maps to, then exit.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a movie and reset its applied state (title substring or TMDB ID), then exit.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every movie in the current directory, overriding any cached value, then exit.")
@@ -108,8 +108,7 @@ func main() {
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading movie_rating_cache.json: %v\n%s\n", err, cacheRecoveryHint)
-		os.Exit(1)
+		exitOnCacheLoadError(err)
 	}
 
 	var plex PlexMovieClient

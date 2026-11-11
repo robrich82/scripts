@@ -292,14 +292,15 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 				cache.Set(tmdbID, r)
 			}
 		}
+		cache.SetFileTMDBID(filePath, tmdbID)
 	} else {
+		cache.SetFileTMDBID(filePath, tmdbID) // before the fetch, so a TMDB error keeps the mapping
 		details, err = tmdb.GetMovieDetails(tmdbID)
 		if err != nil {
 			fmt.Printf("[ERR]     %s: TMDB details: %v\n", basename, err)
 			return ResultError
 		}
 	}
-	cache.SetFileTMDBID(filePath, tmdbID)
 
 	// 3. Parse release date.
 	if details.ReleaseDate == "" {
@@ -637,6 +638,7 @@ func extractYear(filename string) string {
 func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, force bool, cutoff time.Time) Stats {
 	var stats Stats
 	var saveErr error // the last save's error; only the first in a run of failures is printed
+	lastSaved := ""   // the file after which the cache was last saved
 	// The callback never returns an error, so neither does WalkDir.
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -668,24 +670,37 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 		}
 		// Save after each file so an interrupted run keeps the ratings and
 		// TMDB IDs resolved so far.
-		if cache != nil {
-			err := cache.Save()
-			switch {
-			case err != nil && saveErr == nil:
-				fmt.Printf("[!] Failed to save rating cache: %v\n    Retrying after each file; until a save succeeds, this run's ratings are kept in memory only.\n", err)
-			case err == nil && saveErr != nil:
-				fmt.Println("[i] Rating cache saved.")
-			}
-			saveErr = err
+		err = cache.Save()
+		switch {
+		case err != nil && saveErr == nil:
+			fmt.Printf("[!] Failed to save rating cache: %v\n    Retrying after each file; until a save succeeds, changes are kept in memory only.\n", err)
+		case err == nil && saveErr != nil:
+			fmt.Println("[i] Rating cache saved.")
 		}
+		if err == nil {
+			lastSaved = d.Name()
+		}
+		saveErr = err
 		fmt.Println()
 		return nil
 	})
 	if saveErr != nil {
-		fmt.Printf("[!] The rating cache was not saved, so this run's ratings and TMDB IDs are lost: %v\n", saveErr)
+		// One more try: on Windows the rename fails while another program
+		// (antivirus, an indexer) briefly holds the cache open.
+		beforeFinalSave()
+		if err := cache.Save(); err == nil {
+			fmt.Println("[i] Rating cache saved.")
+		} else if lastSaved == "" {
+			fmt.Printf("[!] The rating cache was never saved; this run's ratings, TMDB IDs and applied state are lost: %v\n", err)
+		} else {
+			fmt.Printf("[!] The rating cache was last saved after %s; later ratings, TMDB IDs and applied state are lost: %v\n", lastSaved, err)
+		}
 	}
 	return stats
 }
+
+// beforeFinalSave runs before walkAndProcess's last save attempt; tests replace it.
+var beforeFinalSave = func() { time.Sleep(time.Second) }
 
 // applyDebandOnlyFile updates only the DEBAND MKV tag for filePath, preserving
 // all other existing tags and restoring the original file timestamps afterward.
