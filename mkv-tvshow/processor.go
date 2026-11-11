@@ -722,6 +722,7 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 	// --overwrite-ratings: no source has data, so keep the cached rating rather
 	// than prompting, as mkv-movie does.
 	if suggested == RatingNone && haveCached && cached != RatingNone {
+		fmt.Printf("  [i] No source has a rating for %q; keeping cached %s\n", showName, cached)
 		p.sessionPromptedRating[tmdbID] = cached
 		return cached
 	}

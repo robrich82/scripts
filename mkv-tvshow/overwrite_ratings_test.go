@@ -10,7 +10,7 @@ import (
 
 // runOverwrite runs a full pass over two episodes of one show with a cached
 // R16 rating, the given sources and prompt answers, under --overwrite-ratings.
-func runOverwrite(t *testing.T, sources []RatingSource, prompter *scriptedPrompter) *RatingCache {
+func runOverwrite(t *testing.T, sources []RatingSource, prompter *scriptedPrompter) (*RatingCache, string) {
 	t.Helper()
 	dir := t.TempDir()
 	showDir := filepath.Join(dir, "Rated Show")
@@ -31,17 +31,17 @@ func runOverwrite(t *testing.T, sources []RatingSource, prompter *scriptedPrompt
 	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true, OverwriteRatings: true},
 		cacheWith(t, map[string]string{"Rated Show": "999"}), map[string]ManualEntry{}, tmdb, runner, prompter,
 		&captureFileTimer{}, emptyRetryList(t), rc, sources, nil, nil)
-	captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		if stats := p.Run(); stats.Success != 2 {
 			t.Errorf("stats = %+v; want 2 success", stats)
 		}
 	})
-	return rc
+	return rc, out
 }
 
 func TestRun_OverwriteRatings_RefetchesOncePerShow(t *testing.T) {
 	prompter := &scriptedPrompter{answers: []string{""}} // confirm the source's rating
-	rc := runOverwrite(t, []RatingSource{&fakeRatingSource{showRating: RatingM}}, prompter)
+	rc, _ := runOverwrite(t, []RatingSource{&fakeRatingSource{showRating: RatingM}}, prompter)
 
 	if prompter.idx != 1 {
 		t.Errorf("prompted %d times; want once per show", prompter.idx)
@@ -53,13 +53,16 @@ func TestRun_OverwriteRatings_RefetchesOncePerShow(t *testing.T) {
 
 func TestRun_OverwriteRatings_NoSourceData_KeepsCachedRating(t *testing.T) {
 	prompter := &scriptedPrompter{}
-	rc := runOverwrite(t, []RatingSource{&fakeRatingSource{}}, prompter)
+	rc, out := runOverwrite(t, []RatingSource{&fakeRatingSource{}}, prompter)
 
 	if prompter.idx != 0 {
 		t.Errorf("prompted %d times; with no source data the cached rating is kept without a prompt", prompter.idx)
 	}
 	if got, _ := rc.GetShowRating("999"); got != RatingR16 {
 		t.Errorf("cached rating = %q; want R16 kept", got)
+	}
+	if n := strings.Count(out, `[i] No source has a rating for "Rated Show"; keeping cached R16`); n != 1 {
+		t.Errorf("keep-cached notice printed %d times; want once per show:\n%s", n, out)
 	}
 }
 
