@@ -166,64 +166,63 @@ func newMovieRatingResolver(
 	}
 }
 
-// ResolveMovieRating returns the best NZ rating for the given movie.
-// key is the TMDB numeric ID (preferred) or a "title:YEAR" fallback.
-// title is the human-readable name used for Classification Office lookups and prompts.
-func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
+// ResolveMovieRating returns the best NZ rating for the movie tmdbID. title is
+// used for Classification Office lookups and prompts; title and year (the
+// release year) find the movie in Plex when its TMDB GUID doesn't.
+//
+// A cached rating is returned silently. Otherwise a rating found by a source
+// is shown for the user to confirm or override, as mkv-tvshow does; with no
+// source data the user is prompted, with Plex's rating as the default.
+// --overwrite-ratings skips the cache, but keeps the cached rating when no
+// source has one.
+func (r *MovieRatingResolver) ResolveMovieRating(tmdbID, title, year string) NZRating {
 	if r.cache == nil {
 		return RatingNone
 	}
-
-	// 1. Cache hit (skip when --overwrite-ratings).
-	if !r.overwrite {
-		if rating, ok := r.cache.Get(key); ok {
-			return rating
-		}
+	// At most one prompt per movie per run.
+	if rating, already := r.sessionPrompted[tmdbID]; already {
+		return rating
 	}
 
-	// 2. External sources.
+	cached, haveCached := r.cache.Get(tmdbID)
+	if haveCached && !r.overwrite {
+		return cached
+	}
+
+	var suggested NZRating
 	for _, src := range r.sources {
-		rating, err := src.FetchRating(key, title)
+		rating, err := src.FetchRating(tmdbID, title)
 		if err != nil {
 			fmt.Printf("  [!] %s rating error: %v\n", src.Name(), err)
 			continue
 		}
 		if rating != RatingNone {
-			r.cache.Set(key, rating)
-			return rating
+			suggested = rating
+			break
 		}
 	}
 
-	// 3. Cache fallback — use any previously-saved rating rather than re-prompting,
-	//    even under --overwrite-ratings (external sources failed/have no data).
-	if rating, ok := r.cache.Get(key); ok && rating != RatingNone {
-		return rating
+	if suggested == RatingNone && haveCached {
+		fmt.Printf("  [i] No source has a rating for %q; keeping cached %s\n", title, cached)
+		r.sessionPrompted[tmdbID] = cached
+		return cached
 	}
 
-	// 4. Session prompt dedup — at most once per key per run.
-	if rating, already := r.sessionPrompted[key]; already {
-		return rating
-	}
-
-	// Check Plex for an existing rating to use as the default on blank input.
-	var plexDefault NZRating
-	if r.plex != nil {
-		year := ""
-		if idx := strings.LastIndex(key, ":"); idx >= 0 {
-			year = key[idx+1:]
-		}
-		if rk, err := r.plex.FindMovieByTitle(title, year); err == nil {
-			plexDefault, _ = r.plex.GetContentRating(rk)
-		}
-	}
+	plexDefault := r.plexRatingDefault(tmdbID, title, year)
 
 	var promptMsg string
-	if plexDefault != RatingNone {
+	switch {
+	case suggested != RatingNone:
+		promptMsg = fmt.Sprintf(
+			"NZ rating for %q: %s — press enter to confirm, or enter a new rating (%s): ",
+			title, suggested, validRatings,
+		)
+	case plexDefault != RatingNone:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
 			title, plexDefault, validRatings,
 		)
-	} else {
+	default:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, or classificationoffice.govt.nz\nLeave blank to skip: ",
 			title, validRatings,
@@ -234,21 +233,54 @@ func (r *MovieRatingResolver) ResolveMovieRating(key, title string) NZRating {
 		ans, _ := r.prompter(promptMsg)
 		ans = strings.TrimSpace(ans)
 		if ans == "" {
-			if plexDefault != RatingNone {
+			if suggested != RatingNone {
+				rating = suggested
+			} else {
 				rating = plexDefault
-				r.cache.Set(key, rating)
+			}
+			if rating != RatingNone {
+				r.cache.Set(tmdbID, rating)
 			}
 			break
 		}
 		parsed, ok := ParseNZRating(ans)
 		if ok {
 			rating = parsed
-			r.cache.Set(key, rating)
+			r.cache.Set(tmdbID, rating)
 			break
 		}
 		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to skip: ", ans, validRatings)
 	}
-	r.sessionPrompted[key] = rating
+	r.sessionPrompted[tmdbID] = rating
+	return rating
+}
+
+// plexRatingDefault returns the rating Plex already has for the movie, offered
+// as the prompt's default. It looks the movie up by TMDB GUID, then by title
+// and release year, which keeps a remake from picking up the other film's
+// rating. It falls back only when the GUID lookup found nothing; a failed
+// lookup is reported and gives no default.
+func (r *MovieRatingResolver) plexRatingDefault(tmdbID, title, year string) NZRating {
+	if r.plex == nil {
+		return RatingNone
+	}
+	rk, err := r.plex.FindMovieByTMDBID(tmdbID)
+	if errors.Is(err, ErrPlexMovieNotFound) || (err == nil && rk == "") {
+		rk, err = r.plex.FindMovieByTitle(title, year)
+	}
+	if errors.Is(err, ErrPlexMovieNotFound) || (err == nil && rk == "") {
+		fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID, then title and year)\n", title)
+		return RatingNone
+	}
+	if err != nil {
+		fmt.Printf("  [!] Plex: lookup failed for %q: %v\n", title, err)
+		return RatingNone
+	}
+	rating, err := r.plex.GetContentRating(rk)
+	if err != nil {
+		fmt.Printf("  [!] Plex: rating fetch failed for %q: %v\n", title, err)
+		return RatingNone
+	}
 	return rating
 }
 
@@ -358,7 +390,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	// 5. Resolve NZ rating early so we can include it in the needs-update check.
 	var rating NZRating
 	if rr != nil {
-		rating = rr.ResolveMovieRating(tmdbID, details.Title)
+		rating = rr.ResolveMovieRating(tmdbID, details.Title, releaseYear(details.ReleaseDate))
 	}
 
 	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) && !plexStreamsNeedSet() {
@@ -614,6 +646,14 @@ func parseDate(s string) (time.Time, error) {
 func extractYear(filename string) string {
 	year, _ := lastYearMatch(filename)
 	return year
+}
+
+// releaseYear returns the year of a TMDB release date (YYYY-MM-DD), or "".
+func releaseYear(date string) string {
+	if len(date) < 4 {
+		return ""
+	}
+	return date[:4]
 }
 
 // walkAndProcess walks root for .mkv files and processes each one.

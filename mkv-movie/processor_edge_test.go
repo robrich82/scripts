@@ -327,7 +327,7 @@ func TestResolveMovieRating_NilCache_ReturnsNone(t *testing.T) {
 		cache:           nil,
 		sessionPrompted: make(map[string]NZRating),
 	}
-	rating := rr.ResolveMovieRating("key", "Title")
+	rating := rr.ResolveMovieRating("key", "Title", "")
 	if rating != RatingNone {
 		t.Errorf("got %q, want RatingNone when cache is nil", rating)
 	}
@@ -343,7 +343,7 @@ func TestResolveMovieRating_CachedRating_ReturnedWithoutPrompt(t *testing.T) {
 		return "", nil
 	}
 	rr := newMovieRatingResolver(nil, cache, false, false, nil, prompter)
-	rating := rr.ResolveMovieRating("99999", "Some Film")
+	rating := rr.ResolveMovieRating("99999", "Some Film", "")
 	if rating != RatingPG {
 		t.Errorf("got %q, want PG from cache", rating)
 	}
@@ -361,8 +361,8 @@ func TestResolveMovieRating_SessionDedup_PromptsOnce(t *testing.T) {
 	}
 	rr := newMovieRatingResolver(nil, cache, false, false, nil, prompter)
 
-	r1 := rr.ResolveMovieRating("film:2020", "Film")
-	r2 := rr.ResolveMovieRating("film:2020", "Film")
+	r1 := rr.ResolveMovieRating("film:2020", "Film", "")
+	r2 := rr.ResolveMovieRating("film:2020", "Film", "")
 
 	if r1 != RatingM || r2 != RatingM {
 		t.Errorf("got r1=%q r2=%q, want both M", r1, r2)
@@ -381,7 +381,7 @@ func TestResolveMovieRating_ExternalSourceError_ContinuesToNext(t *testing.T) {
 	prompter := func(string) (string, error) { return "", nil }
 	rr := newMovieRatingResolver([]RatingSource{errSource, goodSource}, cache, false, false, nil, prompter)
 
-	rating := rr.ResolveMovieRating("film:2021", "Film")
+	rating := rr.ResolveMovieRating("film:2021", "Film", "")
 	if rating != RatingG {
 		t.Errorf("got %q, want G (from second source)", rating)
 	}

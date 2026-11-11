@@ -481,7 +481,7 @@ func TestResolveMovieRating_BlankAcceptsPlexDefault(t *testing.T) {
 	prompter := func(string) (string, error) { return "", nil }
 	rr := newMovieRatingResolver(nil, cache, false, false, plex, prompter)
 
-	rating := rr.ResolveMovieRating("Some Film:2022", "Some Film")
+	rating := rr.ResolveMovieRating("Some Film:2022", "Some Film", "")
 	if rating != RatingR16 {
 		t.Errorf("got %q, want R16 (Plex default)", rating)
 	}
@@ -497,7 +497,7 @@ func TestResolveMovieRating_BlankWithNoPlexDefault_Skips(t *testing.T) {
 	prompter := func(string) (string, error) { return "", nil }
 	rr := newMovieRatingResolver(nil, cache, false, false, plex, prompter)
 
-	rating := rr.ResolveMovieRating("Some Film:2022", "Some Film")
+	rating := rr.ResolveMovieRating("Some Film:2022", "Some Film", "")
 	if rating != RatingNone {
 		t.Errorf("got %q, want RatingNone when Plex has no rating and user skips", rating)
 	}
@@ -515,7 +515,7 @@ func TestResolveMovieRating_InvalidInput_RePrompts(t *testing.T) {
 	}
 	rr := newMovieRatingResolver(nil, cache, false, false, nil, prompter)
 
-	rating := rr.ResolveMovieRating("title:2020", "Some Movie")
+	rating := rr.ResolveMovieRating("title:2020", "Some Movie", "")
 	if rating != RatingR16 {
 		t.Errorf("got %q, want R16", rating)
 	}
