@@ -362,7 +362,7 @@ Flags:
 |------|-------------|
 | `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
 | `--all` | Process all files regardless of modification date |
-| `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values |
+| `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values; a cached rating is kept when no source has one |
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--force` | Re-apply all metadata even if already cached |
 | `--clean` | Remove cache entries for movie files that no longer exist on disk, then exit. Entries on an offline drive are kept |
@@ -550,7 +550,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--all` | false | Process all files regardless of modification date |
 | `--prompt-each` | false | Prompt before processing each cached show (default: process all) |
 | `--ratings-only` | false | Only update NZ content ratings; skip all other metadata |
-| `--overwrite-ratings` | false | Re-fetch all ratings, ignoring cached values |
+| `--overwrite-ratings` | false | Re-fetch all ratings (prompting once per show), ignoring cached values; a cached rating is kept when no source has one |
 | `--overwrite-language` | false | Re-apply Plex audio language preference even if already set for a show |
 | `--language-only` | false | Apply Plex audio language preference for all cached shows without scanning files |
 | `--missing` | false | Check for missing episodes (see below) |

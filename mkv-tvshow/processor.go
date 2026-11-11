@@ -679,12 +679,14 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 		return r
 	}
 
-	// Cache hits: return silently without prompting.
-	if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok {
-		return r
+	cached, haveCached := p.ratingCache.GetEpisodeRating(tmdbID, season, episode)
+	if !haveCached {
+		cached, haveCached = p.ratingCache.GetShowRating(tmdbID)
 	}
-	if r, ok := p.ratingCache.GetShowRating(tmdbID); ok {
-		return r
+	// Cache hits: return silently without prompting. --overwrite-ratings
+	// re-fetches instead, and falls back to the cached value below.
+	if haveCached && !p.cfg.OverwriteRatings {
+		return cached
 	}
 
 	// Try external sources. If a source finds a rating it is stored as a
@@ -717,44 +719,14 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 		}
 	}
 
-	// Check Plex for an existing rating (shown when no source has data).
-	// Try TMDB-ID lookup first, then title match, then file-path lookup (most
-	// reliable for anime whose Plex title differs from the folder name).
-	var plexDefault NZRating
-	if p.plex != nil {
-		showKey, err := p.plex.FindShowByTMDBID(tmdbID)
-		if err != nil {
-			if err != ErrPlexNotFound {
-				fmt.Printf("  [i] Plex: TMDB lookup error for %q: %v\n", showName, err)
-			}
-			var titleErr error
-			showKey, titleErr = p.plex.FindShowByTitle(showName)
-			if titleErr != nil && titleErr != ErrPlexNotFound {
-				fmt.Printf("  [i] Plex: title lookup error for %q: %v\n", showName, titleErr)
-			}
-		}
-		if showKey == "" && filePath != "" {
-			var pathErr error
-			showKey, pathErr = p.plex.FindShowByFilePath(filePath)
-			if pathErr != nil && pathErr != ErrPlexNotFound {
-				fmt.Printf("  [i] Plex: file-path lookup error for %q: %v\n", showName, pathErr)
-			}
-		}
-		if showKey != "" {
-			if p.sessionPlexKey != nil {
-				p.sessionPlexKey[tmdbID] = showKey
-			}
-			var fetchErr error
-			plexDefault, fetchErr = p.plex.GetContentRating(showKey)
-			if fetchErr != nil {
-				fmt.Printf("  [i] Plex: rating fetch error for %q: %v\n", showName, fetchErr)
-			} else if plexDefault == RatingNone {
-				fmt.Printf("  [i] Plex: %q found but no NZ content rating is set\n", showName)
-			}
-		} else {
-			fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID, title, and file path)\n", showName)
-		}
+	// --overwrite-ratings: no source has data, so keep the cached rating rather
+	// than prompting, as mkv-movie does.
+	if suggested == RatingNone && haveCached && cached != RatingNone {
+		p.sessionPromptedRating[tmdbID] = cached
+		return cached
 	}
+
+	plexDefault := p.plexRatingDefault(tmdbID, showName, filePath)
 
 	// Prompt the user once per show per run.
 	// When a source found a rating, show it as the default so the user can
@@ -800,6 +772,56 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to skip: ", ans, validRatings)
 	}
 	p.sessionPromptedRating[tmdbID] = r
+	return r
+}
+
+// plexRatingDefault returns the rating Plex already has for the show, offered
+// as the prompt's default. It tries the TMDB GUID, then the title, then the
+// file path (most reliable for anime whose Plex title differs from the
+// folder name). It moves to the next lookup only when the previous one found
+// nothing; a failed lookup is reported and gives no default.
+func (p *Processor) plexRatingDefault(tmdbID, showName, filePath string) NZRating {
+	if p.plex == nil {
+		return RatingNone
+	}
+	type lookup struct {
+		name string
+		find func() (string, error)
+	}
+	lookups := []lookup{
+		{"TMDB GUID", func() (string, error) { return p.plex.FindShowByTMDBID(tmdbID) }},
+		{"title", func() (string, error) { return p.plex.FindShowByTitle(showName) }},
+	}
+	if filePath != "" {
+		lookups = append(lookups, lookup{"file path", func() (string, error) { return p.plex.FindShowByFilePath(filePath) }})
+	}
+	var showKey string
+	for _, l := range lookups {
+		key, err := l.find()
+		if err == nil && key != "" {
+			showKey = key
+			break
+		}
+		if err != nil && !errors.Is(err, ErrPlexNotFound) {
+			fmt.Printf("  [!] Plex: %s lookup failed for %q: %v\n", l.name, showName, err)
+			return RatingNone
+		}
+	}
+	if showKey == "" {
+		fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID, title, and file path)\n", showName)
+		return RatingNone
+	}
+	if p.sessionPlexKey != nil {
+		p.sessionPlexKey[tmdbID] = showKey
+	}
+	r, err := p.plex.GetContentRating(showKey)
+	if err != nil {
+		fmt.Printf("  [!] Plex: rating fetch failed for %q: %v\n", showName, err)
+		return RatingNone
+	}
+	if r == RatingNone {
+		fmt.Printf("  [i] Plex: %q found but no NZ content rating is set\n", showName)
+	}
 	return r
 }
 
