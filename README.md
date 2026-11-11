@@ -365,7 +365,7 @@ Flags:
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values; a cached rating is kept when no source has one |
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--force` | Re-apply all metadata even if already cached |
-| `--clean` | Remove cache entries for movie files that no longer exist on disk, and the ratings, TMDB IDs and Plex state of movies no remaining file maps to (listed by title), then exit. Entries on an offline drive are kept |
+| `--clean` | Remove cache entries for movie files that no longer exist on disk, and the ratings, TMDB IDs and Plex state of movies no remaining file maps to (and lists them), then exit. Entries on an offline drive are kept |
 | `--reset-rating <query>` | Clear the cached NZ rating for a movie and reset its applied state so the next run re-fetches and re-applies it. `query` is a title substring or TMDB ID |
 | `--set-rating <RATING>` | Set `RATING` as the NZ rating for **every** movie in the current directory, overriding any cached value, then exit (see below) |
 | `--deband-only` | Update only the `DEBAND` MKV tag for movies configured in `manual_data.json`; preserves all other tags and timestamps |
@@ -414,8 +414,10 @@ The cached "already applied" value records the language given to every configure
 
 The cache is stored in `%APPDATA%\mkv-movie\movie_rating_cache.json`
 (Windows) or `$XDG_CONFIG_HOME/mkv-movie/movie_rating_cache.json` (Linux/macOS).
-It persists TMDB IDs (keyed by `title:YEAR`), NZ ratings, and which files have
-already had their full metadata written.
+It persists TMDB IDs (keyed by `title:YEAR`), which TMDB ID each file is, NZ
+ratings, Plex state, and which files have already had their full metadata
+written. It is saved after each file, so an interrupted run keeps what it has
+resolved so far.
 
 #### manual_data.json
 
