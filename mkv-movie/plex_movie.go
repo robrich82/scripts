@@ -651,6 +651,10 @@ func (m *multiPlexMovieClient) GetContentRating(ratingKey string) (NZRating, err
 func (m *multiPlexMovieClient) SetContentRating(ratingKey string, rating NZRating) error {
 	return m.primary.SetContentRating(ratingKey, rating)
 }
+
+// SetMovieStreams sets the primary account's streams, then each alt's. Only a
+// primary failure is returned; alt failures are kept for altErrSuffix. The
+// returned flags report a change on any account.
 func (m *multiPlexMovieClient) SetMovieStreams(ratingKey string, langs AudioLangs) (audioSet, subtitleSet bool, err error) {
 	m.altErrs = make([]error, len(m.alts))
 	audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, langs)
@@ -658,7 +662,12 @@ func (m *multiPlexMovieClient) SetMovieStreams(ratingKey string, langs AudioLang
 		return
 	}
 	for i, a := range m.alts {
-		_, _, m.altErrs[i] = a.client.SetMovieStreams(ratingKey, AudioLangs{Default: langs.forAccount(a.name)})
+		altAudio, altSubtitle, altErr := a.client.SetMovieStreams(ratingKey, AudioLangs{Default: langs.forAccount(a.name)})
+		m.altErrs[i] = altErr
+		if altErr == nil {
+			audioSet = audioSet || altAudio
+			subtitleSet = subtitleSet || altSubtitle
+		}
 	}
 	return
 }

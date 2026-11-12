@@ -308,6 +308,7 @@ type fakeMultiPlexMovieClient struct {
 	setStreamsLangTag   string
 	setStreamsCalls     int
 	setStreamsErr       error
+	unchanged           bool // SetMovieStreams reports no change
 }
 
 func (f *fakeMultiPlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
@@ -329,7 +330,32 @@ func (f *fakeMultiPlexMovieClient) SetMovieStreams(rk string, langs AudioLangs) 
 	f.setStreamsCalls++
 	f.setStreamsRatingKey = rk
 	f.setStreamsLangTag = langs.Default
-	return true, true, f.setStreamsErr
+	return !f.unchanged, !f.unchanged, f.setStreamsErr
+}
+
+// An alt account's change counts as a change even when the primary had none;
+// a failed alt's flags don't.
+func TestMultiPlexMovieClient_SetMovieStreams_ReportsAltChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		alt     *fakeMultiPlexMovieClient
+		wantSet bool
+	}{
+		{"alt changed", &fakeMultiPlexMovieClient{}, true},
+		{"alt unchanged", &fakeMultiPlexMovieClient{unchanged: true}, false},
+		{"alt failed", &fakeMultiPlexMovieClient{setStreamsErr: errors.New("alt failed")}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mc := newMultiPlexMovieClient(&fakeMultiPlexMovieClient{unchanged: true}, namedPlexMovieClient{name: altAccount, client: tc.alt})
+			audioSet, subtitleSet, err := mc.SetMovieStreams("rk1", AudioLangs{Default: "ja"})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if audioSet != tc.wantSet || subtitleSet != tc.wantSet {
+				t.Errorf("audioSet=%v subtitleSet=%v; want %v", audioSet, subtitleSet, tc.wantSet)
+			}
+		})
+	}
 }
 
 func TestMultiPlexMovieClient_SetMovieStreams_CallsAll(t *testing.T) {

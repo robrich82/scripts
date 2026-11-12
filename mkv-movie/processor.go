@@ -470,12 +470,16 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					}
 					failed = append(failed, "Plex streams")
 				} else {
-					cache.SetStreamsApplied(tmdbID, langSig)
-					if audioSet || subtitleSet {
-						langSet = langSig
-					}
 					if r, ok := rr.plex.(multiAccountReporter); ok {
 						langAltSuffix = r.altErrSuffix()
+					}
+					// A failed alt account is a warning, not an error, but isn't
+					// recorded, so a later --all run retries it.
+					if langAltSuffix == "" {
+						cache.SetStreamsApplied(tmdbID, langSig)
+					}
+					if audioSet || subtitleSet {
+						langSet = langSig
 					}
 				}
 			}
@@ -503,8 +507,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		if ratingPushed {
 			fmt.Printf(" (Plex rating: %s)", rating)
 		}
-		if langSet != "" {
-			fmt.Printf(" (Plex lang: %s%s)", langSet, langAltSuffix)
+		if note := langNote(langSet, langAltSuffix); note != "" {
+			fmt.Printf(" (Plex lang: %s)", note)
 		}
 		printFailed(failed)
 		return result
@@ -517,8 +521,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		if ratingPushed {
 			fmt.Printf(" (Plex rating: %s)", rating)
 		}
-		if langSet != "" {
-			fmt.Printf(" (Plex lang: %s%s)", langSet, langAltSuffix)
+		if note := langNote(langSet, langAltSuffix); note != "" {
+			fmt.Printf(" (Plex lang: %s)", note)
 		}
 		printFailed(failed)
 		return ResultError
@@ -542,11 +546,24 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	if rating != RatingNone {
 		fmt.Printf(" (rating: %s)", rating)
 	}
-	if langSet != "" {
-		fmt.Printf(" (lang: %s%s)", langSet, langAltSuffix)
+	if note := langNote(langSet, langAltSuffix); note != "" {
+		fmt.Printf(" (lang: %s)", note)
 	}
 	printFailed(failed)
 	return result
+}
+
+// langNote is the result line's stream note: the language signature when any
+// account's streams changed, plus alt-account failures, which show even when
+// nothing changed. "" when there is nothing to report.
+func langNote(langSet, altSuffix string) string {
+	switch {
+	case langSet != "":
+		return langSet + altSuffix
+	case altSuffix != "":
+		return "unchanged" + altSuffix
+	}
+	return ""
 }
 
 // printFailed ends a result line, naming the steps that failed.
