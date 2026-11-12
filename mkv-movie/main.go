@@ -137,6 +137,6 @@ func main() {
 	fmt.Printf("Scanning %s...\n", dir)
 	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, manualData, cutoff)
 
-	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Skipped (old): %d  Errors: %d\n",
-		stats.Updated, stats.OK, stats.Skipped, stats.SkippedOld, stats.Errors)
+	fmt.Printf("\nDone. Updated: %d  Skipped: %d  Skipped (old): %d  Errors: %d\n",
+		stats.Updated, stats.Skipped, stats.SkippedOld, stats.Errors)
 }

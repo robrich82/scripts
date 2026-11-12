@@ -157,7 +157,9 @@ func TestProcessFile_BadFilename_Skipped(t *testing.T) {
 	}
 }
 
-func TestProcessFile_ApplierError_ReturnsUpdated_WithoutMarkingApplied(t *testing.T) {
+// A failed tag write is an error, and the file isn't backdated, so it stays in
+// the --cutoff-date window and the next run tries again.
+func TestProcessFile_ApplierError_IsErrorAndNotBackdated(t *testing.T) {
 	path := makeTempMKVNamed(t, "Inception.2010.mkv")
 	past := time.Date(2005, 1, 1, 0, 0, 0, 0, time.Local)
 	if err := os.Chtimes(path, past, past); err != nil {
@@ -174,9 +176,19 @@ func TestProcessFile_ApplierError_ReturnsUpdated_WithoutMarkingApplied(t *testin
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)
 
-	out := captureStdout(t, func() { processFile(path, tmdb, applier, timer, nil, cache, nil) })
-	if !strings.Contains(out, "[ERR]") || !strings.Contains(out, "apply metadata") {
+	var result FileResult
+	out := captureStdout(t, func() { result = processFile(path, tmdb, applier, timer, nil, cache, nil) })
+	if result != ResultError {
+		t.Errorf("got %v, want ResultError", result)
+	}
+	if !strings.Contains(out, "Writing tags failed") || !strings.Contains(out, "[ERR]     Inception.2010.mkv: tags not written") {
 		t.Errorf("Apply error not reported:\n%s", out)
+	}
+	if strings.Contains(out, "[UPDATED]") {
+		t.Errorf("failed file reported updated:\n%s", out)
+	}
+	if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
+		t.Errorf("file backdated after a failed tag write: mtime %v, ctime %v", timer.setTimesCalls, timer.setCreationTimeCalls)
 	}
 }
 

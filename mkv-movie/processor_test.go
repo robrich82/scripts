@@ -48,6 +48,7 @@ type fakeFileTimer struct {
 	ctimeNeedsUpdate     bool
 	setTimesCalls        []time.Time
 	setCreationTimeCalls []time.Time
+	setTimesErr          error
 }
 
 func (f *fakeFileTimer) CreationTimeNeedsUpdate(_ string, _ int64) bool {
@@ -56,7 +57,7 @@ func (f *fakeFileTimer) CreationTimeNeedsUpdate(_ string, _ int64) bool {
 
 func (f *fakeFileTimer) SetTimes(_ string, t time.Time) error {
 	f.setTimesCalls = append(f.setTimesCalls, t)
-	return nil
+	return f.setTimesErr
 }
 
 func (f *fakeFileTimer) SetCreationTime(_ string, t time.Time) error {
@@ -417,6 +418,8 @@ type fakePlexMovieClient struct {
 	titleLookups     [][2]string // (title, year) of each FindMovieByTitle call
 	ratingSets       int         // SetContentRating calls
 	streamSets       int         // SetMovieStreams calls
+	setRatingErr     error
+	setStreamsErr    error
 }
 
 func (f *fakePlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
@@ -443,11 +446,11 @@ func (f *fakePlexMovieClient) GetContentRating(rk string) (NZRating, error) {
 
 func (f *fakePlexMovieClient) SetContentRating(_ string, _ NZRating) error {
 	f.ratingSets++
-	return nil
+	return f.setRatingErr
 }
 func (f *fakePlexMovieClient) SetMovieStreams(_ string, _ AudioLangs) (bool, bool, error) {
 	f.streamSets++
-	return false, false, nil
+	return false, false, f.setStreamsErr
 }
 func (f *fakePlexMovieClient) RefreshLibraries() error { return nil }
 

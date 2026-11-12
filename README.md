@@ -378,7 +378,7 @@ Flags:
 Output:
 
 ```
-Done. Updated: 8  OK: 0  Skipped: 3  Skipped (old): 412  Errors: 0
+Done. Updated: 8  Skipped: 3  Skipped (old): 412  Errors: 0
 ```
 
 ### Bulk rating override (`--set-rating`)
@@ -411,6 +411,8 @@ When Plex is configured, after processing each movie the tool pushes the resolve
 Stream selection is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same selection is applied for those accounts — or a different audio language per account via `alt-language` / `alt2-language` in `manual_data.json`. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a movie it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run.
 
 The cached "already applied" value records the language given to every configured account (`ja|alt=ja|alt2=en`), so adding a token re-applies on the next run rather than being skipped because the language itself did not change.
+
+A file whose tags couldn't be written counts as an error and keeps its timestamps, so it stays in the `--cutoff-date` window and the next run retries it. A failed poster download, Plex lookup or push, or timestamp change also counts as an error, named on the result line as `(failed: …)`. A movie Plex doesn't have yet (its library refresh is asynchronous) isn't recorded as pushed, so a later run that reaches the file pushes it.
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` and `mkvextract` are available.

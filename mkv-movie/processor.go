@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -119,7 +118,6 @@ func (a *realMKVApplier) Apply(filePath, title, dateStr, tagsPath, posterPath st
 // Stats counts processing outcomes.
 type Stats struct {
 	Updated    int
-	OK         int
 	Skipped    int
 	SkippedOld int
 	Errors     int
@@ -130,7 +128,6 @@ type FileResult int
 
 const (
 	ResultUpdated FileResult = iota
-	ResultOK
 	ResultSkipped
 	ResultError
 )
@@ -366,18 +363,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		fmt.Printf("[ERR]     %s: parse date %q: %v\n", basename, details.ReleaseDate, err)
 		return ResultError
 	}
-	ts := dt.Unix()
 
-	// 4. Check what needs doing.
-	info, err := os.Stat(filePath)
-	if err != nil {
-		fmt.Printf("[ERR]     %s: stat: %v\n", basename, err)
-		return ResultError
-	}
-	mtimeNeedsUpdate := math.Abs(float64(info.ModTime().Unix()-ts)) > 1
-	ctimeNeedsUpdate := timer.CreationTimeNeedsUpdate(filePath, ts)
-	// Every file in the --cutoff-date/--all window is retagged when MKVToolNix is
-	// available (applier != nil), as in mkv-tvshow.
+	// 4. Every file in the --cutoff-date/--all window is retagged when MKVToolNix
+	// is available (applier != nil), and its timestamps restored, as in mkv-tvshow.
 
 	// The Plex rating is pushed when it differs from the last one pushed, so a
 	// manually corrected cache entry reaches Plex.
@@ -422,6 +410,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		deband = *entry.Deband
 	}
 	var tagsPath, posterPath string
+	var failed []string // steps that failed, named on the result line
 	if applier != nil {
 		xml := buildMovieTagXML(details.Overview, tmdbID, details.ReleaseDate, rating, deband)
 		if xml != "" {
@@ -434,6 +423,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		if url := details.PosterURL(); url != "" {
 			if posterPath, err = downloadPoster(url); err != nil {
 				fmt.Printf("  [!] Poster download failed; cover unchanged: %v\n", err)
+				failed = append(failed, "poster")
 			}
 		}
 	}
@@ -442,7 +432,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	mkvRan := false
 	if applier != nil {
 		if err := applier.Apply(filePath, details.Title, details.ReleaseDate, tagsPath, posterPath); err != nil {
-			fmt.Printf("[ERR]     %s: apply metadata: %v\n", basename, err)
+			fmt.Printf("  [!] Writing tags failed: %v\n", err)
 		} else {
 			mkvRan = true
 		}
@@ -459,20 +449,14 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, releaseYear(details.ReleaseDate))
 		}
 		if errors.Is(plexErr, ErrPlexMovieNotFound) {
+			// Nothing is recorded as pushed, so the next run that reaches the file
+			// pushes once Plex has picked the movie up.
 			fmt.Printf("  [!] Not in Plex library – rating and streams not pushed\n")
-			// Cache what we would have set so subsequent runs skip retrying. After adding
-			// the movie to Plex, retry with --all (or a --cutoff-date that covers the file)
-			// plus --set-rating <its rating> in its folder, or --overwrite-streams.
-			if rating != RatingNone {
-				cache.SetPlexRating(tmdbID, rating)
-			}
-			if langs.Default != "" {
-				cache.SetStreamsApplied(tmdbID, langSig)
-			}
 		} else if plexErr == nil {
 			if plexRatingNeedsUpdate(rating) {
 				if err := rr.plex.SetContentRating(rk, rating); err != nil {
 					fmt.Printf("  [!] Plex rating update failed: %v\n", err)
+					failed = append(failed, "Plex rating")
 				} else {
 					cache.SetPlexRating(tmdbID, rating)
 					ratingPushed = true
@@ -482,6 +466,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 				audioSet, subtitleSet, err := rr.plex.SetMovieStreams(rk, langs)
 				if err != nil {
 					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, langSig, err)
+					failed = append(failed, "Plex streams")
 				} else {
 					cache.SetStreamsApplied(tmdbID, langSig)
 					if audioSet || subtitleSet {
@@ -494,6 +479,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			}
 		} else {
 			fmt.Printf("  [!] Plex lookup failed – rating and streams not pushed: %v\n", plexErr)
+			failed = append(failed, "Plex lookup")
 		}
 	}
 
@@ -507,38 +493,66 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	// No tags were written, so don't backdate the file: that would move it out
 	// of the --cutoff-date window before it is ever tagged.
 	if applier == nil {
-		fmt.Printf("[SKIP]    %s (mkvpropedit/mkvextract not found; file not changed)", basename)
+		tag, result := "[SKIP]   ", ResultSkipped
+		if len(failed) > 0 {
+			tag, result = "[ERR]    ", ResultError
+		}
+		fmt.Printf("%s %s (mkvpropedit/mkvextract not found; file not changed)", tag, basename)
 		if ratingPushed {
 			fmt.Printf(" (Plex rating: %s)", rating)
 		}
 		if langSet != "" {
 			fmt.Printf(" (Plex lang: %s%s)", langSet, langAltSuffix)
 		}
-		fmt.Println()
-		return ResultSkipped
+		printFailed(failed)
+		return result
+	}
+
+	// The tags weren't written: leave the timestamps alone so the file stays in
+	// the --cutoff-date window, and the next run tries again, as mkv-tvshow does.
+	if !mkvRan {
+		fmt.Printf("[ERR]     %s: tags not written", basename)
+		if ratingPushed {
+			fmt.Printf(" (Plex rating: %s)", rating)
+		}
+		if langSet != "" {
+			fmt.Printf(" (Plex lang: %s%s)", langSet, langAltSuffix)
+		}
+		printFailed(failed)
+		return ResultError
 	}
 
 	// 8. Restore timestamps — mkvpropedit updates mtime as a side effect.
-	if mkvRan || mtimeNeedsUpdate {
-		if err := timer.SetTimes(filePath, dt); err != nil {
-			fmt.Printf("[ERR]     %s: set mtime: %v\n", basename, err)
-		}
+	if err := timer.SetTimes(filePath, dt); err != nil {
+		fmt.Printf("  [!] Setting the modified time failed: %v\n", err)
+		failed = append(failed, "mtime")
 	}
-	if mkvRan || ctimeNeedsUpdate {
-		if err := timer.SetCreationTime(filePath, dt); err != nil {
-			fmt.Printf("[ERR]     %s: set ctime: %v\n", basename, err)
-		}
+	if err := timer.SetCreationTime(filePath, dt); err != nil {
+		fmt.Printf("  [!] Setting the creation time failed: %v\n", err)
+		failed = append(failed, "ctime")
 	}
 
-	fmt.Printf("[UPDATED] %s -> %s", basename, details.ReleaseDate)
+	tag, result := "[UPDATED]", ResultUpdated
+	if len(failed) > 0 {
+		tag, result = "[ERR]    ", ResultError
+	}
+	fmt.Printf("%s %s -> %s", tag, basename, details.ReleaseDate)
 	if rating != RatingNone {
 		fmt.Printf(" (rating: %s)", rating)
 	}
 	if langSet != "" {
 		fmt.Printf(" (lang: %s%s)", langSet, langAltSuffix)
 	}
+	printFailed(failed)
+	return result
+}
+
+// printFailed ends a result line, naming the steps that failed.
+func printFailed(failed []string) {
+	if len(failed) > 0 {
+		fmt.Printf(" (failed: %s)", strings.Join(failed, ", "))
+	}
 	fmt.Println()
-	return ResultUpdated
 }
 
 // buildMovieTagXML constructs the Matroska tags XML for the given movie metadata.
@@ -701,8 +715,6 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 		switch processFile(path, tmdb, applier, timer, rr, cache, manualData) {
 		case ResultUpdated:
 			stats.Updated++
-		case ResultOK:
-			stats.OK++
 		case ResultSkipped:
 			stats.Skipped++
 		case ResultError:
