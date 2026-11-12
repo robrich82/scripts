@@ -371,7 +371,7 @@ Flags:
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values. A source rating that differs from the cached one is shown for confirmation; a movie no source rates keeps its cached rating |
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--clean` | Remove cache entries for movie files that no longer exist on disk, and the ratings, TMDB IDs and Plex state of movies no remaining file maps to (and lists them), then exit. Entries on an offline drive are kept |
-| `--ratings-only` | Only write the NZ rating (`COUNTRY`/`LAW_RATING`) into each file's existing tags, restoring its timestamps, and push it to Plex. Every file is processed whatever its age; `--cutoff-date`/`--all` are ignored. A file whose tags already hold the rating is left alone (unless `--overwrite-ratings`), as is Plex when it was the last rating pushed. Titles, dates, posters and streams are untouched, and TMDB is only called for a movie with no cached ID or rating |
+| `--ratings-only` | Only write the NZ rating (`COUNTRY`/`LAW_RATING`) into each file's existing tags, restoring its timestamps, and push it to Plex. Every file is processed whatever its age; `--cutoff-date`/`--all` are ignored. A file the cache records as already holding the rating is left alone, as is Plex when it was the last rating pushed; `--overwrite-ratings` re-fetches the rating and rewrites the tags. TMDB is called only to look a rating up, or for the title and year Plex is searched by when one is pushed. Prints `Done. Updated: N  Skipped: N  Errors: N` |
 | `--reset-rating <query>` | Clear the cached NZ rating and the rating last pushed to Plex for a movie, then exit. Run `mkv-movie --ratings-only` in its folder to fetch the rating again, retag it and push it. `query` is a title substring or TMDB ID |
 | `--set-rating <RATING>` | Set `RATING` as the NZ rating for **every** movie in the current directory, overriding any cached value, then exit (see below) |
 | `--deband-only` | Update only the `DEBAND` MKV tag for movies configured in `manual_data.json`; preserves all other tags and timestamps |
@@ -413,7 +413,7 @@ Stream selection is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_T
 
 The cached "already applied" value records the language each account received (`ja|alt=ja|alt2=en`). An account missing from it, or whose language has since changed, is applied on the next run that reaches the file; the others are left alone. Adding a token applies only the new account.
 
-A file whose tags couldn't be written counts as an error and keeps its timestamps, so it stays in the `--cutoff-date` window and a later run that still covers it retries. A failed poster download, Plex lookup or push, or timestamp change also counts as an error, named on the result line as `(failed: …)`; the file is backdated because its tags are right, so retry with `mkv-movie --all` in its folder. A movie with no audio track in its Plex language fails its stream push on each run that reaches it until `language` in `manual_data.json` names one it has. A movie Plex doesn't have yet (its library refresh is asynchronous) isn't recorded as pushed; once Plex has it, `mkv-movie --all` in its folder pushes it.
+A file whose tags couldn't be written counts as an error and keeps its timestamps, so it stays in the `--cutoff-date` window and a later run that still covers it retries. A failed poster download, Plex lookup or push, or timestamp change also counts as an error, named on the result line as `(failed: …)`; the file is backdated because its tags are right, so retry with `mkv-movie --all` in its folder. A movie with no audio track in its Plex language fails its stream push on each run that reaches it until `language` in `manual_data.json` names one it has. A movie Plex doesn't have yet (its library refresh is asynchronous) isn't recorded as pushed; once Plex has it, `mkv-movie --all` in its folder pushes it (`--ratings-only` pushes just the rating).
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` and `mkvextract` are available.
@@ -423,7 +423,7 @@ A file whose tags couldn't be written counts as an error and keeps its timestamp
 The cache is stored in `%APPDATA%\mkv-movie\movie_rating_cache.json`
 (Windows) or `$XDG_CONFIG_HOME/mkv-movie/movie_rating_cache.json` (Linux/macOS).
 It persists TMDB IDs (keyed by `title:YEAR`), which TMDB ID each file is, NZ
-ratings and Plex state. It is saved after each file, so an interrupted run keeps what it has
+ratings, the rating written to each file's tags, and Plex state. It is saved after each file, so an interrupted run keeps what it has
 resolved so far.
 
 #### manual_data.json
