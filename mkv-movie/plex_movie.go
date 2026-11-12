@@ -511,9 +511,10 @@ func (c *httpPlexMovieClient) plexSetStream(partID int, param string, streamID i
 
 // multiAccountReporter is implemented by multiPlexMovieClient, the client that
 // fans SetMovieStreams out to more than one Plex account. It lets the caller
-// record what was applied per account and report any per-account failures.
+// set and record streams per account and report any per-account failures.
 type multiAccountReporter interface {
 	appliedSignature(langs AudioLangs) string
+	setStreamsPending(ratingKey string, langs AudioLangs, applied string) (audioSet, subtitleSet bool, record string, err error)
 	altErrSuffix() string
 }
 
@@ -652,24 +653,76 @@ func (m *multiPlexMovieClient) SetContentRating(ratingKey string, rating NZRatin
 	return m.primary.SetContentRating(ratingKey, rating)
 }
 
-// SetMovieStreams sets the primary account's streams, then each alt's. Only a
-// primary failure is returned; alt failures are kept for altErrSuffix. The
-// returned flags report a change on any account.
+// SetMovieStreams sets every account's streams: setStreamsPending with nothing
+// applied yet.
 func (m *multiPlexMovieClient) SetMovieStreams(ratingKey string, langs AudioLangs) (audioSet, subtitleSet bool, err error) {
+	audioSet, subtitleSet, _, err = m.setStreamsPending(ratingKey, langs, "")
+	return
+}
+
+// setStreamsPending implements multiAccountReporter. It sets the streams only
+// for the accounts whose language in applied (a cached signature, or "") isn't
+// the one langs gives them, so an account that already has its selection —
+// possibly changed by hand in Plex since — is left alone. The primary goes
+// first; only its failure is returned, and then nothing is recorded. Alt
+// failures are kept for altErrSuffix. record is the signature to cache: applied
+// plus each account that succeeded, without a failed alt, so the next run
+// retries that alt alone. The flags report a change on any account.
+func (m *multiPlexMovieClient) setStreamsPending(ratingKey string, langs AudioLangs, applied string) (audioSet, subtitleSet bool, record string, err error) {
 	m.altErrs = make([]error, len(m.alts))
-	audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, langs)
-	if err != nil {
-		return
+	done := parseLangSignature(applied)
+	if lang, ok := done[""]; !ok || lang != langs.Default {
+		if audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, langs); err != nil {
+			return false, false, "", err
+		}
+		done[""] = langs.Default
 	}
 	for i, a := range m.alts {
-		altAudio, altSubtitle, altErr := a.client.SetMovieStreams(ratingKey, AudioLangs{Default: langs.forAccount(a.name)})
+		lang := langs.forAccount(a.name)
+		if got, ok := done[a.name]; ok && got == lang {
+			continue
+		}
+		altAudio, altSubtitle, altErr := a.client.SetMovieStreams(ratingKey, AudioLangs{Default: lang})
 		m.altErrs[i] = altErr
-		if altErr == nil {
-			audioSet = audioSet || altAudio
-			subtitleSet = subtitleSet || altSubtitle
+		if altErr != nil {
+			delete(done, a.name)
+			continue
+		}
+		done[a.name] = lang
+		audioSet = audioSet || altAudio
+		subtitleSet = subtitleSet || altSubtitle
+	}
+	return audioSet, subtitleSet, m.formatSignature(done), nil
+}
+
+// formatSignature writes an account → language map in appliedSignature's form,
+// skipping alts it doesn't hold.
+func (m *multiPlexMovieClient) formatSignature(done map[string]string) string {
+	var b strings.Builder
+	b.WriteString(done[""])
+	for _, a := range m.alts {
+		if lang, ok := done[a.name]; ok {
+			b.WriteString("|" + a.name + "=" + lang)
 		}
 	}
-	return
+	return b.String()
+}
+
+// parseLangSignature reads a cached signature ("ja|alt=ja|alt2=en") into an
+// account → language map, with the primary account under "".
+func parseLangSignature(sig string) map[string]string {
+	done := map[string]string{}
+	if sig == "" {
+		return done
+	}
+	parts := strings.Split(sig, "|")
+	done[""] = parts[0]
+	for _, p := range parts[1:] {
+		if name, lang, ok := strings.Cut(p, "="); ok {
+			done[name] = lang
+		}
+	}
+	return done
 }
 func (m *multiPlexMovieClient) RefreshLibraries() error { return m.primary.RefreshLibraries() }
 

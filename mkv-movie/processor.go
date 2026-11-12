@@ -382,8 +382,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	stem := strings.TrimSuffix(basename, filepath.Ext(basename))
 	entry := manualData[stem]
 	langs := entry.audioLangs(details.OriginalLanguage)
-	// What to cache as "already applied": the language every configured account
-	// receives, so adding an account re-applies rather than being skipped.
+	// What "already applied" should be: the language every configured account
+	// receives, so adding an account applies it rather than being skipped.
 	langSig := ""
 	if rr != nil && rr.plex != nil {
 		langSig = appliedLangSignature(rr.plex, langs)
@@ -462,7 +462,21 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 				}
 			}
 			if plexStreamsNeedSet() {
-				audioSet, subtitleSet, err := rr.plex.SetMovieStreams(rk, langs)
+				// With alt accounts, only those the cached signature doesn't
+				// cover yet are set, so a retry leaves the others alone.
+				var audioSet, subtitleSet bool
+				var err error
+				record := langSig
+				multi, isMulti := rr.plex.(multiAccountReporter)
+				if isMulti {
+					applied, _ := cache.GetStreamsApplied(tmdbID)
+					if rr.overwriteStreams {
+						applied = ""
+					}
+					audioSet, subtitleSet, record, err = multi.setStreamsPending(rk, langs, applied)
+				} else {
+					audioSet, subtitleSet, err = rr.plex.SetMovieStreams(rk, langs)
+				}
 				if err != nil {
 					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, langSig, err)
 					if errors.Is(err, ErrPlexNoAudioStream) {
@@ -470,14 +484,12 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					}
 					failed = append(failed, "Plex streams")
 				} else {
-					if r, ok := rr.plex.(multiAccountReporter); ok {
-						langAltSuffix = r.altErrSuffix()
+					if isMulti {
+						langAltSuffix = multi.altErrSuffix()
 					}
-					// A failed alt account is a warning, not an error, but isn't
-					// recorded, so a later --all run retries it.
-					if langAltSuffix == "" {
-						cache.SetStreamsApplied(tmdbID, langSig)
-					}
+					// A failed alt account is a warning, not an error. It's left
+					// out of the record, so a later --all run retries it alone.
+					cache.SetStreamsApplied(tmdbID, record)
 					if audioSet || subtitleSet {
 						langSet = langSig
 					}
