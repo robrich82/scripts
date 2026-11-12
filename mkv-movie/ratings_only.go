@@ -8,12 +8,13 @@ import (
 
 // processRatingOnly writes the movie's NZ rating into filePath's existing tags,
 // restoring its timestamps, and pushes the rating to Plex. The tags are left
-// alone when the cache says they already hold it (unless --overwrite-ratings),
-// and Plex when it was the last rating pushed. tagger is nil when MKVToolNix
-// isn't installed: only Plex is updated then.
+// alone when the cache records this rating as written to them (unless
+// --overwrite-ratings), and Plex when it was the last rating pushed. tagger is
+// nil when MKVToolNix isn't installed: only Plex is updated then. rr must not
+// be nil.
 //
-// TMDB details are fetched only when the rating isn't cached; otherwise the
-// filename's title and year stand in for Plex's title lookup.
+// TMDB details are fetched only when the rating must be looked up, or pushed:
+// Plex's title lookup needs TMDB's title and release year, not the filename's.
 func processRatingOnly(filePath string, tmdb TMDBMovieClient, tagger MKVTagger, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache) FileResult {
 	basename := filepath.Base(filePath)
 	year := extractYear(basename)
@@ -23,14 +24,33 @@ func processRatingOnly(filePath string, tmdb TMDBMovieClient, tagger MKVTagger, 
 		return ResultSkipped
 	}
 
-	tmdbID, details, result, ok := lookupMovie(filePath, title, year, tmdb, rr, cache, func(id string) bool { return !rr.settled(id) })
+	tmdbID, details, result, ok := lookupMovie(filePath, title, year, tmdb, rr, cache)
 	if !ok {
 		return result
 	}
-	if details != nil {
-		title, year = details.Title, releaseYear(details.ReleaseDate)
+	// fetchDetails sets title and year from TMDB, keeping the filename's year
+	// when TMDB has no release date.
+	fetchDetails := func() error {
+		if details == nil {
+			d, err := tmdb.GetMovieDetails(tmdbID)
+			if err != nil {
+				return err
+			}
+			details = &d
+		}
+		title = details.Title
+		if y := releaseYear(details.ReleaseDate); y != "" {
+			year = y
+		}
+		return nil
 	}
 
+	if details != nil || !rr.settled(tmdbID) {
+		if err := fetchDetails(); err != nil {
+			fmt.Printf("[ERR]     %s: TMDB details: %v\n", basename, err)
+			return ResultError
+		}
+	}
 	rating := rr.ResolveMovieRating(tmdbID, title, year)
 	if rating == RatingNone {
 		fmt.Printf("[SKIP]    %s (no NZ rating)\n", basename)
@@ -50,9 +70,18 @@ func processRatingOnly(filePath string, tmdb TMDBMovieClient, tagger MKVTagger, 
 		}
 	}
 
-	pushed, pushFailed := pushPlexRating(rr.plex, cache, tmdbID, title, year, rating)
-	if pushFailed != "" {
-		failed = append(failed, pushFailed)
+	pushed := false
+	if plexRatingDue(rr.plex, cache, tmdbID, rating) {
+		if err := fetchDetails(); err != nil {
+			fmt.Printf("  [!] TMDB details failed – Plex rating not pushed: %v\n", err)
+			failed = append(failed, "TMDB details")
+		} else {
+			var pushFailed string
+			pushed, pushFailed = pushPlexRating(rr.plex, cache, tmdbID, title, year, rating)
+			if pushFailed != "" {
+				failed = append(failed, pushFailed)
+			}
+		}
 	}
 
 	tag, result := "[SKIP]   ", ResultSkipped
@@ -71,7 +100,7 @@ func processRatingOnly(filePath string, tmdb TMDBMovieClient, tagger MKVTagger, 
 	case tagged:
 		fmt.Printf(" (rating: %s)", rating)
 	default:
-		fmt.Printf(" (rating: %s, already in tags)", rating)
+		fmt.Printf(" (rating: %s, written earlier)", rating)
 	}
 	if pushed {
 		fmt.Printf(" (Plex rating: %s)", rating)
@@ -80,23 +109,23 @@ func processRatingOnly(filePath string, tmdb TMDBMovieClient, tagger MKVTagger, 
 	return result
 }
 
-// pushPlexRating sets rating on the movie in Plex, found by TMDB GUID or else
-// by title and year, unless it was the last rating pushed. It reports whether
-// it pushed, or names the step that failed. A movie Plex doesn't have is a
-// warning, and nothing is recorded, so the next --ratings-only run retries it.
-func pushPlexRating(plex PlexMovieClient, cache *MovieRatingCache, tmdbID, title, year string, rating NZRating) (pushed bool, failed string) {
+// plexRatingDue reports whether rating needs pushing to Plex: it is set and
+// isn't the last rating pushed.
+func plexRatingDue(plex PlexMovieClient, cache *MovieRatingCache, tmdbID string, rating NZRating) bool {
 	if plex == nil || rating == RatingNone {
-		return false, ""
+		return false
 	}
-	if last, ok := cache.GetPlexRating(tmdbID); ok && last == rating {
-		return false, ""
-	}
-	rk, err := plex.FindMovieByTMDBID(tmdbID)
-	if errors.Is(err, ErrPlexMovieNotFound) || (err == nil && rk == "") {
-		rk, err = plex.FindMovieByTitle(title, year)
-	}
-	if errors.Is(err, ErrPlexMovieNotFound) || (err == nil && rk == "") {
-		fmt.Println("  [!] Not in Plex library – rating not pushed; rerun with --ratings-only once Plex has it")
+	last, ok := cache.GetPlexRating(tmdbID)
+	return !ok || last != rating
+}
+
+// pushPlexRating sets rating on the movie in Plex and records it. It reports
+// whether it pushed, or names the step that failed. A movie Plex doesn't have
+// is a warning, and nothing is recorded, so the next --ratings-only run retries.
+func pushPlexRating(plex PlexMovieClient, cache *MovieRatingCache, tmdbID, title, year string, rating NZRating) (pushed bool, failed string) {
+	rk, err := findPlexMovie(plex, tmdbID, title, year)
+	if errors.Is(err, ErrPlexMovieNotFound) {
+		fmt.Printf("  [!] Plex: %q not found (tried TMDB GUID, then title and year) – rating not pushed; rerun with --ratings-only once Plex has it\n", title)
 		return false, ""
 	}
 	if err != nil {

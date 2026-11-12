@@ -280,11 +280,8 @@ func (r *MovieRatingResolver) plexRatingDefault(tmdbID, title, year string) NZRa
 	if r.plex == nil {
 		return RatingNone
 	}
-	rk, err := r.plex.FindMovieByTMDBID(tmdbID)
-	if errors.Is(err, ErrPlexMovieNotFound) || (err == nil && rk == "") {
-		rk, err = r.plex.FindMovieByTitle(title, year)
-	}
-	if errors.Is(err, ErrPlexMovieNotFound) || (err == nil && rk == "") {
+	rk, err := findPlexMovie(r.plex, tmdbID, title, year)
+	if errors.Is(err, ErrPlexMovieNotFound) {
 		fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID, then title and year)\n", title)
 		return RatingNone
 	}
@@ -303,6 +300,21 @@ func (r *MovieRatingResolver) plexRatingDefault(tmdbID, title, year string) NZRa
 	return rating
 }
 
+// findPlexMovie returns the movie's Plex rating key, found by TMDB GUID or else
+// by title and release year. With no year the title lookup is skipped, so a
+// remake can't match. Not found is ErrPlexMovieNotFound, whatever the client
+// returned.
+func findPlexMovie(plex PlexMovieClient, tmdbID, title, year string) (string, error) {
+	rk, err := plex.FindMovieByTMDBID(tmdbID)
+	if (errors.Is(err, ErrPlexMovieNotFound) || (err == nil && rk == "")) && year != "" {
+		rk, err = plex.FindMovieByTitle(title, year)
+	}
+	if err == nil && rk == "" {
+		return "", ErrPlexMovieNotFound
+	}
+	return rk, err
+}
+
 // settled reports whether ResolveMovieRating answers for tmdbID without a
 // lookup or a prompt.
 func (r *MovieRatingResolver) settled(tmdbID string) bool {
@@ -315,24 +327,16 @@ func (r *MovieRatingResolver) settled(tmdbID string) bool {
 
 // lookupMovie returns the TMDB ID of the movie title (year), cached or found by
 // a TMDB search (prompting when the search finds nothing), and records it for
-// filePath. A search returns the details too; for a cached ID they are fetched
-// only when wantDetails(tmdbID) is true, and are nil otherwise. When ok is
-// false it has printed the file's result line, and result is that outcome.
-func lookupMovie(filePath, title, year string, tmdb TMDBMovieClient, rr *MovieRatingResolver, cache *MovieRatingCache, wantDetails func(tmdbID string) bool) (tmdbID string, details *MovieDetails, result FileResult, ok bool) {
+// filePath. Details come back only from a search; they are nil for a cached
+// ID. When ok is false it has printed the file's result line, and result is
+// that outcome.
+func lookupMovie(filePath, title, year string, tmdb TMDBMovieClient, rr *MovieRatingResolver, cache *MovieRatingCache) (tmdbID string, details *MovieDetails, result FileResult, ok bool) {
 	basename := filepath.Base(filePath)
 	cacheKey := title + ":" + year
 	tmdbID = cache.GetTMDBID(cacheKey)
 	if tmdbID != "" {
-		cache.SetFileTMDBID(filePath, tmdbID) // before the fetch, so a TMDB error keeps the mapping
-		if !wantDetails(tmdbID) {
-			return tmdbID, nil, 0, true
-		}
-		d, err := tmdb.GetMovieDetails(tmdbID)
-		if err != nil {
-			fmt.Printf("[ERR]     %s: TMDB details: %v\n", basename, err)
-			return "", nil, ResultError, false
-		}
-		return tmdbID, &d, 0, true
+		cache.SetFileTMDBID(filePath, tmdbID) // before any details fetch, so a TMDB error keeps the mapping
+		return tmdbID, nil, 0, true
 	}
 
 	tmdbID, d, err := tmdb.SearchAndFetch(title, year)
@@ -374,9 +378,17 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 
 	// 2. Resolve TMDB ID — cached or searched.
-	tmdbID, fetched, result, ok := lookupMovie(filePath, title, year, tmdb, rr, cache, func(string) bool { return true })
+	tmdbID, fetched, result, ok := lookupMovie(filePath, title, year, tmdb, rr, cache)
 	if !ok {
 		return result
+	}
+	if fetched == nil {
+		d, err := tmdb.GetMovieDetails(tmdbID)
+		if err != nil {
+			fmt.Printf("[ERR]     %s: TMDB details: %v\n", basename, err)
+			return ResultError
+		}
+		fetched = &d
 	}
 	details := *fetched
 
@@ -845,7 +857,7 @@ func walkMKVs(root string, cache *MovieRatingCache, cutoff time.Time, process fu
 	return stats
 }
 
-// beforeFinalSave runs before walkAndProcess's last save attempt; tests replace it.
+// beforeFinalSave runs before walkMKVs's last save attempt; tests replace it.
 var beforeFinalSave = func() { time.Sleep(time.Second) }
 
 // applyDebandOnlyFile updates only the DEBAND MKV tag for filePath, preserving

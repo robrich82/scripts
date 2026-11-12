@@ -95,14 +95,6 @@ func main() {
 	}
 	tmdb := newTMDBMovieSource(tmdbKey)
 
-	// A nil *realMKVApplier stored in the interface would be non-nil and panic.
-	var applier MKVApplier
-	if a, err := newRealMKVApplier(); err == nil {
-		applier = a
-	} else {
-		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated and files are skipped, timestamps included (Plex updates still run).\n", err)
-	}
-
 	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
 
@@ -131,10 +123,13 @@ func main() {
 	}
 
 	if *ratingsOnly {
-		// A nil *realMKVTagger stored in the interface would be non-nil.
+		// A nil *realMKVTagger stored in the interface would compare non-nil.
 		var tagger MKVTagger
 		if t := newRealMKVTagger(); t.Available() {
 			tagger = t
+		} else if plex == nil {
+			fmt.Fprintln(os.Stderr, "Error: mkvpropedit or mkvextract not found in PATH, and Plex isn't configured: --ratings-only has nothing to write.")
+			os.Exit(1)
 		} else {
 			fmt.Fprintln(os.Stderr, "Warning: mkvpropedit or mkvextract not found in PATH. Tags will not be written (Plex ratings are still pushed).")
 		}
@@ -142,6 +137,14 @@ func main() {
 		stats := walkRatingsOnly(dir, tmdb, tagger, timer, rr, cache)
 		fmt.Printf("\nDone. Updated: %d  Skipped: %d  Errors: %d\n", stats.Updated, stats.Skipped, stats.Errors)
 		return
+	}
+
+	// A nil *realMKVApplier stored in the interface would be non-nil and panic.
+	var applier MKVApplier
+	if a, err := newRealMKVApplier(); err == nil {
+		applier = a
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated and files are skipped, timestamps included (Plex updates still run).\n", err)
 	}
 
 	if cutoff.IsZero() {
