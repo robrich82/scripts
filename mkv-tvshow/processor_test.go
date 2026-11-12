@@ -1726,6 +1726,63 @@ func TestRunLanguageOnly_AltFailure_RetriesOnlyThatAlt(t *testing.T) {
 	}
 }
 
+// An alt that can't see the show (not found) is an alt failure: the show's
+// cached Plex key, which belongs to the primary, is kept.
+func TestRunLanguageOnly_AltNotFound_KeepsPlexKey(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+	rc.SetPlexKey("111", "plex-99")
+	rc.SetLanguageApplied("111", "ja-JP")
+	alt := &fakePlexClient{setLangErr: ErrPlexNotFound}
+	plexClient := newMultiPlexClient(&fakePlexClient{showRatingKey: "plex-99"}, namedPlexClient{name: altAccount, client: alt})
+	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	out := captureStdout(t, p.RunLanguageOnly)
+
+	if key, ok := rc.GetPlexKey("111"); !ok || key != "plex-99" {
+		t.Errorf("Plex key = %q, %v; want plex-99 kept", key, ok)
+	}
+	if got, _ := rc.GetLanguageApplied("111"); got != "ja-JP" {
+		t.Errorf("recorded %q; want ja-JP, without the alt", got)
+	}
+	if !strings.Contains(out, "alt: ") {
+		t.Errorf("alt failure not shown:\n%s", out)
+	}
+}
+
+// Removing alt tokens doesn't push the primary again (which would undo a
+// language chosen in Plex since); only the record and nothing is logged.
+func TestRunLanguageOnly_AltTokensRemoved_PrimaryNotPushed(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		plex       func(primary *fakePlexClient) PlexClient
+		cached     string
+		wantRecord string
+	}{
+		{"all alts removed", func(p *fakePlexClient) PlexClient { return p }, "ja-JP|alt=ja-JP", "ja-JP"},
+		{"alt2 removed", func(p *fakePlexClient) PlexClient {
+			return newMultiPlexClient(p, namedPlexClient{name: altAccount, client: &fakePlexClient{}})
+		}, "ja-JP|alt=ja-JP|alt2=ja-JP", "ja-JP|alt=ja-JP"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := emptyRatingCache(t)
+			rc.SetShowRating("111", RatingM)
+			rc.SetLanguageApplied("111", tc.cached)
+			primary := &fakePlexClient{showRatingKey: "plex-99"}
+			p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, tc.plex(primary), nil)
+			out := captureStdout(t, p.RunLanguageOnly)
+			if len(primary.setLangCalls) != 0 {
+				t.Errorf("primary pushed %d times; want 0", len(primary.setLangCalls))
+			}
+			if got, _ := rc.GetLanguageApplied("111"); got != tc.wantRecord {
+				t.Errorf("recorded %q; want %q", got, tc.wantRecord)
+			}
+			if strings.Contains(out, "audio language for") {
+				t.Errorf("logged a push that didn't happen:\n%s", out)
+			}
+		})
+	}
+}
+
 // Adding an alt account sets only that account.
 func TestRunLanguageOnly_NewAltAccount_SetsOnlyIt(t *testing.T) {
 	rc := emptyRatingCache(t)

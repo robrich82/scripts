@@ -660,7 +660,7 @@ func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) er
 // what was applied per account and report any per-account failures.
 type multiAccountReporter interface {
 	appliedSignature(langs AudioLangs) string
-	setLanguagePending(ratingKey string, langs AudioLangs, applied string) (record string, err error)
+	setLanguagePending(ratingKey string, langs AudioLangs, applied string) (record string, pushed bool, err error)
 	altErrSuffix() string
 }
 
@@ -813,7 +813,7 @@ func (m *multiPlexClient) SetContentRating(ratingKey string, itemType PlexItemTy
 // SetAudioLanguage sets every account's language: setLanguagePending with
 // nothing applied yet.
 func (m *multiPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) error {
-	_, err := m.setLanguagePending(ratingKey, langs, "")
+	_, _, err := m.setLanguagePending(ratingKey, langs, "")
 	return err
 }
 
@@ -824,14 +824,16 @@ func (m *multiPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) e
 // failure is returned, and then nothing is recorded. Alt failures are kept for
 // altErrSuffix. record is the signature to cache: applied plus each account
 // that succeeded, without a failed alt, so the next run retries that alt alone.
-func (m *multiPlexClient) setLanguagePending(ratingKey string, langs AudioLangs, applied string) (record string, err error) {
+// pushed reports whether any account succeeded.
+func (m *multiPlexClient) setLanguagePending(ratingKey string, langs AudioLangs, applied string) (record string, pushed bool, err error) { //nolint:unparam // pushed is read through multiAccountReporter
 	m.altErrs = make([]error, len(m.alts))
 	done := parseLangSignature(applied)
 	if tag, ok := done[""]; !ok || tag != plexAudioLangTag(langs.Default) {
 		if err := m.primary.SetAudioLanguage(ratingKey, langs); err != nil {
-			return "", err
+			return "", false, err
 		}
 		done[""] = plexAudioLangTag(langs.Default)
+		pushed = true
 	}
 	for i, a := range m.alts {
 		lang := langs.forAccount(a.name)
@@ -843,8 +845,9 @@ func (m *multiPlexClient) setLanguagePending(ratingKey string, langs AudioLangs,
 			continue
 		}
 		done[a.name] = plexAudioLangTag(lang)
+		pushed = true
 	}
-	return m.formatSignature(done), nil
+	return m.formatSignature(done), pushed, nil
 }
 
 // formatSignature writes an account → tag map in appliedSignature's form,

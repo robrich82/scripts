@@ -773,6 +773,114 @@ func TestMultiPlexClient_SetAudioLanguage_AltErrorStoredNotPropagated(t *testing
 	}
 }
 
+func newTwoAltClient(primary, alt, alt2 *fakePlexClient) *multiPlexClient {
+	return newMultiPlexClient(primary,
+		namedPlexClient{name: altAccount, client: alt},
+		namedPlexClient{name: alt2Account, client: alt2}).(*multiPlexClient)
+}
+
+// With everything succeeding, the record equals appliedSignature (region tags
+// included), so processApplyLanguage's applied == sig check stops the next run.
+func TestMultiPlexClient_SetLanguagePending_RecordMatchesSignature(t *testing.T) {
+	primary, alt, alt2 := &fakePlexClient{}, &fakePlexClient{}, &fakePlexClient{}
+	mc := newTwoAltClient(primary, alt, alt2)
+	langs := AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "en"}}
+	record, _, err := mc.setLanguagePending("rk1", langs, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := mc.appliedSignature(langs); record != want || record != "ja-JP|alt=ja-JP|alt2=en-US" {
+		t.Errorf("record = %q; want %q", record, want)
+	}
+	if _, _, err := mc.setLanguagePending("rk1", langs, record); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(primary.setLangCalls) != 1 || len(alt.setLangCalls) != 1 || len(alt2.setLangCalls) != 1 {
+		t.Errorf("calls primary %d, alt %d, alt2 %d; want 1 each (nothing pending the second time)", len(primary.setLangCalls), len(alt.setLangCalls), len(alt2.setLangCalls))
+	}
+}
+
+// One alt fails and the next still runs; the record keeps the primary and the
+// alt that succeeded.
+func TestMultiPlexClient_SetLanguagePending_PartialFailure(t *testing.T) {
+	alt := &fakePlexClient{setLangErr: errors.New("alt failed")}
+	alt2 := &fakePlexClient{}
+	mc := newTwoAltClient(&fakePlexClient{}, alt, alt2)
+	record, _, err := mc.setLanguagePending("rk1", AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "en"}}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(alt2.setLangCalls) != 1 || record != "ja-JP|alt2=en-US" {
+		t.Errorf("alt2 calls %d, record %q; want 1 and ja-JP|alt2=en-US", len(alt2.setLangCalls), record)
+	}
+	if got := mc.altErrSuffix(); got != "; alt: alt failed" {
+		t.Errorf("altErrSuffix() = %q", got)
+	}
+}
+
+// Only the accounts whose language changed are set again.
+func TestMultiPlexClient_SetLanguagePending_ChangedLanguage(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		langs                AudioLangs
+		wantPrimary, wantAlt int
+		wantRecord           string
+	}{
+		{"primary changed, alt overridden", AudioLangs{Default: "ko", Alts: map[string]string{altAccount: "ja"}}, 1, 0, "ko-KR|alt=ja-JP"},
+		{"alt changed", AudioLangs{Default: "ja", Alts: map[string]string{altAccount: "en"}}, 0, 1, "ja-JP|alt=en-US"},
+		{"bare code matches cached tag", AudioLangs{Default: "ja"}, 0, 0, "ja-JP|alt=ja-JP"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			primary, alt := &fakePlexClient{}, &fakePlexClient{}
+			mc := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt}).(*multiPlexClient)
+			record, _, err := mc.setLanguagePending("rk1", tc.langs, "ja-JP|alt=ja-JP")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(primary.setLangCalls) != tc.wantPrimary || len(alt.setLangCalls) != tc.wantAlt {
+				t.Errorf("calls primary %d, alt %d; want %d, %d", len(primary.setLangCalls), len(alt.setLangCalls), tc.wantPrimary, tc.wantAlt)
+			}
+			if record != tc.wantRecord {
+				t.Errorf("record = %q; want %q", record, tc.wantRecord)
+			}
+		})
+	}
+}
+
+// A pending primary that fails returns its error, records nothing and stops
+// before the alts.
+func TestMultiPlexClient_SetLanguagePending_PrimaryFailure(t *testing.T) {
+	alt := &fakePlexClient{}
+	mc := newMultiPlexClient(&fakePlexClient{setLangErr: errors.New("primary failed")}, namedPlexClient{name: altAccount, client: alt}).(*multiPlexClient)
+	record, _, err := mc.setLanguagePending("rk1", AudioLangs{Default: "ja"}, "")
+	if err == nil || record != "" || len(alt.setLangCalls) != 0 {
+		t.Errorf("err %v, record %q, alt calls %d; want an error, no record, no alt call", err, record, len(alt.setLangCalls))
+	}
+}
+
+func TestParseLangSignature(t *testing.T) {
+	for _, tc := range []struct {
+		sig  string
+		want map[string]string
+	}{
+		{"", map[string]string{}},
+		{"ja-JP", map[string]string{"": "ja-JP"}},
+		{"ja-JP|alt=en-US|alt2=ja-JP", map[string]string{"": "ja-JP", "alt": "en-US", "alt2": "ja-JP"}},
+		{"ja-JP|alt||alt2=en-US", map[string]string{"": "ja-JP", "alt2": "en-US"}}, // malformed entries dropped
+	} {
+		got := parseLangSignature(tc.sig)
+		if len(got) != len(tc.want) {
+			t.Errorf("parseLangSignature(%q) = %v; want %v", tc.sig, got, tc.want)
+			continue
+		}
+		for k, v := range tc.want {
+			if got[k] != v {
+				t.Errorf("parseLangSignature(%q)[%q] = %q; want %q", tc.sig, k, got[k], v)
+			}
+		}
+	}
+}
+
 func TestMultiPlexClient_SetAudioLanguage_AltErrClearedOnSuccess(t *testing.T) {
 	primary := &fakePlexClient{}
 	alt := &fakePlexClient{}
