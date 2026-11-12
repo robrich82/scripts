@@ -11,7 +11,6 @@ import (
 func main() {
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
 	overwriteStreams := flag.Bool("overwrite-streams", false, "Re-select Plex audio/subtitle streams even if already applied for a movie.")
-	force := flag.Bool("force", false, "Re-apply all metadata even if already cached.")
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
 	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, and the cached ratings, TMDB IDs and Plex state of movies no remaining file maps to, then exit.")
@@ -136,7 +135,7 @@ func main() {
 		fmt.Printf("--- Cutoff date: %s ---\n", cutoff.Format("2006-01-02"))
 	}
 	fmt.Printf("Scanning %s...\n", dir)
-	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, manualData, *force, cutoff)
+	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, manualData, cutoff)
 
 	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Skipped (old): %d  Errors: %d\n",
 		stats.Updated, stats.OK, stats.Skipped, stats.SkippedOld, stats.Errors)

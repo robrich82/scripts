@@ -308,7 +308,7 @@ func (r *MovieRatingResolver) plexRatingDefault(tmdbID, title, year string) NZRa
 
 // processFile looks up the movie on TMDB by filename, fetches full metadata,
 // and applies it to the MKV file (title, date header, tags, poster, timestamps).
-func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, force bool) FileResult {
+func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry) FileResult {
 	basename := filepath.Base(filePath)
 
 	// 1. Derive title and year from filename.
@@ -376,7 +376,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 	mtimeNeedsUpdate := math.Abs(float64(info.ModTime().Unix()-ts)) > 1
 	ctimeNeedsUpdate := timer.CreationTimeNeedsUpdate(filePath, ts)
-	needsApply := !cache.IsMetaApplied(filePath, tmdbID) || (rr != nil && rr.overwrite) || force
+	// Every file in the --cutoff-date/--all window is retagged, as in mkv-tvshow.
+	needsApply := applier != nil
 
 	// Determine whether the Plex rating needs updating independently of needsApply,
 	// so that a manually corrected cache entry is always pushed to Plex.
@@ -385,7 +386,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			return false
 		}
 		last, ok := cache.GetPlexRating(tmdbID)
-		return force || !ok || last != rating
+		return !ok || last != rating
 	}
 
 	// Plex audio/subtitle preferences per account: manual_data's "language" if
@@ -406,7 +407,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			return false
 		}
 		applied, ok := cache.GetStreamsApplied(tmdbID)
-		return force || !ok || applied != langSig || rr.overwriteStreams
+		return !ok || applied != langSig || rr.overwriteStreams
 	}
 
 	// 5. Resolve NZ rating early so we can include it in the needs-update check.
@@ -449,7 +450,6 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			fmt.Printf("[ERR]     %s: apply metadata: %v\n", basename, err)
 		} else {
 			mkvRan = true
-			cache.MarkMetaApplied(filePath, tmdbID)
 		}
 	}
 
@@ -466,7 +466,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		if errors.Is(plexErr, ErrPlexMovieNotFound) {
 			fmt.Printf("  [!] Not in Plex library – rating and streams not pushed\n")
 			// Cache what we would have set so subsequent runs skip retrying.
-			// Re-run with --force to retry after adding the movie to Plex.
+			// --reset-rating (rating) or --overwrite-streams retries after adding the movie to Plex.
 			if rating != RatingNone {
 				cache.SetPlexRating(tmdbID, rating)
 			}
@@ -508,9 +508,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		os.Remove(posterPath)
 	}
 
-	// No tags were written to this untagged file, so don't backdate it or
-	// report it updated. Tagged files fall through for timestamp fixes.
-	if applier == nil && !cache.IsMetaApplied(filePath, tmdbID) {
+	// No tags were written, so don't backdate the file: that would move it out
+	// of the --cutoff-date window before it is ever tagged.
+	if applier == nil {
 		fmt.Printf("[SKIP]    %s (mkvpropedit/mkvextract not found; file not changed)", basename)
 		if ratingPushed {
 			fmt.Printf(" (Plex rating: %s)", rating)
@@ -679,7 +679,7 @@ func releaseYear(date string) string {
 }
 
 // walkAndProcess walks root for .mkv files and processes each one.
-func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, force bool, cutoff time.Time) Stats {
+func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, cutoff time.Time) Stats {
 	var stats Stats
 	var saveErr error // the last save's error; only the first in a run of failures is printed
 	lastSaved := ""   // the file after which the cache was last saved
@@ -702,7 +702,7 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 				return nil
 			}
 		}
-		switch processFile(path, tmdb, applier, timer, rr, cache, manualData, force) {
+		switch processFile(path, tmdb, applier, timer, rr, cache, manualData) {
 		case ResultUpdated:
 			stats.Updated++
 		case ResultOK:

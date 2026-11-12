@@ -366,11 +366,10 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
-| `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today) |
+| `--cutoff-date YYYY-MM-DD` | Only process files modified on or after this date (defaults to today). Every file in the window is retagged, even if an earlier run tagged it |
 | `--all` | Process all files regardless of modification date |
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values. A source rating that differs from the cached one is shown for confirmation; a movie no source rates keeps its cached rating |
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
-| `--force` | Re-apply all metadata even if already cached |
 | `--clean` | Remove cache entries for movie files that no longer exist on disk, and the ratings, TMDB IDs and Plex state of movies no remaining file maps to (and lists them), then exit. Entries on an offline drive are kept |
 | `--reset-rating <query>` | Clear the cached NZ rating for a movie and reset its applied state so the next run re-fetches and re-applies it. `query` is a title substring or TMDB ID |
 | `--set-rating <RATING>` | Set `RATING` as the NZ rating for **every** movie in the current directory, overriding any cached value, then exit (see below) |
@@ -403,7 +402,7 @@ the next `mkv-movie --all` writes the new `LAW_RATING` tag and pushes it to Plex
 ### Dependencies
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
-- `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files whose metadata hasn't been written yet are skipped, timestamps included; Plex updates still run)
+- `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files are skipped, timestamps included, so they stay in the `--cutoff-date` window; Plex updates still run)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; stream selection is applied for these accounts too
 
@@ -421,8 +420,7 @@ The cached "already applied" value records the language given to every configure
 The cache is stored in `%APPDATA%\mkv-movie\movie_rating_cache.json`
 (Windows) or `$XDG_CONFIG_HOME/mkv-movie/movie_rating_cache.json` (Linux/macOS).
 It persists TMDB IDs (keyed by `title:YEAR`), which TMDB ID each file is, NZ
-ratings, Plex state, and which files have already had their full metadata
-written. It is saved after each file, so an interrupted run keeps what it has
+ratings and Plex state. It is saved after each file, so an interrupted run keeps what it has
 resolved so far.
 
 #### manual_data.json

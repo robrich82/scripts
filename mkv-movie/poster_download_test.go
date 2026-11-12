@@ -81,7 +81,7 @@ func TestProcessFile_PosterDownloadFails_WarnsAndKeepsCover(t *testing.T) {
 	applier := &fakeApplier{}
 
 	out := captureStdout(t, func() {
-		processFile(path, tmdb, applier, &fakeFileTimer{}, nil, makeCache(t), nil, false)
+		processFile(path, tmdb, applier, &fakeFileTimer{}, nil, makeCache(t), nil)
 	})
 	if !strings.Contains(out, "Poster download failed; cover unchanged: unexpected status 503") {
 		t.Errorf("missing poster warning:\n%s", out)

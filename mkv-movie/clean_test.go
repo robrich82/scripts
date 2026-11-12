@@ -44,7 +44,7 @@ func TestRunClean_OfflineDriveKeepsEntries(t *testing.T) {
 	cache, _ := LoadMovieRatingCache(cachePath)
 	for f, id := range ids {
 		cache.data.Applied[f] = string(RatingPG)
-		cache.MarkMetaApplied(f, id)
+		cache.SetFileTMDBID(f, id)
 		cache.Set(id, RatingPG)
 	}
 	if err := cache.Save(); err != nil {
@@ -60,9 +60,6 @@ func TestRunClean_OfflineDriveKeepsEntries(t *testing.T) {
 	for f, want := range map[string]bool{offline: true, gone: false, kept: true} {
 		if _, ok := cache.data.Applied[f]; ok != want {
 			t.Errorf("applied has %s = %v, want %v", f, ok, want)
-		}
-		if ok := cache.IsMetaApplied(f, ids[f]); ok != want {
-			t.Errorf("meta_applied has %s = %v, want %v", f, ok, want)
 		}
 		if _, ok := cache.data.Files[f]; ok != want {
 			t.Errorf("files has %s = %v, want %v", f, ok, want)

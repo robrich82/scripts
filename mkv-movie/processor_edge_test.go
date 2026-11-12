@@ -151,7 +151,7 @@ func TestProcessFile_BadFilename_Skipped(t *testing.T) {
 	// "(2019).mkv" → year="2019", title="" after truncation.
 	path := makeTempMKVNamed(t, "(2019).mkv")
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
-	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped for empty-title filename", result)
 	}
@@ -174,10 +174,9 @@ func TestProcessFile_ApplierError_ReturnsUpdated_WithoutMarkingApplied(t *testin
 	timer := &fakeFileTimer{}
 	cache := makeCache(t)
 
-	// When apply fails, meta should NOT be marked applied.
-	processFile(path, tmdb, applier, timer, nil, cache, nil, false)
-	if cache.IsMetaApplied(path, "27205") {
-		t.Error("meta should not be marked applied when Apply() returns an error")
+	out := captureStdout(t, func() { processFile(path, tmdb, applier, timer, nil, cache, nil) })
+	if !strings.Contains(out, "[ERR]") || !strings.Contains(out, "apply metadata") {
+		t.Errorf("Apply error not reported:\n%s", out)
 	}
 }
 
@@ -207,40 +206,12 @@ func TestProcessFile_CachedTMDBID_SkipsSearch(t *testing.T) {
 	// Pre-seed the TMDB ID so search should be skipped.
 	cache.SetTMDBID("Interstellar:2014", "157336")
 
-	result := processFile(path, tmdb, applier, timer, nil, cache, nil, false)
+	result := processFile(path, tmdb, applier, timer, nil, cache, nil)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated", result)
 	}
 	if searchCalled {
 		t.Error("SearchAndFetch should not be called when TMDB ID is already cached")
-	}
-}
-
-func TestProcessFile_ForceFlag_ReappliesEvenWhenApplied(t *testing.T) {
-	path := makeTempMKVNamed(t, "Parasite.2019.mkv")
-	target := time.Date(2019, 5, 30, 0, 0, 0, 0, time.Local)
-	if err := os.Chtimes(path, target, target); err != nil {
-		t.Fatal(err)
-	}
-
-	tmdb := &fakeTMDBMovieClient{tmdbID: "496243", details: MovieDetails{
-		TMDBID:      "496243",
-		Title:       "Parasite",
-		Overview:    "Class struggle.",
-		ReleaseDate: "2019-05-30",
-	}}
-	applier := &fakeApplier{}
-	timer := &fakeFileTimer{}
-	cache := makeCache(t)
-	cache.SetTMDBID("Parasite:2019", "496243")
-	cache.MarkMetaApplied(path, "496243")
-
-	result := processFile(path, tmdb, applier, timer, nil, cache, nil, true /* force */)
-	if result != ResultUpdated {
-		t.Errorf("got %v, want ResultUpdated when force=true", result)
-	}
-	if len(applier.calls) != 1 {
-		t.Errorf("expected 1 Apply call under force, got %d", len(applier.calls))
 	}
 }
 
@@ -262,9 +233,8 @@ func TestProcessFile_CtimeNeedsUpdate_SetsCreationTime(t *testing.T) {
 	timer := &fakeFileTimer{ctimeNeedsUpdate: true}
 	cache := makeCache(t)
 	cache.SetTMDBID("Avengers:2012", "24428")
-	cache.MarkMetaApplied(path, "24428")
 
-	result := processFile(path, tmdb, applier, timer, nil, cache, nil, false)
+	result := processFile(path, tmdb, applier, timer, nil, cache, nil)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated (ctime needs fixing)", result)
 	}
@@ -293,7 +263,7 @@ func TestWalkAndProcess_MultipleFiles_CountsAll(t *testing.T) {
 	// Client always returns not-found.
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
 	cache := makeCache(t)
-	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
+	stats := walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, time.Time{})
 
 	// All three have derivable titles and go to TMDB, which returns not-found for each.
 	if stats.Skipped != 3 {
@@ -313,7 +283,7 @@ func TestWalkAndProcess_SavesCache(t *testing.T) {
 	cache.Set("test", RatingG)
 
 	tmdb := &fakeTMDBMovieClient{tmdbID: ""}
-	walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
+	walkAndProcess(dir, tmdb, nil, &fakeFileTimer{}, nil, cache, nil, time.Time{})
 
 	if _, statErr := os.Stat(cacheFile); os.IsNotExist(statErr) {
 		t.Error("cache file should be written by walkAndProcess")

@@ -22,7 +22,7 @@ type movieRatingCacheData struct {
 	Movies         map[string]string `json:"movies"`
 	Applied        map[string]string `json:"applied,omitempty"`         // absFilePath → rating already written
 	TMDBIDs        map[string]string `json:"tmdb_ids,omitempty"`        // "title:YEAR" → tmdbID
-	MetaApplied    map[string]string `json:"meta_applied,omitempty"`    // absFilePath → tmdbID (full metadata written)
+	LegacyMeta     map[string]string `json:"meta_applied,omitempty"`    // read on load to back-fill Files, never saved
 	PlexRatings    map[string]string `json:"plex_ratings,omitempty"`    // tmdbID → rating last pushed to Plex
 	StreamsApplied map[string]string `json:"streams_applied,omitempty"` // tmdbID → audio lang tag when streams were last set
 	Files          map[string]string `json:"files,omitempty"`           // absFilePath → tmdbID, for --clean and --reset-rating
@@ -50,7 +50,6 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 			Movies:         make(map[string]string),
 			Applied:        make(map[string]string),
 			TMDBIDs:        make(map[string]string),
-			MetaApplied:    make(map[string]string),
 			PlexRatings:    make(map[string]string),
 			StreamsApplied: make(map[string]string),
 			Files:          make(map[string]string),
@@ -75,9 +74,6 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	if c.data.TMDBIDs == nil {
 		c.data.TMDBIDs = make(map[string]string)
 	}
-	if c.data.MetaApplied == nil {
-		c.data.MetaApplied = make(map[string]string)
-	}
 	if c.data.PlexRatings == nil {
 		c.data.PlexRatings = make(map[string]string)
 	}
@@ -87,12 +83,14 @@ func LoadMovieRatingCache(path string) (*MovieRatingCache, error) {
 	if c.data.Files == nil {
 		c.data.Files = make(map[string]string)
 	}
-	// Caches written before "files" existed map files to IDs only through meta_applied.
-	for file, id := range c.data.MetaApplied {
+	// Caches written before "files" existed map files to IDs only through the
+	// retired meta_applied map. Saving drops it once Files holds its entries.
+	for file, id := range c.data.LegacyMeta {
 		if _, ok := c.data.Files[file]; !ok && id != "" {
 			c.data.Files[file] = id
 		}
 	}
+	c.data.LegacyMeta = nil
 	return c, nil
 }
 
@@ -125,18 +123,6 @@ func (c *MovieRatingCache) SetFileTMDBID(filePath, tmdbID string) {
 	if tmdbID != "" {
 		c.data.Files[filePath] = tmdbID
 	}
-}
-
-// IsMetaApplied returns true if the file at filePath already has full metadata
-// from the given TMDB ID written to it.
-func (c *MovieRatingCache) IsMetaApplied(filePath, tmdbID string) bool {
-	return c.data.MetaApplied[filePath] == tmdbID && tmdbID != ""
-}
-
-// MarkMetaApplied records that filePath has had its full metadata written from tmdbID.
-func (c *MovieRatingCache) MarkMetaApplied(filePath, tmdbID string) {
-	c.data.MetaApplied[filePath] = tmdbID
-	c.SetFileTMDBID(filePath, tmdbID)
 }
 
 // GetPlexRating returns the rating that was last successfully pushed to Plex
@@ -175,7 +161,7 @@ func (c *MovieRatingCache) SetStreamsApplied(tmdbID, lang string) {
 // Returns the removed file paths and movie names (see movieDisplayName), sorted.
 func (c *MovieRatingCache) CleanStalePaths() (files, movies []string) {
 	gone := make(map[string]bool) // path → pathGone(path), checked once per path
-	for _, m := range []map[string]string{c.data.Files, c.data.Applied, c.data.MetaApplied} {
+	for _, m := range []map[string]string{c.data.Files, c.data.Applied} {
 		for path := range m {
 			g, seen := gone[path]
 			if !seen {
@@ -288,7 +274,6 @@ func (c *MovieRatingCache) ResetForTMDBID(tmdbID string) []string {
 	for path, id := range c.data.Files {
 		if id == tmdbID {
 			delete(c.data.Applied, path)
-			delete(c.data.MetaApplied, path)
 			paths = append(paths, path)
 		}
 	}

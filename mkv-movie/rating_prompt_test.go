@@ -103,7 +103,7 @@ func TestProcessFile_PlexTitleFallbackUsesReleaseYear(t *testing.T) {
 	rr := newMovieRatingResolver(nil, cache, false, false, plex, answerPrompter(""))
 
 	captureStdout(t, func() {
-		processFile(path, &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}, &fakeApplier{}, &fakeFileTimer{}, rr, cache, nil, false)
+		processFile(path, &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}, &fakeApplier{}, &fakeFileTimer{}, rr, cache, nil)
 	})
 
 	// Both the prompt default and the rating push look the movie up.
