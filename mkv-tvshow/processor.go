@@ -733,17 +733,20 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 	// When a source found a rating, show it as the default so the user can
 	// confirm with Enter or type a new value to override.
 	var promptMsg string
+	blankDoes := "skip" // what a blank answer does, for the invalid-input re-prompt
 	switch {
 	case suggested != RatingNone:
 		promptMsg = fmt.Sprintf(
 			"NZ rating for %q: %s — press enter to confirm, or enter a new rating (%s): ",
 			showName, suggested, validRatings,
 		)
+		blankDoes = "accept " + string(suggested)
 	case plexDefault != RatingNone:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
 			showName, plexDefault, validRatings,
 		)
+		blankDoes = "use Plex's " + string(plexDefault)
 	default:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
@@ -770,7 +773,7 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 			p.ratingCache.SetShowRating(tmdbID, r)
 			break
 		}
-		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to skip: ", ans, validRatings)
+		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to %s: ", ans, validRatings, blankDoes)
 	}
 	p.sessionPromptedRating[tmdbID] = r
 	return r

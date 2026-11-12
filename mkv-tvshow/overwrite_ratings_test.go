@@ -115,3 +115,48 @@ func TestResolveEpisodeRating_PlexLookupError_NoFallback(t *testing.T) {
 		})
 	}
 }
+
+// recordingPrompter answers each prompt in turn, then blank, and records the prompts.
+type recordingPrompter struct {
+	answers []string
+	prompts []string
+}
+
+func (p *recordingPrompter) Ask(msg string) (string, error) {
+	p.prompts = append(p.prompts, msg)
+	if len(p.answers) == 0 {
+		return "", nil
+	}
+	ans := p.answers[0]
+	p.answers = p.answers[1:]
+	return ans, nil
+}
+
+// After an invalid answer, the re-prompt says what blank does in that prompt.
+func TestResolveEpisodeRating_RepromptNamesWhatBlankDoes(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		sources []RatingSource
+		plex    PlexClient
+		want    string
+	}{
+		{"source", []RatingSource{&fakeRatingSource{showRating: RatingG}}, nil, "or blank to accept G: "},
+		{"plex", nil, &fakePlexClient{showRatingKey: "42", contentRating: RatingM}, "or blank to use Plex's M: "},
+		{"none", nil, nil, "or blank to skip: "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pr := &recordingPrompter{answers: []string{"PG-13", ""}}
+			p := &Processor{
+				ratingCache:           emptyRatingCache(t),
+				prompter:              pr,
+				plex:                  tc.plex,
+				ratingSources:         tc.sources,
+				sessionPromptedRating: map[string]NZRating{},
+			}
+			captureStdout(t, func() { p.resolveEpisodeRating("12345", "Test Show", "", 1, 1) })
+			if len(pr.prompts) != 2 || !strings.HasSuffix(pr.prompts[1], tc.want) {
+				t.Errorf("prompts %q; want the re-prompt to end %q", pr.prompts, tc.want)
+			}
+		})
+	}
+}
