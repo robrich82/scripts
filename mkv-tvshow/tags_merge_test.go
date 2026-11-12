@@ -372,7 +372,7 @@ func TestBuildTagXML_EscapesSummary(t *testing.T) {
 }
 
 func TestApplyMKV_MergesIntoExistingTags(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsXML: trackStatsXML}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: trackStatsXML}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false)
 
@@ -386,7 +386,7 @@ func TestApplyMKV_MergesIntoExistingTags(t *testing.T) {
 
 // Applying the fresh tags alone would delete every other tag in the file.
 func TestApplyMKV_ExtractFails_DoesNotApply(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsErr: os.ErrNotExist}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsErr: os.ErrNotExist}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	if p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false) {
 		t.Error("applyMKV succeeded, want failure")
@@ -397,7 +397,7 @@ func TestApplyMKV_ExtractFails_DoesNotApply(t *testing.T) {
 }
 
 func TestApplyMKV_MergeFails_DoesNotApply(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	if p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false) {
 		t.Error("applyMKV succeeded, want failure")
@@ -408,7 +408,7 @@ func TestApplyMKV_MergeFails_DoesNotApply(t *testing.T) {
 }
 
 func TestApplyDebandOnlyMKV_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml",
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml",
 		extractTagsXML: `<Tags><Tag><Targets /><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	if !p.applyDebandOnlyMKV(debandTestFile(t), false) {
@@ -420,7 +420,7 @@ func TestApplyDebandOnlyMKV_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
 }
 
 func TestApplyDebandOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	if p.applyDebandOnlyMKV(debandTestFile(t), true) {
 		t.Error("applyDebandOnlyMKV succeeded, want failure")
@@ -431,7 +431,7 @@ func TestApplyDebandOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
 }
 
 func TestApplyRatingOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	if p.applyRatingOnlyMKV(debandTestFile(t), RatingM) {
 		t.Error("applyRatingOnlyMKV succeeded, want failure")
@@ -442,7 +442,7 @@ func TestApplyRatingOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
 }
 
 func TestApplyMKV_WriteTempTagsFails_DoesNotApply(t *testing.T) {
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg, tagsErr: os.ErrPermission}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsErr: os.ErrPermission}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	if p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false) {
 		t.Error("applyMKV succeeded, want failure")
@@ -571,5 +571,28 @@ func TestRealMKVRunner_DebandOnOff_NoEmptyBlock(t *testing.T) {
 
 	if !p.applyDebandOnlyMKV(untagged, false) {
 		t.Fatal("applyDebandOnlyMKV on an untagged file failed")
+	}
+}
+
+// Real mkvpropedit exits 1 when it writes the changes but warns (here: no PNG
+// attachment to delete). mkvpropeditWrote must count that as written.
+func TestRealMKVRunner_WarningExitStillWrites(t *testing.T) {
+	ep, runner := muxTestMKV(t, t.TempDir(), "Show - S01E01.mkv")
+	out, rc, err := runner.Apply(ep, []string{"--edit", "info", "--set", "title=Warned", "--delete-attachment", "mime-type:image/png"})
+	if err != nil {
+		t.Fatalf("Apply: %v\n%s", err, out)
+	}
+	if rc != 1 {
+		t.Fatalf("rc = %d, want 1 (written with a warning):\n%s", rc, out)
+	}
+	if !mkvpropeditWrote(rc) {
+		t.Errorf("mkvpropeditWrote(%d) = false; the file was written:\n%s", rc, out)
+	}
+	info, err := exec.Command(runner.mkvmerge, "-J", ep).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(info), `"title": "Warned"`) {
+		t.Errorf("title not written:\n%s", info)
 	}
 }
