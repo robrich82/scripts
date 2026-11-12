@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -152,8 +153,12 @@ func (tc *TitleChecker) Run() {
 
 			cKey := fmt.Sprintf("%s_S%d", tmdbID, tmdbSeason)
 			if _, ok := seasonCache[cKey]; !ok {
-				if sr, err := tc.tmdb.GetSeason(tmdbID, tmdbSeason); err == nil {
+				sr, err := tc.tmdb.GetSeason(tmdbID, tmdbSeason)
+				switch {
+				case err == nil:
 					seasonCache[cKey] = sr
+				case !errors.Is(err, errTMDBNotFound):
+					fmt.Printf("  [!] TMDB season lookup failed, not checking %s: %v\n", file, err)
 				}
 			}
 			sr, ok := seasonCache[cKey]
