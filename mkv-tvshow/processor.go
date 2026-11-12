@@ -13,7 +13,10 @@ import (
 )
 
 const tmdbImageBase = "https://image.tmdb.org/t/p/original"
-const mkvpropeditSuccessMsg = "The changes are written to the file. Done."
+
+// mkvpropeditWrote reports whether mkvpropedit wrote the file. Exit code 0 is
+// success, 1 means it wrote the changes but printed warnings, 2 is an error.
+func mkvpropeditWrote(rc int) bool { return rc == 0 || rc == 1 }
 
 // Config holds all runtime configuration for a processing run.
 type Config struct {
@@ -167,7 +170,9 @@ func (p *Processor) Run() Stats {
 		mainPoster := ""
 		showFirstAirDate := ""
 		if !p.cfg.RatingsOnly {
-			if details, err := p.tmdb.GetShow(showID); err == nil {
+			if details, err := p.tmdb.GetShow(showID); err != nil {
+				fmt.Printf("[!] TMDB show lookup failed for %s (show poster and first air date unavailable): %v\n", showFolder, err)
+			} else {
 				if details.PosterPath != "" {
 					mainPoster = tmdbImageBase + details.PosterPath
 				}
@@ -224,35 +229,31 @@ func (p *Processor) Run() Stats {
 
 						// Fetch season data for poster.
 						if posterSeason != 0 {
-							cKey := fmt.Sprintf("%s_S%d", showID, posterSeason)
-							if _, ok := seasonCache[cKey]; !ok {
-								if sr, err := p.tmdb.GetSeason(showID, posterSeason); err == nil {
-									seasonCache[cKey] = sr
-								}
+							sr, err := p.seasonData(seasonCache, showID, posterSeason)
+							if err != nil {
+								p.failTMDBLookup(&stats, filePath, file, err)
+								continue
 							}
-							if sr, ok := seasonCache[cKey]; ok && sr.PosterPath != "" {
+							if sr.PosterPath != "" {
 								posterURL = tmdbImageBase + sr.PosterPath
 							}
 						}
 
 						// Fetch episode metadata when an episode reference is specified.
 						if epNum > 0 {
-							cKey := fmt.Sprintf("%s_S%d", showID, epSeason)
-							if _, ok := seasonCache[cKey]; !ok {
-								if sr, err := p.tmdb.GetSeason(showID, epSeason); err == nil {
-									seasonCache[cKey] = sr
-								}
+							sr, err := p.seasonData(seasonCache, showID, epSeason)
+							if err != nil {
+								p.failTMDBLookup(&stats, filePath, file, err)
+								continue
 							}
-							if sr, ok := seasonCache[cKey]; ok {
-								for _, ep := range sr.Episodes {
-									if ep.EpisodeNumber == epNum {
-										if ep.AirDate != "" {
-											relDate = ep.AirDate + "T00:00:00Z"
-											stampDate = relDate
-										}
-										summary = ep.Overview
-										break
+							for _, ep := range sr.Episodes {
+								if ep.EpisodeNumber == epNum {
+									if ep.AirDate != "" {
+										relDate = ep.AirDate + "T00:00:00Z"
+										stampDate = relDate
 									}
+									summary = ep.Overview
+									break
 								}
 							}
 						}
@@ -325,32 +326,29 @@ func (p *Processor) Run() Stats {
 			// Full processing mode: fetch season data and apply all metadata.
 			var relDate, stampDate, posterURL, summary string
 			posterURL = mainPoster
-			cKey := fmt.Sprintf("%s_S%d", currID, tmdbSeason)
-			if _, ok := seasonCache[cKey]; !ok {
-				if sr, err := p.tmdb.GetSeason(currID, tmdbSeason); err == nil {
-					seasonCache[cKey] = sr
-				}
+			sr, err := p.seasonData(seasonCache, currID, tmdbSeason)
+			if err != nil {
+				p.failTMDBLookup(&stats, filePath, file, err)
+				continue
 			}
-			var prevDate, srAirDate string
-			if sr, ok := seasonCache[cKey]; ok {
-				if sr.PosterPath != "" {
-					posterURL = tmdbImageBase + sr.PosterPath
-				}
-				for _, ep := range sr.Episodes {
-					if ep.EpisodeNumber == tmdbEpisode {
-						summary = ep.Overview
-						if ep.AirDate != "" {
-							relDate = ep.AirDate + "T00:00:00Z"
-							stampDate = relDate // real date: safe to stamp filesystem
-						}
-						break
-					}
+			var prevDate string
+			if sr.PosterPath != "" {
+				posterURL = tmdbImageBase + sr.PosterPath
+			}
+			for _, ep := range sr.Episodes {
+				if ep.EpisodeNumber == tmdbEpisode {
+					summary = ep.Overview
 					if ep.AirDate != "" {
-						prevDate = ep.AirDate
+						relDate = ep.AirDate + "T00:00:00Z"
+						stampDate = relDate // real date: safe to stamp filesystem
 					}
+					break
 				}
-				srAirDate = sr.AirDate
+				if ep.AirDate != "" {
+					prevDate = ep.AirDate
+				}
 			}
+			srAirDate := sr.AirDate
 
 			// Manual date overrides all TMDB-derived dates.
 			epKey := fmt.Sprintf("S%02dE%02d", sNum, eNum)
@@ -639,7 +637,7 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 		return false
 	}
 
-	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
+	success := mkvpropeditWrote(rc)
 	if !success {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
 	} else if rc != 0 {
@@ -679,12 +677,14 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 		return r
 	}
 
-	// Cache hits: return silently without prompting.
-	if r, ok := p.ratingCache.GetEpisodeRating(tmdbID, season, episode); ok {
-		return r
+	cached, haveCached := p.ratingCache.GetEpisodeRating(tmdbID, season, episode)
+	if !haveCached {
+		cached, haveCached = p.ratingCache.GetShowRating(tmdbID)
 	}
-	if r, ok := p.ratingCache.GetShowRating(tmdbID); ok {
-		return r
+	// Cache hits: return silently without prompting. --overwrite-ratings
+	// re-fetches instead, and falls back to the cached value below.
+	if haveCached && !p.cfg.OverwriteRatings {
+		return cached
 	}
 
 	// Try external sources. If a source finds a rating it is stored as a
@@ -717,60 +717,34 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 		}
 	}
 
-	// Check Plex for an existing rating (shown when no source has data).
-	// Try TMDB-ID lookup first, then title match, then file-path lookup (most
-	// reliable for anime whose Plex title differs from the folder name).
-	var plexDefault NZRating
-	if p.plex != nil {
-		showKey, err := p.plex.FindShowByTMDBID(tmdbID)
-		if err != nil {
-			if err != ErrPlexNotFound {
-				fmt.Printf("  [i] Plex: TMDB lookup error for %q: %v\n", showName, err)
-			}
-			var titleErr error
-			showKey, titleErr = p.plex.FindShowByTitle(showName)
-			if titleErr != nil && titleErr != ErrPlexNotFound {
-				fmt.Printf("  [i] Plex: title lookup error for %q: %v\n", showName, titleErr)
-			}
-		}
-		if showKey == "" && filePath != "" {
-			var pathErr error
-			showKey, pathErr = p.plex.FindShowByFilePath(filePath)
-			if pathErr != nil && pathErr != ErrPlexNotFound {
-				fmt.Printf("  [i] Plex: file-path lookup error for %q: %v\n", showName, pathErr)
-			}
-		}
-		if showKey != "" {
-			if p.sessionPlexKey != nil {
-				p.sessionPlexKey[tmdbID] = showKey
-			}
-			var fetchErr error
-			plexDefault, fetchErr = p.plex.GetContentRating(showKey)
-			if fetchErr != nil {
-				fmt.Printf("  [i] Plex: rating fetch error for %q: %v\n", showName, fetchErr)
-			} else if plexDefault == RatingNone {
-				fmt.Printf("  [i] Plex: %q found but no NZ content rating is set\n", showName)
-			}
-		} else {
-			fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID, title, and file path)\n", showName)
-		}
+	// --overwrite-ratings: no source has data, so keep the cached rating rather
+	// than prompting, as mkv-movie does.
+	if suggested == RatingNone && haveCached && cached != RatingNone {
+		fmt.Printf("  [i] No source has a rating for %q; keeping cached %s\n", showName, cached)
+		p.sessionPromptedRating[tmdbID] = cached
+		return cached
 	}
+
+	plexDefault := p.plexRatingDefault(tmdbID, showName, filePath)
 
 	// Prompt the user once per show per run.
 	// When a source found a rating, show it as the default so the user can
 	// confirm with Enter or type a new value to override.
 	var promptMsg string
+	blankDoes := "skip" // what a blank answer does, for the invalid-input re-prompt
 	switch {
 	case suggested != RatingNone:
 		promptMsg = fmt.Sprintf(
 			"NZ rating for %q: %s — press enter to confirm, or enter a new rating (%s): ",
 			showName, suggested, validRatings,
 		)
+		blankDoes = "accept " + string(suggested)
 	case plexDefault != RatingNone:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
 			showName, plexDefault, validRatings,
 		)
+		blankDoes = "use Plex's " + string(plexDefault)
 	default:
 		promptMsg = fmt.Sprintf(
 			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
@@ -797,9 +771,59 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 			p.ratingCache.SetShowRating(tmdbID, r)
 			break
 		}
-		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to skip: ", ans, validRatings)
+		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to %s: ", ans, validRatings, blankDoes)
 	}
 	p.sessionPromptedRating[tmdbID] = r
+	return r
+}
+
+// plexRatingDefault returns the rating Plex already has for the show, offered
+// as the prompt's default. It tries the TMDB GUID, then the title, then the
+// file path (most reliable for anime whose Plex title differs from the
+// folder name). It moves to the next lookup only when the previous one found
+// nothing; a failed lookup is reported and gives no default.
+func (p *Processor) plexRatingDefault(tmdbID, showName, filePath string) NZRating {
+	if p.plex == nil {
+		return RatingNone
+	}
+	type lookup struct {
+		name string
+		find func() (string, error)
+	}
+	lookups := []lookup{
+		{"TMDB GUID", func() (string, error) { return p.plex.FindShowByTMDBID(tmdbID) }},
+		{"title", func() (string, error) { return p.plex.FindShowByTitle(showName) }},
+	}
+	if filePath != "" {
+		lookups = append(lookups, lookup{"file path", func() (string, error) { return p.plex.FindShowByFilePath(filePath) }})
+	}
+	var showKey string
+	for _, l := range lookups {
+		key, err := l.find()
+		if err == nil && key != "" {
+			showKey = key
+			break
+		}
+		if err != nil && !errors.Is(err, ErrPlexNotFound) {
+			fmt.Printf("  [!] Plex: %s lookup failed for %q: %v\n", l.name, showName, err)
+			return RatingNone
+		}
+	}
+	if showKey == "" {
+		fmt.Printf("  [i] Plex: %q not found (tried TMDB GUID, title, and file path)\n", showName)
+		return RatingNone
+	}
+	if p.sessionPlexKey != nil {
+		p.sessionPlexKey[tmdbID] = showKey
+	}
+	r, err := p.plex.GetContentRating(showKey)
+	if err != nil {
+		fmt.Printf("  [!] Plex: rating fetch failed for %q: %v\n", showName, err)
+		return RatingNone
+	}
+	if r == RatingNone {
+		fmt.Printf("  [i] Plex: %q found but no NZ content rating is set\n", showName)
+	}
 	return r
 }
 
@@ -855,7 +879,7 @@ func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
 		fmt.Printf("  [!] subprocess error: %v\n", err)
 		return false
 	}
-	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
+	success := mkvpropeditWrote(rc)
 	if !success {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
 		return false
@@ -917,7 +941,7 @@ func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
 		fmt.Printf("  [!] subprocess error: %v\n", err)
 		return false
 	}
-	success := rc == 0 || strings.Contains(combined, mkvpropeditSuccessMsg)
+	success := mkvpropeditWrote(rc)
 	if !success {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
 		return false
@@ -1163,12 +1187,47 @@ func (p *Processor) resolveOriginalLang(tmdbID string) string {
 		return lang
 	}
 	if p.tmdb != nil {
-		if details, err := p.tmdb.GetShow(tmdbID); err == nil && details.OriginalLanguage != "" {
+		details, err := p.tmdb.GetShow(tmdbID)
+		if err != nil {
+			fmt.Printf("  [!] TMDB show lookup failed for ID %s (original language unknown): %v\n", tmdbID, err)
+		} else if details.OriginalLanguage != "" {
 			p.sessionOriginalLang[tmdbID] = details.OriginalLanguage
 			return details.OriginalLanguage
 		}
 	}
 	return ""
+}
+
+// seasonData returns a TMDB season, caching it in cache. A season TMDB doesn't
+// have is reported once and is an empty result. Any other error is returned
+// and not cached, so the next episode tries again.
+func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, season int) (SeasonResult, error) {
+	key := fmt.Sprintf("%s_S%d", showID, season)
+	if sr, ok := cache[key]; ok {
+		return sr, nil
+	}
+	sr, err := p.tmdb.GetSeason(showID, season)
+	if errors.Is(err, errTMDBNotFound) {
+		// TMDB's 404 is the same for a missing season and a wrong show ID
+		// (e.g. a typo in a manual_data override), so say which was asked for.
+		fmt.Printf("  [i] TMDB has no season %d for show ID %s; tagging without episode data\n", season, showID)
+		sr, err = SeasonResult{}, nil
+	}
+	if err != nil {
+		return SeasonResult{}, fmt.Errorf("show ID %s season %d: %w", showID, season, err)
+	}
+	cache[key] = sr
+	return sr, nil
+}
+
+// failTMDBLookup reports a failed TMDB season lookup for file and leaves it
+// untagged rather than writing partial metadata. The retry list brings it back
+// on the next run even once it falls before the cutoff.
+func (p *Processor) failTMDBLookup(stats *Stats, filePath, file string, err error) {
+	fmt.Printf("  [!] TMDB season lookup failed: %v\n", err)
+	fmt.Printf("  [X] Failed: %s\n", file)
+	p.retryList.Add(filePath)
+	stats.Failed++
 }
 
 // RunLanguageOnly iterates all shows in the rating cache and applies the Plex
