@@ -368,7 +368,7 @@ func TestRatingsOnly_NoYear_NoTitleLookup(t *testing.T) {
 	if len(plex.titleLookups) != 0 || plex.ratingSets != 0 {
 		t.Errorf("title lookups %v, Plex sets %d; want none", plex.titleLookups, plex.ratingSets)
 	}
-	if _, ok := cache.GetPlexRating("438631"); ok || stats.Updated != 1 || !strings.Contains(out, `Plex: "Dune" not found`) {
+	if _, ok := cache.GetPlexRating("438631"); ok || stats.Updated != 1 || !strings.Contains(out, `"Dune" not found by TMDB GUID, and with no release year`) {
 		t.Errorf("Plex rating recorded %v, stats %+v; want tags written and a not-found warning:\n%s", ok, stats, out)
 	}
 }
