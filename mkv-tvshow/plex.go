@@ -660,6 +660,7 @@ func (c *httpPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) er
 // what was applied per account and report any per-account failures.
 type multiAccountReporter interface {
 	appliedSignature(langs AudioLangs) string
+	setLanguagePending(ratingKey string, langs AudioLangs, applied string) (record string, err error)
 	altErrSuffix() string
 }
 
@@ -808,15 +809,72 @@ func (m *multiPlexClient) GetContentRating(ratingKey string) (NZRating, error) {
 func (m *multiPlexClient) SetContentRating(ratingKey string, itemType PlexItemType, rating NZRating) error {
 	return m.primary.SetContentRating(ratingKey, itemType, rating)
 }
+
+// SetAudioLanguage sets every account's language: setLanguagePending with
+// nothing applied yet.
 func (m *multiPlexClient) SetAudioLanguage(ratingKey string, langs AudioLangs) error {
+	_, err := m.setLanguagePending(ratingKey, langs, "")
+	return err
+}
+
+// setLanguagePending implements multiAccountReporter. It sets the language only
+// for the accounts whose tag in applied (a cached signature, or "") isn't the
+// one langs gives them, so an account that already has it — possibly changed
+// by hand in Plex since — is left alone. The primary goes first; only its
+// failure is returned, and then nothing is recorded. Alt failures are kept for
+// altErrSuffix. record is the signature to cache: applied plus each account
+// that succeeded, without a failed alt, so the next run retries that alt alone.
+func (m *multiPlexClient) setLanguagePending(ratingKey string, langs AudioLangs, applied string) (record string, err error) {
 	m.altErrs = make([]error, len(m.alts))
-	if err := m.primary.SetAudioLanguage(ratingKey, langs); err != nil {
-		return err
+	done := parseLangSignature(applied)
+	if tag, ok := done[""]; !ok || tag != plexAudioLangTag(langs.Default) {
+		if err := m.primary.SetAudioLanguage(ratingKey, langs); err != nil {
+			return "", err
+		}
+		done[""] = plexAudioLangTag(langs.Default)
 	}
 	for i, a := range m.alts {
-		m.altErrs[i] = a.client.SetAudioLanguage(ratingKey, AudioLangs{Default: langs.forAccount(a.name)})
+		lang := langs.forAccount(a.name)
+		if tag, ok := done[a.name]; ok && tag == plexAudioLangTag(lang) {
+			continue
+		}
+		if m.altErrs[i] = a.client.SetAudioLanguage(ratingKey, AudioLangs{Default: lang}); m.altErrs[i] != nil {
+			delete(done, a.name)
+			continue
+		}
+		done[a.name] = plexAudioLangTag(lang)
 	}
-	return nil
+	return m.formatSignature(done), nil
+}
+
+// formatSignature writes an account → tag map in appliedSignature's form,
+// skipping alts it doesn't hold.
+func (m *multiPlexClient) formatSignature(done map[string]string) string {
+	var b strings.Builder
+	b.WriteString(done[""])
+	for _, a := range m.alts {
+		if tag, ok := done[a.name]; ok {
+			b.WriteString("|" + a.name + "=" + tag)
+		}
+	}
+	return b.String()
+}
+
+// parseLangSignature reads a cached signature ("ja-JP|alt=ja-JP|alt2=en-US")
+// into an account → tag map, with the primary account under "".
+func parseLangSignature(sig string) map[string]string {
+	done := map[string]string{}
+	if sig == "" {
+		return done
+	}
+	parts := strings.Split(sig, "|")
+	done[""] = parts[0]
+	for _, p := range parts[1:] {
+		if name, tag, ok := strings.Cut(p, "="); ok {
+			done[name] = tag
+		}
+	}
+	return done
 }
 func (m *multiPlexClient) RefreshLibraries() error { return m.primary.RefreshLibraries() }
 func (m *multiPlexClient) RefreshMetadata(ratingKey string) error {

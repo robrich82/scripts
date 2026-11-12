@@ -1684,6 +1684,62 @@ func TestRunLanguageOnly_OverwriteLanguage_ReappliesAlreadySet(t *testing.T) {
 	}
 }
 
+// A failed alt account is shown and left out of the record, so the next run
+// retries that account alone, leaving the primary (and any language chosen in
+// Plex since) untouched.
+func TestRunLanguageOnly_AltFailure_RetriesOnlyThatAlt(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+	tmdbClient := &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}
+	cache := cacheWith(t, map[string]string{"Show A": "111"})
+	run := func(cfg Config, primary, alt *fakePlexClient) string {
+		plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
+		p := NewProcessor(cfg, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
+		return captureStdout(t, p.RunLanguageOnly)
+	}
+
+	out := run(Config{}, &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{setLangErr: errors.New("alt failed")})
+	if !strings.Contains(out, "alt: alt failed") {
+		t.Errorf("alt failure not shown:\n%s", out)
+	}
+	if got, _ := rc.GetLanguageApplied("111"); got != "ja-JP" {
+		t.Errorf("recorded %q; want the primary only (ja-JP)", got)
+	}
+
+	primary, alt := &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{}
+	out = run(Config{}, primary, alt)
+	if len(primary.setLangCalls) != 0 || len(alt.setLangCalls) != 1 {
+		t.Errorf("retry calls: primary %d, alt %d; want 0 and 1", len(primary.setLangCalls), len(alt.setLangCalls))
+	}
+	if got, _ := rc.GetLanguageApplied("111"); got != "ja-JP|alt=ja-JP" {
+		t.Errorf("recorded %q; want ja-JP|alt=ja-JP", got)
+	}
+	if strings.Contains(out, "alt:") {
+		t.Errorf("alt failure still shown after it succeeded:\n%s", out)
+	}
+
+	// --overwrite-language sets every account again.
+	primary, alt = &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{}
+	run(Config{OverwriteLanguage: true}, primary, alt)
+	if len(primary.setLangCalls) != 1 || len(alt.setLangCalls) != 1 {
+		t.Errorf("--overwrite-language calls: primary %d, alt %d; want 1 each", len(primary.setLangCalls), len(alt.setLangCalls))
+	}
+}
+
+// Adding an alt account sets only that account.
+func TestRunLanguageOnly_NewAltAccount_SetsOnlyIt(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.SetShowRating("111", RatingM)
+	rc.SetLanguageApplied("111", "ja-JP")
+	primary, alt := &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{}
+	plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
+	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	captureStdout(t, p.RunLanguageOnly)
+	if len(primary.setLangCalls) != 0 || len(alt.setLangCalls) != 1 {
+		t.Errorf("calls: primary %d, alt %d; want 0 and 1", len(primary.setLangCalls), len(alt.setLangCalls))
+	}
+}
+
 func TestRunLanguageOnly_ShowNotInPlex_Skipped(t *testing.T) {
 	rc := emptyRatingCache(t)
 	rc.SetShowRating("111", RatingM)
