@@ -13,9 +13,10 @@ func main() {
 	overwriteStreams := flag.Bool("overwrite-streams", false, "Re-select Plex audio/subtitle streams even if already applied for a movie.")
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
+	ratingsOnly := flag.Bool("ratings-only", false, "Only write NZ content ratings to every file's tags (whatever its age) and to Plex; titles, dates, posters and streams are left alone.")
 	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, and the cached ratings, TMDB IDs and Plex state of movies no remaining file maps to, then exit.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
-	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached and Plex-pushed rating for a movie (title substring or TMDB ID), then exit. Run with --all in its folder afterwards to retag it.")
+	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached and Plex-pushed rating for a movie (title substring or TMDB ID), then exit. Run with --ratings-only in its folder afterwards to retag it.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every movie in the current directory, overriding any cached value, then exit.")
 	flag.Parse()
 
@@ -127,6 +128,20 @@ func main() {
 		} else {
 			fmt.Println("Plex libraries refreshed.")
 		}
+	}
+
+	if *ratingsOnly {
+		// A nil *realMKVTagger stored in the interface would be non-nil.
+		var tagger MKVTagger
+		if t := newRealMKVTagger(); t.Available() {
+			tagger = t
+		} else {
+			fmt.Fprintln(os.Stderr, "Warning: mkvpropedit or mkvextract not found in PATH. Tags will not be written (Plex ratings are still pushed).")
+		}
+		fmt.Printf("Updating NZ ratings in %s (all files)...\n", dir)
+		stats := walkRatingsOnly(dir, tmdb, tagger, timer, rr, cache)
+		fmt.Printf("\nDone. Updated: %d  Skipped: %d  Errors: %d\n", stats.Updated, stats.Skipped, stats.Errors)
+		return
 	}
 
 	if cutoff.IsZero() {

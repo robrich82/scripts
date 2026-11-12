@@ -303,6 +303,63 @@ func (r *MovieRatingResolver) plexRatingDefault(tmdbID, title, year string) NZRa
 	return rating
 }
 
+// settled reports whether ResolveMovieRating answers for tmdbID without a
+// lookup or a prompt.
+func (r *MovieRatingResolver) settled(tmdbID string) bool {
+	if _, ok := r.sessionPrompted[tmdbID]; ok {
+		return true
+	}
+	_, ok := r.cache.Get(tmdbID)
+	return ok && !r.overwrite
+}
+
+// lookupMovie returns the TMDB ID of the movie title (year), cached or found by
+// a TMDB search (prompting when the search finds nothing), and records it for
+// filePath. A search returns the details too; for a cached ID they are fetched
+// only when wantDetails(tmdbID) is true, and are nil otherwise. When ok is
+// false it has printed the file's result line, and result is that outcome.
+func lookupMovie(filePath, title, year string, tmdb TMDBMovieClient, rr *MovieRatingResolver, cache *MovieRatingCache, wantDetails func(tmdbID string) bool) (tmdbID string, details *MovieDetails, result FileResult, ok bool) {
+	basename := filepath.Base(filePath)
+	cacheKey := title + ":" + year
+	tmdbID = cache.GetTMDBID(cacheKey)
+	if tmdbID != "" {
+		cache.SetFileTMDBID(filePath, tmdbID) // before the fetch, so a TMDB error keeps the mapping
+		if !wantDetails(tmdbID) {
+			return tmdbID, nil, 0, true
+		}
+		d, err := tmdb.GetMovieDetails(tmdbID)
+		if err != nil {
+			fmt.Printf("[ERR]     %s: TMDB details: %v\n", basename, err)
+			return "", nil, ResultError, false
+		}
+		return tmdbID, &d, 0, true
+	}
+
+	tmdbID, d, err := tmdb.SearchAndFetch(title, year)
+	if err != nil {
+		fmt.Printf("[ERR]     %s: TMDB search: %v\n", basename, err)
+		return "", nil, ResultError, false
+	}
+	if tmdbID == "" {
+		// Automatic search failed - let the user supply the ID directly.
+		var found bool
+		tmdbID, d, found = rr.promptTMDBID(title, year, tmdb)
+		if !found {
+			fmt.Printf("[SKIP]    %s (not found on TMDB)\n", basename)
+			return "", nil, ResultSkipped, false
+		}
+	}
+	cache.SetTMDBID(cacheKey, tmdbID)
+	// Migrate any existing title:YEAR rating to the numeric TMDB ID key.
+	if r, ok := cache.Get(cacheKey); ok && r != RatingNone {
+		if _, ok2 := cache.Get(tmdbID); !ok2 {
+			cache.Set(tmdbID, r)
+		}
+	}
+	cache.SetFileTMDBID(filePath, tmdbID)
+	return tmdbID, &d, 0, true
+}
+
 // processFile looks up the movie on TMDB by filename, fetches full metadata,
 // and applies it to the MKV file (title, date header, tags, poster, timestamps).
 func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry) FileResult {
@@ -317,41 +374,11 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 
 	// 2. Resolve TMDB ID — cached or searched.
-	cacheKey := title + ":" + year
-	tmdbID := cache.GetTMDBID(cacheKey)
-	var details MovieDetails
-	var err error
-	if tmdbID == "" {
-		tmdbID, details, err = tmdb.SearchAndFetch(title, year)
-		if err != nil {
-			fmt.Printf("[ERR]     %s: TMDB search: %v\n", basename, err)
-			return ResultError
-		}
-		if tmdbID == "" {
-			// Automatic search failed - let the user supply the ID directly.
-			var ok bool
-			tmdbID, details, ok = rr.promptTMDBID(title, year, tmdb)
-			if !ok {
-				fmt.Printf("[SKIP]    %s (not found on TMDB)\n", basename)
-				return ResultSkipped
-			}
-		}
-		cache.SetTMDBID(cacheKey, tmdbID)
-		// Migrate any existing title:YEAR rating to the numeric TMDB ID key.
-		if r, ok := cache.Get(cacheKey); ok && r != RatingNone {
-			if _, ok2 := cache.Get(tmdbID); !ok2 {
-				cache.Set(tmdbID, r)
-			}
-		}
-		cache.SetFileTMDBID(filePath, tmdbID)
-	} else {
-		cache.SetFileTMDBID(filePath, tmdbID) // before the fetch, so a TMDB error keeps the mapping
-		details, err = tmdb.GetMovieDetails(tmdbID)
-		if err != nil {
-			fmt.Printf("[ERR]     %s: TMDB details: %v\n", basename, err)
-			return ResultError
-		}
+	tmdbID, fetched, result, ok := lookupMovie(filePath, title, year, tmdb, rr, cache, func(string) bool { return true })
+	if !ok {
+		return result
 	}
+	details := *fetched
 
 	// 3. Parse release date.
 	if details.ReleaseDate == "" {
@@ -434,6 +461,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			fmt.Printf("  [!] Writing tags failed: %v\n", err)
 		} else {
 			mkvRan = true
+			cache.MarkApplied(filePath, rating) // the merge drops an old rating when this is RatingNone
 		}
 	}
 
@@ -617,10 +645,7 @@ func buildMovieTagXML(overview, tmdbID, dateStr string, rating NZRating, deband 
 		)
 	}
 	if rating != RatingNone {
-		elements = append(elements, fmt.Sprintf(
-			"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
-				"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>",
-			rating))
+		elements = append(elements, ratingElement(rating))
 	}
 	if deband {
 		elements = append(elements,
@@ -743,6 +768,22 @@ func releaseYear(date string) string {
 
 // walkAndProcess walks root for .mkv files and processes each one.
 func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache, manualData map[string]MovieManualEntry, cutoff time.Time) Stats {
+	return walkMKVs(root, cache, cutoff, func(path string) FileResult {
+		return processFile(path, tmdb, applier, timer, rr, cache, manualData)
+	})
+}
+
+// walkRatingsOnly walks root for .mkv files, whatever their age, and processes
+// each one with processRatingOnly. rr must not be nil.
+func walkRatingsOnly(root string, tmdb TMDBMovieClient, tagger MKVTagger, timer FileTimer, rr *MovieRatingResolver, cache *MovieRatingCache) Stats {
+	return walkMKVs(root, cache, time.Time{}, func(path string) FileResult {
+		return processRatingOnly(path, tmdb, tagger, timer, rr, cache)
+	})
+}
+
+// walkMKVs runs process on each .mkv file under root modified on or after
+// cutoff (every file when it is zero), saving the cache after each one.
+func walkMKVs(root string, cache *MovieRatingCache, cutoff time.Time, process func(path string) FileResult) Stats {
 	var stats Stats
 	var saveErr error // the last save's error; only the first in a run of failures is printed
 	lastSaved := ""   // the file after which the cache was last saved
@@ -765,7 +806,7 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 				return nil
 			}
 		}
-		switch processFile(path, tmdb, applier, timer, rr, cache, manualData) {
+		switch process(path) {
 		case ResultUpdated:
 			stats.Updated++
 		case ResultSkipped:
@@ -814,44 +855,57 @@ func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer F
 		fmt.Println("  [!] mkvpropedit or mkvextract not found in PATH")
 		return false
 	}
+	// A failed timestamp restore is printed but still counts as updated (#164).
+	_, ok := rewriteTags(filePath, tagger, timer, func(xml string) (string, error) {
+		return updateDebandInXML(xml, deband)
+	})
+	return ok
+}
 
+// rewriteTags passes filePath's tags through update, writes the result back
+// and restores the file's modified time, which it also sets as the creation
+// time. ok is false when the tags weren't written; failed names the timestamps
+// ("mtime", "ctime") that couldn't be restored. Errors are printed.
+func rewriteTags(filePath string, tagger MKVTagger, timer FileTimer, update func(string) (string, error)) (failed []string, ok bool) {
 	origStat, err := os.Stat(filePath)
 	if err != nil {
 		fmt.Printf("  [!] Cannot read timestamps to restore, not tagging: %v\n", err)
-		return false
+		return nil, false
 	}
 
 	currentXML, err := tagger.ExtractTags(filePath)
 	if err != nil {
 		fmt.Printf("  [!] Failed to extract tags: %v\n", err)
-		return false
+		return nil, false
 	}
 
-	updatedXML, err := updateDebandInXML(currentXML, deband)
+	updatedXML, err := update(currentXML)
 	if err != nil {
 		fmt.Printf("  [!] Failed to update tags: %v\n", err)
-		return false
+		return nil, false
 	}
 
 	tagsPath, err := tagger.WriteTempTags(updatedXML)
 	if err != nil {
 		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
-		return false
+		return nil, false
 	}
 	defer tagger.Cleanup(tagsPath)
 
 	if err := tagger.ApplyTags(filePath, tagsPath); err != nil {
 		fmt.Printf("  [!] mkvpropedit failed: %v\n", err)
-		return false
+		return nil, false
 	}
 
 	if err := timer.SetTimes(filePath, origStat.ModTime()); err != nil {
 		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		failed = append(failed, "mtime")
 	}
 	if err := timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
 		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
+		failed = append(failed, "ctime")
 	}
-	return true
+	return failed, true
 }
 
 // runDebandOnly scans dir and updates only the DEBAND MKV tag for files that

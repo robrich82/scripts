@@ -20,7 +20,7 @@ type MovieRatingCache struct {
 
 type movieRatingCacheData struct {
 	Movies         map[string]string `json:"movies"`
-	Applied        map[string]string `json:"applied,omitempty"`         // absFilePath → rating written; unused until --ratings-only (#133)
+	Applied        map[string]string `json:"applied,omitempty"`         // absFilePath → rating in its tags, so --ratings-only skips it
 	TMDBIDs        map[string]string `json:"tmdb_ids,omitempty"`        // "title:YEAR" → tmdbID
 	LegacyMeta     map[string]string `json:"meta_applied,omitempty"`    // read on load to back-fill Files, never saved
 	PlexRatings    map[string]string `json:"plex_ratings,omitempty"`    // tmdbID → rating last pushed to Plex
@@ -123,6 +123,21 @@ func (c *MovieRatingCache) SetFileTMDBID(filePath, tmdbID string) {
 	if tmdbID != "" {
 		c.data.Files[filePath] = tmdbID
 	}
+}
+
+// IsApplied reports whether filePath's tags already hold rating r.
+func (c *MovieRatingCache) IsApplied(filePath string, r NZRating) bool {
+	return r != RatingNone && NZRating(c.data.Applied[filePath]) == r
+}
+
+// MarkApplied records the rating written to filePath's tags; RatingNone means
+// the tags have none.
+func (c *MovieRatingCache) MarkApplied(filePath string, r NZRating) {
+	if r == RatingNone {
+		delete(c.data.Applied, filePath)
+		return
+	}
+	c.data.Applied[filePath] = string(r)
 }
 
 // GetPlexRating returns the rating that was last successfully pushed to Plex

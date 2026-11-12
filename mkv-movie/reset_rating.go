@@ -45,5 +45,5 @@ func runResetRating(query string) {
 		fmt.Fprintf(os.Stderr, "Error saving cache: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Done. Rating cleared. Run 'mkv-movie --all' in the movie's folder to fetch it again, retag the file and push it to Plex.")
+	fmt.Println("Done. Rating cleared. Run 'mkv-movie --ratings-only' in the movie's folder to fetch it again, retag the file and push it to Plex.")
 }

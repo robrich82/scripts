@@ -133,5 +133,5 @@ func runSetRating(ratingStr, dir string, prompter func(string) (string, error)) 
 	}
 
 	fmt.Printf("Done. %d movie(s) (%d file(s)) set to %s.\n", len(plans), filesReset, rating)
-	fmt.Println("Run 'mkv-movie --all' in this folder to write the tags and push to Plex.")
+	fmt.Println("Run 'mkv-movie --ratings-only' in this folder to write the tags and push to Plex.")
 }
