@@ -371,14 +371,14 @@ Flags:
 | `--overwrite-ratings` | Re-fetch all NZ ratings, ignoring cached values. A source rating that differs from the cached one is shown for confirmation; a movie no source rates keeps its cached rating |
 | `--overwrite-streams` | Re-select Plex audio/subtitle streams even if already applied for a movie |
 | `--clean` | Remove cache entries for movie files that no longer exist on disk, and the ratings, TMDB IDs and Plex state of movies no remaining file maps to (and lists them), then exit. Entries on an offline drive are kept |
-| `--reset-rating <query>` | Clear the cached NZ rating for a movie and reset its applied state so the next run re-fetches and re-applies it. `query` is a title substring or TMDB ID |
+| `--reset-rating <query>` | Clear the cached NZ rating and the rating last pushed to Plex for a movie, then exit. A tagged file is outside the default window, so run `mkv-movie --all` in its folder to fetch the rating again, retag it and push it. `query` is a title substring or TMDB ID |
 | `--set-rating <RATING>` | Set `RATING` as the NZ rating for **every** movie in the current directory, overriding any cached value, then exit (see below) |
 | `--deband-only` | Update only the `DEBAND` MKV tag for movies configured in `manual_data.json`; preserves all other tags and timestamps |
 
 Output:
 
 ```
-Updated: 8  OK: 42  Skipped: 3  Errors: 0
+Done. Updated: 8  OK: 0  Skipped: 3  Skipped (old): 412  Errors: 0
 ```
 
 ### Bulk rating override (`--set-rating`)
@@ -395,9 +395,9 @@ movies are listed with their current rating, and nothing is written until you
 confirm. Files with no cached TMDB ID (never processed) are listed as skipped —
 run `mkv-movie` normally on them first.
 
-Confirming replaces the cached rating, clears the applied state for those files,
-and clears the recorded Plex rating. No TMDB, Plex, or network calls are made:
-the next `mkv-movie --all` writes the new `LAW_RATING` tag and pushes it to Plex.
+Confirming replaces the cached rating and clears the recorded Plex rating. No
+TMDB, Plex, or network calls are made: the next `mkv-movie --all` in the same
+directory writes the new `LAW_RATING` tag and pushes it to Plex.
 
 ### Dependencies
 

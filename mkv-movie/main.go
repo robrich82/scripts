@@ -15,7 +15,7 @@ func main() {
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
 	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, and the cached ratings, TMDB IDs and Plex state of movies no remaining file maps to, then exit.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
-	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a movie and reset its applied state (title substring or TMDB ID), then exit.")
+	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached and Plex-pushed rating for a movie (title substring or TMDB ID), then exit. Run with --all in its folder afterwards to retag it.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every movie in the current directory, overriding any cached value, then exit.")
 	flag.Parse()
 
@@ -99,7 +99,7 @@ func main() {
 	if a, err := newRealMKVApplier(); err == nil {
 		applier = a
 	} else {
-		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated; files not yet tagged are skipped (Plex updates still run).\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated and files are skipped, timestamps included (Plex updates still run).\n", err)
 	}
 
 	plexURL := os.Getenv("PLEX_URL")

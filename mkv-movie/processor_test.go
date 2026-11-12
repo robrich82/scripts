@@ -173,9 +173,7 @@ func TestProcessFile_PreviouslyTagged_RetaggedInWindow(t *testing.T) {
 	tmdb := &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}
 	applier := &fakeApplier{}
 	timer := &fakeFileTimer{}
-	cache := makeCache(t)
-	cache.SetTMDBID("Avengers Endgame:2019", "12345")
-	cache.SetFileTMDBID(path, "12345")
+	cache := legacyTaggedCache(t, path) // tagged by a version that recorded meta_applied
 
 	result := processFile(path, tmdb, applier, timer, nil, cache, nil)
 	if result != ResultUpdated {
@@ -189,21 +187,37 @@ func TestProcessFile_PreviouslyTagged_RetaggedInWindow(t *testing.T) {
 	}
 }
 
-// Without MKVToolNix, a file whose timestamps are already right is left as is.
-func TestProcessFile_NoApplier_TimestampsCurrent_OK(t *testing.T) {
-	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
-	target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
-	if err := os.Chtimes(path, target, target); err != nil {
-		t.Fatal(err)
-	}
-	timer := &fakeFileTimer{}
+// Without MKVToolNix a file is skipped and never backdated, even one an earlier
+// run tagged, so it stays in the --cutoff-date window until it can be tagged.
+func TestProcessFile_NoApplier_TaggedFileNotBackdated(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		mtimeCurrent bool
+	}{
+		{"timestamps wrong", false},
+		{"timestamps current", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+			if tc.mtimeCurrent {
+				target := time.Date(2019, 4, 26, 0, 0, 0, 0, time.Local)
+				if err := os.Chtimes(path, target, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			timer := &fakeFileTimer{ctimeNeedsUpdate: !tc.mtimeCurrent}
 
-	result := processFile(path, &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}, nil, timer, nil, makeCache(t), nil)
-	if result != ResultOK {
-		t.Errorf("got %v, want ResultOK", result)
-	}
-	if len(timer.setTimesCalls) != 0 {
-		t.Errorf("SetTimes calls = %v, want none", timer.setTimesCalls)
+			var result FileResult
+			out := captureStdout(t, func() {
+				result = processFile(path, &fakeTMDBMovieClient{tmdbID: "12345", details: testDetails()}, nil, timer, nil, legacyTaggedCache(t, path), nil)
+			})
+			if result != ResultSkipped || !strings.Contains(out, "[SKIP]") {
+				t.Errorf("got %v, want ResultSkipped:\n%s", result, out)
+			}
+			if len(timer.setTimesCalls) != 0 || len(timer.setCreationTimeCalls) != 0 {
+				t.Errorf("timestamps changed with no applier: mtime %v, ctime %v", timer.setTimesCalls, timer.setCreationTimeCalls)
+			}
+		})
 	}
 }
 
@@ -401,6 +415,8 @@ type fakePlexMovieClient struct {
 	ratingsByKey     map[string]NZRating // overrides contentRating when set
 	contentRatingErr error
 	titleLookups     [][2]string // (title, year) of each FindMovieByTitle call
+	ratingSets       int         // SetContentRating calls
+	streamSets       int         // SetMovieStreams calls
 }
 
 func (f *fakePlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
@@ -425,8 +441,12 @@ func (f *fakePlexMovieClient) GetContentRating(rk string) (NZRating, error) {
 	return f.contentRating, f.contentRatingErr
 }
 
-func (f *fakePlexMovieClient) SetContentRating(_ string, _ NZRating) error { return nil }
+func (f *fakePlexMovieClient) SetContentRating(_ string, _ NZRating) error {
+	f.ratingSets++
+	return nil
+}
 func (f *fakePlexMovieClient) SetMovieStreams(_ string, _ AudioLangs) (bool, bool, error) {
+	f.streamSets++
 	return false, false, nil
 }
 func (f *fakePlexMovieClient) RefreshLibraries() error { return nil }

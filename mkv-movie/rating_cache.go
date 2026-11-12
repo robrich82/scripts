@@ -9,10 +9,10 @@ import (
 	"strings"
 )
 
-// MovieRatingCache persists NZ content ratings for movies across runs so that
-// external sources and user prompts are not repeated unnecessarily.
-// The on-disk format is: {"movies":{"tmdbID":"M"}}
-// Keys are TMDB IDs when available, or "title:YEAR" as a fallback.
+// MovieRatingCache persists NZ content ratings across runs, with the TMDB IDs,
+// file-to-movie mappings and Plex push state that save repeating lookups and
+// prompts. "movies" is keyed by TMDB ID, or "title:YEAR" as a fallback; see
+// movieRatingCacheData for the other sections.
 type MovieRatingCache struct {
 	path string
 	data movieRatingCacheData
@@ -20,7 +20,7 @@ type MovieRatingCache struct {
 
 type movieRatingCacheData struct {
 	Movies         map[string]string `json:"movies"`
-	Applied        map[string]string `json:"applied,omitempty"`         // absFilePath → rating already written
+	Applied        map[string]string `json:"applied,omitempty"`         // absFilePath → rating written; unused until --ratings-only (#133)
 	TMDBIDs        map[string]string `json:"tmdb_ids,omitempty"`        // "title:YEAR" → tmdbID
 	LegacyMeta     map[string]string `json:"meta_applied,omitempty"`    // read on load to back-fill Files, never saved
 	PlexRatings    map[string]string `json:"plex_ratings,omitempty"`    // tmdbID → rating last pushed to Plex
@@ -265,8 +265,8 @@ func (c *MovieRatingCache) FindTMDBIDByQuery(query string) [][2]string {
 	return matches
 }
 
-// ResetForTMDBID clears the cached rating, Plex rating, and all applied-state
-// entries for files identified by the given TMDB ID. Returns the reset file paths.
+// ResetForTMDBID clears the cached rating, the Plex-pushed rating and the
+// applied entries of the movie tmdbID's files. Returns those files' paths.
 func (c *MovieRatingCache) ResetForTMDBID(tmdbID string) []string {
 	delete(c.data.Movies, tmdbID)
 	delete(c.data.PlexRatings, tmdbID)

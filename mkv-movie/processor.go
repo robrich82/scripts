@@ -376,11 +376,11 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 	mtimeNeedsUpdate := math.Abs(float64(info.ModTime().Unix()-ts)) > 1
 	ctimeNeedsUpdate := timer.CreationTimeNeedsUpdate(filePath, ts)
-	// Every file in the --cutoff-date/--all window is retagged, as in mkv-tvshow.
-	needsApply := applier != nil
+	// Every file in the --cutoff-date/--all window is retagged when MKVToolNix is
+	// available (applier != nil), as in mkv-tvshow.
 
-	// Determine whether the Plex rating needs updating independently of needsApply,
-	// so that a manually corrected cache entry is always pushed to Plex.
+	// The Plex rating is pushed when it differs from the last one pushed, so a
+	// manually corrected cache entry reaches Plex.
 	plexRatingNeedsUpdate := func(rating NZRating) bool {
 		if rr == nil || rr.plex == nil || rating == RatingNone {
 			return false
@@ -416,18 +416,13 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		rating = rr.ResolveMovieRating(tmdbID, details.Title, releaseYear(details.ReleaseDate))
 	}
 
-	if !needsApply && !mtimeNeedsUpdate && !ctimeNeedsUpdate && !plexRatingNeedsUpdate(rating) && !plexStreamsNeedSet() {
-		fmt.Printf("[OK]      %s (no changes needed)\n", basename)
-		return ResultOK
-	}
-
-	// 6. Build tags XML and download poster (only when applying metadata).
+	// 6. Build tags XML and download poster (only when MKVToolNix can write them).
 	var deband bool
 	if entry.Deband != nil {
 		deband = *entry.Deband
 	}
 	var tagsPath, posterPath string
-	if needsApply && applier != nil {
+	if applier != nil {
 		xml := buildMovieTagXML(details.Overview, tmdbID, details.ReleaseDate, rating, deband)
 		if xml != "" {
 			tagsPath, err = writeTempTagFile(xml)
@@ -445,7 +440,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 
 	// 7. Apply metadata via mkvpropedit.
 	mkvRan := false
-	if needsApply && applier != nil {
+	if applier != nil {
 		if err := applier.Apply(filePath, details.Title, details.ReleaseDate, tagsPath, posterPath); err != nil {
 			fmt.Printf("[ERR]     %s: apply metadata: %v\n", basename, err)
 		} else {
@@ -454,7 +449,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 
 	// Push rating and stream selection to Plex when either needs updating.
-	// Both are independent of needsApply so corrected cache entries are always propagated.
+	// Both are gated on what was last pushed, so corrected cache entries are propagated.
 	var langSet string
 	var langAltSuffix string
 	ratingPushed := false
@@ -465,8 +460,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		}
 		if errors.Is(plexErr, ErrPlexMovieNotFound) {
 			fmt.Printf("  [!] Not in Plex library – rating and streams not pushed\n")
-			// Cache what we would have set so subsequent runs skip retrying.
-			// --reset-rating (rating) or --overwrite-streams retries after adding the movie to Plex.
+			// Cache what we would have set so subsequent runs skip retrying. After adding
+			// the movie to Plex, retry with --all (or a --cutoff-date that covers the file)
+			// plus --set-rating <its rating> in its folder, or --overwrite-streams.
 			if rating != RatingNone {
 				cache.SetPlexRating(tmdbID, rating)
 			}
@@ -735,9 +731,9 @@ func walkAndProcess(root string, tmdb TMDBMovieClient, applier MKVApplier, timer
 		if err := cache.Save(); err == nil {
 			fmt.Println("[i] Rating cache saved.")
 		} else if lastSaved == "" {
-			fmt.Printf("[!] The rating cache was never saved; this run's ratings, TMDB IDs and applied state are lost: %v\n", err)
+			fmt.Printf("[!] The rating cache was never saved; this run's ratings, TMDB IDs and Plex state are lost: %v\n", err)
 		} else {
-			fmt.Printf("[!] The rating cache was last saved after %s; later ratings, TMDB IDs and applied state are lost: %v\n", lastSaved, err)
+			fmt.Printf("[!] The rating cache was last saved after %s; later ratings, TMDB IDs and Plex state are lost: %v\n", lastSaved, err)
 		}
 	}
 	return stats
