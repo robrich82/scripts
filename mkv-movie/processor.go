@@ -608,7 +608,7 @@ func writeTempTagFile(xml string) (string, error) {
 }
 
 // downloadPoster fetches a poster image to a temp file and returns its path.
-// A non-200 status or an empty body is an error.
+// A non-200 status, an empty body or a body that isn't an image is an error.
 func downloadPoster(posterURL string) (string, error) {
 	client := &http.Client{Timeout: httpTimeout}
 	resp, err := client.Get(posterURL)
@@ -619,22 +619,40 @@ func downloadPoster(posterURL string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("unexpected status %s", resp.Status)
 	}
+	body, err := sniffImage(resp.Body)
+	if err != nil {
+		return "", err
+	}
 
 	f, err := os.CreateTemp("", "mkv-movie-poster-*.jpg")
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	n, err := io.Copy(f, resp.Body)
-	if err == nil && n == 0 {
-		err = errors.New("empty response body")
-	}
-	if err != nil {
+	if _, err := io.Copy(f, body); err != nil {
 		f.Close()
 		os.Remove(f.Name())
 		return "", err
 	}
 	return f.Name(), nil
+}
+
+// sniffImage checks that body starts like an image, so an HTML page served with
+// 200 (a captive portal, a CDN error page) isn't attached as the cover. It
+// returns a reader that still yields the whole body.
+func sniffImage(body io.Reader) (io.Reader, error) {
+	br := bufio.NewReaderSize(body, 512)
+	head, err := br.Peek(512)
+	if len(head) == 0 {
+		if err == nil || errors.Is(err, io.EOF) {
+			return nil, errors.New("empty response body")
+		}
+		return nil, err
+	}
+	if ct := http.DetectContentType(head); !strings.HasPrefix(ct, "image/") {
+		return nil, fmt.Errorf("response is %s, not an image", ct)
+	}
+	return br, nil
 }
 
 // xmlEscape replaces XML special characters so they are safe inside tag values.

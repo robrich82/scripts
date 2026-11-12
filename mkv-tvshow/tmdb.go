@@ -98,6 +98,10 @@ func newHTTPTMDBClient(apiKey, baseURL string) *httpTMDBClient {
 	}
 }
 
+// errTMDBNotFound wraps a 404: TMDB has no such show or season, as opposed to
+// a request that failed.
+var errTMDBNotFound = errors.New("TMDB request failed: status 404 Not Found")
+
 // getTMDB performs a GET and rejects non-2xx responses. TMDB answers errors
 // (invalid api_key, rate-limit) with a JSON body that would otherwise decode
 // into an empty struct — indistinguishable from a genuine "no data" result, and
@@ -110,6 +114,9 @@ func (c *httpTMDBClient) getTMDB(u string) (*http.Response, error) {
 	if resp.StatusCode/100 != 2 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
 		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("%w: %s", errTMDBNotFound, string(snippet))
+		}
 		return nil, fmt.Errorf("TMDB request failed: status %s: %s", resp.Status, string(snippet))
 	}
 	return resp, nil
