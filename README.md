@@ -402,7 +402,7 @@ directory writes the new `LAW_RATING` tag and pushes it to Plex.
 ### Dependencies
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
-- `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files are skipped, timestamps included, so they stay in the `--cutoff-date` window; Plex updates still run)
+- `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files are skipped with their timestamps untouched, so they stay in the `--cutoff-date` window; Plex updates still run, and a failed one makes the file an error)
 - `PLEX_URL` / `PLEX_TOKEN` — optional; used to read/write NZ ratings in Plex and set preferred audio language
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; stream selection is applied for these accounts too
 
@@ -412,7 +412,7 @@ Stream selection is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_T
 
 The cached "already applied" value records the language given to every configured account (`ja|alt=ja|alt2=en`), so adding a token re-applies on the next run rather than being skipped because the language itself did not change.
 
-A file whose tags couldn't be written counts as an error and keeps its timestamps, so it stays in the `--cutoff-date` window and the next run retries it. A failed poster download, Plex lookup or push, or timestamp change also counts as an error, named on the result line as `(failed: …)`. A movie Plex doesn't have yet (its library refresh is asynchronous) isn't recorded as pushed, so a later run that reaches the file pushes it.
+A file whose tags couldn't be written counts as an error and keeps its timestamps, so it stays in the `--cutoff-date` window and a later run that still covers it retries. A failed poster download, Plex lookup or push, or timestamp change also counts as an error, named on the result line as `(failed: …)`; the file is backdated because its tags are right, so retry with `mkv-movie --all` in its folder. A movie with no audio track in its Plex language fails its stream push on each run that reaches it until `language` in `manual_data.json` names one it has. A movie Plex doesn't have yet (its library refresh is asynchronous) isn't recorded as pushed; once Plex has it, `mkv-movie --all` in its folder pushes it.
 
 > **Note:** Filesystem timestamp modification is Windows-only. On other
 > platforms the internal header is still updated if `mkvpropedit` and `mkvextract` are available.

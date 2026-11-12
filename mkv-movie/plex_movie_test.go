@@ -224,6 +224,27 @@ func TestHTTPPlexMovieClient_SetMovieStreams_SkipsAlreadySelected(t *testing.T) 
 	}
 }
 
+func TestHTTPPlexMovieClient_SetMovieStreams_NoAudioInLanguage(t *testing.T) {
+	var putCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			putCount++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, streamsMetaJSON("ja", false, false))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+	_, _, err := c.SetMovieStreams("42", AudioLangs{Default: "ko"})
+	if !errors.Is(err, ErrPlexNoAudioStream) {
+		t.Errorf("err = %v; want ErrPlexNoAudioStream", err)
+	}
+	if putCount != 0 {
+		t.Errorf("expected 0 PUT requests, got %d", putCount)
+	}
+}
+
 func plexMetadataJSON(contentRating string) string {
 	return `{"MediaContainer":{"Metadata":[{"contentRating":"` + contentRating + `"}]}}`
 }

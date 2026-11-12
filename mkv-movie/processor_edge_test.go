@@ -227,7 +227,9 @@ func TestProcessFile_CachedTMDBID_SkipsSearch(t *testing.T) {
 	}
 }
 
-func TestProcessFile_CtimeNeedsUpdate_SetsCreationTime(t *testing.T) {
+// Retagging moves the timestamps, so they are always restored, even when the
+// file's mtime already matched the release date.
+func TestProcessFile_Updated_RestoresTimestamps(t *testing.T) {
 	path := makeTempMKVNamed(t, "Avengers.2012.mkv")
 	target := time.Date(2012, 5, 4, 0, 0, 0, 0, time.Local)
 	if err := os.Chtimes(path, target, target); err != nil {
@@ -241,17 +243,16 @@ func TestProcessFile_CtimeNeedsUpdate_SetsCreationTime(t *testing.T) {
 		ReleaseDate: "2012-05-04",
 	}}
 	applier := &fakeApplier{}
-	// Simulate a timer where ctime is out of date.
-	timer := &fakeFileTimer{ctimeNeedsUpdate: true}
+	timer := &fakeFileTimer{}
 	cache := makeCache(t)
 	cache.SetTMDBID("Avengers:2012", "24428")
 
 	result := processFile(path, tmdb, applier, timer, nil, cache, nil)
 	if result != ResultUpdated {
-		t.Errorf("got %v, want ResultUpdated (ctime needs fixing)", result)
+		t.Errorf("got %v, want ResultUpdated", result)
 	}
-	if len(timer.setCreationTimeCalls) == 0 {
-		t.Error("SetCreationTime should be called when ctimeNeedsUpdate=true")
+	if len(timer.setTimesCalls) != 1 || len(timer.setCreationTimeCalls) != 1 {
+		t.Errorf("mtime %v, ctime %v; want both restored once", timer.setTimesCalls, timer.setCreationTimeCalls)
 	}
 }
 

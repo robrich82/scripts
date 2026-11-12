@@ -16,6 +16,10 @@ import (
 // exists in any Plex library section.
 var ErrPlexMovieNotFound = errors.New("plex: movie not found")
 
+// ErrPlexNoAudioStream is returned by SetMovieStreams when the movie has no
+// audio stream in the requested language.
+var ErrPlexNoAudioStream = errors.New("plex: no audio stream in that language")
+
 // flexBool unmarshals JSON booleans (true/false) or integers (0/1) into a bool.
 // Plex API versions differ: some return selected/forced as int, others as bool.
 type flexBool bool
@@ -431,7 +435,7 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey string, langs AudioLangs
 	}
 	if !audioOK {
 		if audioID == 0 {
-			return false, false, fmt.Errorf("plex: no %s audio stream in %s", audioLangTag, ratingKey)
+			return false, false, fmt.Errorf("%w: %s, key %s", ErrPlexNoAudioStream, audioLangTag, ratingKey)
 		}
 		if err := c.plexSetStream(part.ID, "audioStreamID", audioID); err != nil {
 			return false, false, fmt.Errorf("plex: set audio stream: %w", err)

@@ -366,7 +366,6 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 
 	// 4. Every file in the --cutoff-date/--all window is retagged when MKVToolNix
 	// is available (applier != nil), and its timestamps restored, as in mkv-tvshow.
-
 	// The Plex rating is pushed when it differs from the last one pushed, so a
 	// manually corrected cache entry reaches Plex.
 	plexRatingNeedsUpdate := func(rating NZRating) bool {
@@ -398,7 +397,7 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 		return !ok || applied != langSig || rr.overwriteStreams
 	}
 
-	// 5. Resolve NZ rating early so we can include it in the needs-update check.
+	// 5. Resolve the NZ rating: it goes into the tags and to Plex.
 	var rating NZRating
 	if rr != nil {
 		rating = rr.ResolveMovieRating(tmdbID, details.Title, releaseYear(details.ReleaseDate))
@@ -449,9 +448,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, releaseYear(details.ReleaseDate))
 		}
 		if errors.Is(plexErr, ErrPlexMovieNotFound) {
-			// Nothing is recorded as pushed, so the next run that reaches the file
-			// pushes once Plex has picked the movie up.
-			fmt.Printf("  [!] Not in Plex library – rating and streams not pushed\n")
+			// Nothing is recorded as pushed. The file is still backdated once
+			// tagged, so only a later --all (or older --cutoff-date) run pushes.
+			fmt.Printf("  [!] Not in Plex library – rating and streams not pushed; rerun with --all once Plex has it\n")
 		} else if plexErr == nil {
 			if plexRatingNeedsUpdate(rating) {
 				if err := rr.plex.SetContentRating(rk, rating); err != nil {
@@ -466,6 +465,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 				audioSet, subtitleSet, err := rr.plex.SetMovieStreams(rk, langs)
 				if err != nil {
 					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, langSig, err)
+					if errors.Is(err, ErrPlexNoAudioStream) {
+						fmt.Printf("  [i] Set \"language\" for %q in manual_data.json to a language the file has\n", stem)
+					}
 					failed = append(failed, "Plex streams")
 				} else {
 					cache.SetStreamsApplied(tmdbID, langSig)
