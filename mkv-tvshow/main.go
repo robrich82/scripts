@@ -49,6 +49,40 @@ func main() {
 		return
 	}
 
+	mediaDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	cfgDir, err := configDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving config dir: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating config dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	mkv := newRealMKVRunner()
+	timer := &win32FileTimer{}
+
+	// --deband-only mode: update the DEBAND tag for configured files only. No TMDB calls.
+	if *debandOnlyMode {
+		debandManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
+			os.Exit(1)
+		}
+		cfg := Config{MediaDir: mediaDir}
+		processor := NewProcessor(cfg, nil, debandManualData, nil, mkv, nil, timer, nil, nil, nil, nil, nil)
+		fmt.Printf("Updating DEBAND tags in %s...\n", mediaDir)
+		stats := processor.RunDebandOnly()
+		fmt.Printf("\nDone. Updated: %d  Failed: %d\n", stats.Success, stats.Failed)
+		return
+	}
+
 	apiKey := os.Getenv("TMDB_API_KEY")
 	if apiKey == "" {
 		fmt.Fprintln(os.Stderr, "Error: TMDB_API_KEY environment variable not set")
@@ -74,22 +108,6 @@ func main() {
 	}
 
 	prompter := newStdinPrompter()
-
-	mediaDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	cfgDir, err := configDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error resolving config dir: %v\n", err)
-		os.Exit(1)
-	}
-	if err := os.MkdirAll(cfgDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating config dir: %v\n", err)
-		os.Exit(1)
-	}
 
 	cache, err := LoadCache(filepath.Join(cfgDir, "show_cache.json"))
 	if err != nil {
@@ -121,9 +139,6 @@ func main() {
 		return
 	}
 
-	mkv := newRealMKVRunner()
-	timer := &win32FileTimer{}
-
 	titleCache, err := LoadTitleCache(filepath.Join(cfgDir, "title_cache.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading title_cache.json: %v\n", err)
@@ -149,21 +164,6 @@ func main() {
 		cfg := Config{OverwriteLanguage: *overwriteLanguage}
 		processor := NewProcessor(cfg, cache, langManualData, tmdb, nil, nil, nil, nil, ratingCache, nil, plexClient, nil)
 		processor.RunLanguageOnly()
-		return
-	}
-
-	// --deband-only mode: update the DEBAND tag for configured files only.
-	if *debandOnlyMode {
-		debandManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
-			os.Exit(1)
-		}
-		cfg := Config{MediaDir: mediaDir}
-		processor := NewProcessor(cfg, nil, debandManualData, nil, mkv, nil, timer, nil, nil, nil, nil, nil)
-		fmt.Printf("Updating DEBAND tags in %s...\n", mediaDir)
-		stats := processor.RunDebandOnly()
-		fmt.Printf("\nDone. Updated: %d  Failed: %d\n", stats.Success, stats.Failed)
 		return
 	}
 

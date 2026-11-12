@@ -181,7 +181,7 @@ func TestApplyFullTitle_RestoresTimestamps(t *testing.T) {
 	if err := os.Chtimes(path, want, want); err != nil {
 		t.Fatal(err)
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done."}
 	timer := &captureFileTimer{}
 	tc := NewTitleChecker(Config{}, nil, nil, nil, nil, runner, newNullTitleCache(t), timer)
 
@@ -200,7 +200,7 @@ func TestApplyFullTitle_RestoresTimestamps(t *testing.T) {
 
 func TestApplyFullTitle_StatError_DoesNotSetTitle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.mkv")
-	runner := &fakeMKVRunner{avail: true, applyResult: mkvpropeditSuccessMsg}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done."}
 	tc := NewTitleChecker(Config{}, nil, nil, nil, nil, runner, newNullTitleCache(t), &captureFileTimer{})
 
 	out := captureStdout(t, func() { tc.applyFullTitle(path, "Full Title") })
