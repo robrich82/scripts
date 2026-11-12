@@ -467,14 +467,18 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 				var audioSet, subtitleSet bool
 				var err error
 				record := langSig
+				applied, _ := cache.GetStreamsApplied(tmdbID)
+				if rr.overwriteStreams {
+					applied = ""
+				}
 				multi, isMulti := rr.plex.(multiAccountReporter)
-				if isMulti {
-					applied, _ := cache.GetStreamsApplied(tmdbID)
-					if rr.overwriteStreams {
-						applied = ""
-					}
+				switch {
+				case isMulti:
 					audioSet, subtitleSet, record, err = multi.setStreamsPending(rk, langs, applied)
-				} else {
+				case parseLangSignature(applied)[""] == langs.Default:
+					// Only alt entries differ (their tokens were removed): the
+					// primary already has its streams, so it isn't set again.
+				default:
 					audioSet, subtitleSet, err = rr.plex.SetMovieStreams(rk, langs)
 				}
 				if err != nil {

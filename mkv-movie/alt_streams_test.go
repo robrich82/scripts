@@ -180,6 +180,69 @@ func TestProcessFile_NewAltAccount_SetsOnlyIt(t *testing.T) {
 	}
 }
 
+// Removing every alt token doesn't set the primary's streams again, which would
+// undo a selection made in Plex since; only the record shrinks.
+func TestProcessFile_AltTokensRemoved_PrimaryNotSet(t *testing.T) {
+	path := makeTempMKVNamed(t, "Avengers.Endgame.2019.mkv")
+	cache := makeCache(t)
+	cache.SetStreamsApplied("12345", "en|alt=en")
+	primary := &fakePlexMovieClient{tmdbRatingKey: "10"}
+	rr := newMovieRatingResolver(nil, cache, false, false, primary, answerPrompter())
+	captureStdout(t, func() {
+		processFile(path, &fakeTMDBMovieClient{tmdbID: "12345", details: detailsWithLanguage()}, &fakeApplier{}, &fakeFileTimer{}, rr, cache, nil)
+	})
+	if primary.streamSets != 0 {
+		t.Errorf("primary streams set %d times; want 0", primary.streamSets)
+	}
+	if got, _ := cache.GetStreamsApplied("12345"); got != "en" {
+		t.Errorf("recorded %q; want en", got)
+	}
+}
+
+// A pending primary that fails is an error: nothing is recorded and the alts
+// aren't tried.
+func TestProcessFile_PrimaryStreamsFailure_RecordsNothing(t *testing.T) {
+	f := newAltFixture(t)
+	f.primary.setStreamsErr = errors.New("plex: 403")
+	alt := &fakeMultiPlexMovieClient{}
+	result, out := f.run(&fakeApplier{}, false, alt)
+	if result != ResultError || !strings.Contains(out, "(failed: Plex streams)") {
+		t.Errorf("got %v; want ResultError naming the streams:\n%s", result, out)
+	}
+	if alt.setStreamsCalls != 0 {
+		t.Errorf("alt tried %d times after the primary failed", alt.setStreamsCalls)
+	}
+	if _, ok := f.cache.GetStreamsApplied("12345"); ok {
+		t.Error("streams recorded though the primary failed")
+	}
+}
+
+// With everything succeeding, the record equals appliedSignature, so
+// plexStreamsNeedSet stops the next run.
+func TestMultiPlexMovieClient_SetStreamsPending_RecordMatchesSignature(t *testing.T) {
+	primary, alt, alt2 := &fakeMultiPlexMovieClient{}, &fakeMultiPlexMovieClient{}, &fakeMultiPlexMovieClient{}
+	mc := newMultiPlexMovieClient(primary,
+		namedPlexMovieClient{name: altAccount, client: alt},
+		namedPlexMovieClient{name: alt2Account, client: alt2}).(*multiPlexMovieClient)
+	langs := AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "en"}}
+	_, _, record, _ := mc.setStreamsPending("rk1", langs, "")
+	if want := mc.appliedSignature(langs); record != want {
+		t.Errorf("record = %q; want %q", record, want)
+	}
+	mc.setStreamsPending("rk1", langs, record) //nolint:errcheck // only the call counts matter
+	if primary.setStreamsCalls != 1 || alt.setStreamsCalls != 1 || alt2.setStreamsCalls != 1 {
+		t.Errorf("calls primary %d, alt %d, alt2 %d; want 1 each", primary.setStreamsCalls, alt.setStreamsCalls, alt2.setStreamsCalls)
+	}
+
+	// A changed primary language sets only the primary when the alt has its own.
+	primary.setStreamsCalls, alt.setStreamsCalls, alt2.setStreamsCalls = 0, 0, 0
+	langs = AudioLangs{Default: "ko", Alts: map[string]string{altAccount: "ja", alt2Account: "en"}}
+	_, _, record, _ = mc.setStreamsPending("rk1", langs, "ja|alt=ja|alt2=en")
+	if primary.setStreamsCalls != 1 || alt.setStreamsCalls != 0 || alt2.setStreamsCalls != 0 || record != "ko|alt=ja|alt2=en" {
+		t.Errorf("calls primary %d, alt %d, alt2 %d, record %q; want only the primary, ko|alt=ja|alt2=en", primary.setStreamsCalls, alt.setStreamsCalls, alt2.setStreamsCalls, record)
+	}
+}
+
 func TestParseLangSignature(t *testing.T) {
 	for _, tc := range []struct {
 		sig  string
@@ -188,6 +251,7 @@ func TestParseLangSignature(t *testing.T) {
 		{"", map[string]string{}},
 		{"ja", map[string]string{"": "ja"}},
 		{"ja|alt=en|alt2=ja", map[string]string{"": "ja", "alt": "en", "alt2": "ja"}},
+		{"ja|alt||alt2=en", map[string]string{"": "ja", "alt2": "en"}}, // malformed entries dropped
 	} {
 		got := parseLangSignature(tc.sig)
 		if len(got) != len(tc.want) {
