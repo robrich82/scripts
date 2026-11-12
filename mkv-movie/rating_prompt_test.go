@@ -261,3 +261,94 @@ func TestResolveMovieRating_OverwriteConfirmsOnlyAChangedRating(t *testing.T) {
 		}
 	}
 }
+
+// A movie settled once in a run isn't asked about again, including when the
+// answer was blank: under --overwrite-ratings with a changed source rating,
+// and with no rating anywhere.
+func TestResolveMovieRating_SessionDedupAfterBlankAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cached    NZRating
+		overwrite bool
+		source    NZRating
+		want      NZRating
+	}{
+		{"overwrite, source differs", RatingM, true, RatingG, RatingG},
+		{"no rating anywhere", RatingNone, false, RatingNone, RatingNone},
+	} {
+		cache := makeCache(t)
+		if tc.cached != RatingNone {
+			cache.Set("12345", tc.cached)
+		}
+		p := &recordingPrompter{}
+		src := &fakeRatingSource{name: "Src", rating: tc.source}
+		rr := newMovieRatingResolver([]RatingSource{src}, cache, tc.overwrite, false, nil, p.ask)
+
+		var r1, r2 NZRating
+		captureStdout(t, func() {
+			r1 = rr.ResolveMovieRating("12345", "Coco", "2017")
+			r2 = rr.ResolveMovieRating("12345", "Coco", "2017")
+		})
+
+		if r1 != tc.want || r2 != tc.want {
+			t.Errorf("%s: got %q, %q; want %q twice", tc.name, r1, r2, tc.want)
+		}
+		if len(p.prompts) != 1 {
+			t.Errorf("%s: %d prompts %q; want 1", tc.name, len(p.prompts), p.prompts)
+		}
+	}
+}
+
+// A failed rating fetch from Plex is reported and gives no default.
+func TestResolveMovieRating_PlexRatingFetchErrorGivesNoDefault(t *testing.T) {
+	plex := &fakePlexMovieClient{tmdbRatingKey: "10", contentRating: RatingM, contentRatingErr: errors.New("plex: 503")}
+	p := &recordingPrompter{}
+	rr := newMovieRatingResolver(nil, makeCache(t), false, false, plex, p.ask)
+
+	var got NZRating
+	out := captureStdout(t, func() { got = rr.ResolveMovieRating("12345", "Coco", "2017") })
+
+	if got != RatingNone {
+		t.Errorf("got %q; want no rating (blank answer, no default)", got)
+	}
+	if !strings.Contains(out, `[!] Plex: rating fetch failed for "Coco": plex: 503`) {
+		t.Errorf("fetch error not reported:\n%s", out)
+	}
+	if len(p.prompts) != 1 || strings.Contains(p.prompts[0], "Plex currently has") {
+		t.Errorf("prompts = %q; want one prompt with no Plex default", p.prompts)
+	}
+}
+
+// A lookup that succeeds with an empty rating key counts as not found: an
+// empty GUID match falls back to the title, and an empty title match ends the
+// search.
+func TestResolveMovieRating_PlexEmptyRatingKeyIsNotFound(t *testing.T) {
+	t.Run("GUID empty, title found", func(t *testing.T) {
+		plex := &fakePlexMovieClient{tmdbEmptyKey: true, titleRatingKey: "77", contentRating: RatingR16}
+		rr := newMovieRatingResolver(nil, makeCache(t), false, false, plex, answerPrompter(""))
+
+		var got NZRating
+		captureStdout(t, func() { got = rr.ResolveMovieRating("12345", "Coco", "2017") })
+
+		if got != RatingR16 {
+			t.Errorf("got %q, want R16 from the title match", got)
+		}
+		if len(plex.titleLookups) != 1 {
+			t.Errorf("title lookups %v; want one", plex.titleLookups)
+		}
+	})
+	t.Run("both empty", func(t *testing.T) {
+		plex := &fakePlexMovieClient{tmdbEmptyKey: true, contentRating: RatingR16}
+		rr := newMovieRatingResolver(nil, makeCache(t), false, false, plex, answerPrompter(""))
+
+		var got NZRating
+		out := captureStdout(t, func() { got = rr.ResolveMovieRating("12345", "Coco", "2017") })
+
+		if got != RatingNone {
+			t.Errorf("got %q; want no rating", got)
+		}
+		if !strings.Contains(out, `[i] Plex: "Coco" not found (tried TMDB GUID, then title and year)`) {
+			t.Errorf("missing not-found notice:\n%s", out)
+		}
+	})
+}

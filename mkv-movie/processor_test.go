@@ -449,7 +449,8 @@ func TestProcessFile_WithRating_TagsPathSet(t *testing.T) {
 type fakePlexMovieClient struct {
 	findTMDBErr      error
 	tmdbRatingKey    string // "" (and no findTMDBErr) means ErrPlexMovieNotFound
-	titleRatingKey   string
+	tmdbEmptyKey     bool   // FindMovieByTMDBID returns ("", nil)
+	titleRatingKey   string // "" (and no findTitleErr) returns ("", nil)
 	findTitleErr     error
 	contentRating    NZRating
 	ratingsByKey     map[string]NZRating // overrides contentRating when set
@@ -461,7 +462,7 @@ func (f *fakePlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
 	if f.findTMDBErr != nil {
 		return "", f.findTMDBErr
 	}
-	if f.tmdbRatingKey != "" {
+	if f.tmdbRatingKey != "" || f.tmdbEmptyKey {
 		return f.tmdbRatingKey, nil
 	}
 	return "", ErrPlexMovieNotFound
