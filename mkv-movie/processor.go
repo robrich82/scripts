@@ -421,19 +421,8 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	stem := strings.TrimSuffix(basename, filepath.Ext(basename))
 	entry := manualData[stem]
 	langs := entry.audioLangs(details.OriginalLanguage)
-	// What "already applied" should be: the language every configured account
-	// receives, so adding an account applies it rather than being skipped.
-	langSig := ""
-	if rr != nil && rr.plex != nil {
-		langSig = appliedLangSignature(rr.plex, langs)
-	}
-
 	plexStreamsNeedSet := func() bool {
-		if rr == nil || rr.plex == nil || langs.Default == "" {
-			return false
-		}
-		applied, ok := cache.GetStreamsApplied(tmdbID)
-		return !ok || applied != langSig || rr.overwriteStreams
+		return rr != nil && streamsDue(rr.plex, cache, tmdbID, langs, rr.overwriteStreams)
 	}
 
 	// 5. Resolve the NZ rating: it goes into the tags and to Plex.
@@ -502,41 +491,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 				}
 			}
 			if plexStreamsNeedSet() {
-				// With alt accounts, only those the cached signature doesn't
-				// cover yet are set, so a retry leaves the others alone.
-				var audioSet, subtitleSet bool
-				var err error
-				record := langSig
-				applied, _ := cache.GetStreamsApplied(tmdbID)
-				if rr.overwriteStreams {
-					applied = ""
-				}
-				multi, isMulti := rr.plex.(multiAccountReporter)
-				switch {
-				case isMulti:
-					audioSet, subtitleSet, record, err = multi.setStreamsPending(rk, langs, applied)
-				case parseLangSignature(applied)[""] == langs.Default:
-					// Only alt entries differ (their tokens were removed): the
-					// primary already has its streams, so it isn't set again.
-				default:
-					audioSet, subtitleSet, err = rr.plex.SetMovieStreams(rk, langs)
-				}
-				if err != nil {
-					fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, langSig, err)
-					if errors.Is(err, ErrPlexNoAudioStream) {
-						fmt.Printf("  [i] Set \"language\" for %q in manual_data.json to a language the file has\n", stem)
-					}
+				var ok bool
+				if langSet, langAltSuffix, ok = pushPlexStreams(rr.plex, cache, rk, tmdbID, stem, langs, rr.overwriteStreams); !ok {
 					failed = append(failed, "Plex streams")
-				} else {
-					if isMulti {
-						langAltSuffix = multi.altErrSuffix()
-					}
-					// A failed alt account is a warning, not an error. It's left
-					// out of the record, so a later --all run retries it alone.
-					cache.SetStreamsApplied(tmdbID, record)
-					if audioSet || subtitleSet {
-						langSet = langSig
-					}
 				}
 			}
 		} else {
@@ -607,6 +564,64 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	}
 	printFailed(failed)
 	return result
+}
+
+// streamsDue reports whether the movie's streams need setting in Plex: langs
+// names a language for the primary account, and the cached record doesn't hold
+// every configured account's language (see appliedLangSignature), so adding an
+// account applies it; or overwrite (--overwrite-streams) is set.
+func streamsDue(plex PlexMovieClient, cache *MovieRatingCache, tmdbID string, langs AudioLangs, overwrite bool) bool {
+	if plex == nil || langs.Default == "" {
+		return false
+	}
+	applied, ok := cache.GetStreamsApplied(tmdbID)
+	return !ok || applied != appliedLangSignature(plex, langs) || overwrite
+}
+
+// pushPlexStreams selects the movie's audio and subtitle streams in Plex, on
+// rating key rk, for each account the cached record doesn't cover (every
+// account with overwrite), and records the accounts that succeeded. A retry
+// leaves alone the accounts that already have their selection, which may have
+// been changed by hand in Plex since. langSet is the signature when any
+// account's streams changed. altSuffix names failed alt accounts: a warning,
+// not an error, and left out of the record so the next run retries them alone.
+// ok is false when the primary account failed, and nothing is recorded then;
+// stem names the manual_data.json entry to fix when the file has no audio
+// track in the language.
+func pushPlexStreams(plex PlexMovieClient, cache *MovieRatingCache, rk, tmdbID, stem string, langs AudioLangs, overwrite bool) (langSet, altSuffix string, ok bool) {
+	langSig := appliedLangSignature(plex, langs)
+	applied, _ := cache.GetStreamsApplied(tmdbID)
+	if overwrite {
+		applied = ""
+	}
+	var audioSet, subtitleSet bool
+	var err error
+	record := langSig
+	multi, isMulti := plex.(multiAccountReporter)
+	switch {
+	case isMulti:
+		audioSet, subtitleSet, record, err = multi.setStreamsPending(rk, langs, applied)
+	case parseLangSignature(applied)[""] == langs.Default:
+		// Only alt entries differ (their tokens were removed): the primary
+		// already has its streams, so it isn't set again.
+	default:
+		audioSet, subtitleSet, err = plex.SetMovieStreams(rk, langs)
+	}
+	if err != nil {
+		fmt.Printf("  [!] Plex stream update failed (key=%s lang=%s): %v\n", rk, langSig, err)
+		if errors.Is(err, ErrPlexNoAudioStream) {
+			fmt.Printf("  [i] Set \"language\" for %q in manual_data.json to a language the file has\n", stem)
+		}
+		return "", "", false
+	}
+	if isMulti {
+		altSuffix = multi.altErrSuffix()
+	}
+	cache.SetStreamsApplied(tmdbID, record)
+	if audioSet || subtitleSet {
+		langSet = langSig
+	}
+	return langSet, altSuffix, true
 }
 
 // langNote is the result line's stream note: the language signature when any
@@ -797,8 +812,7 @@ func walkRatingsOnly(root string, tmdb TMDBMovieClient, tagger MKVTagger, timer 
 // cutoff (every file when it is zero), saving the cache after each one.
 func walkMKVs(root string, cache *MovieRatingCache, cutoff time.Time, process func(path string) FileResult) Stats {
 	var stats Stats
-	var saveErr error // the last save's error; only the first in a run of failures is printed
-	lastSaved := ""   // the file after which the cache was last saved
+	saver := cacheSaver{cache: cache}
 	// The callback never returns an error, so neither does WalkDir.
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -818,43 +832,66 @@ func walkMKVs(root string, cache *MovieRatingCache, cutoff time.Time, process fu
 				return nil
 			}
 		}
-		switch process(path) {
-		case ResultUpdated:
-			stats.Updated++
-		case ResultSkipped:
-			stats.Skipped++
-		case ResultError:
-			stats.Errors++
-		}
-		// Save after each file so an interrupted run keeps the ratings and
-		// TMDB IDs resolved so far.
-		err = cache.Save()
-		switch {
-		case err != nil && saveErr == nil:
-			fmt.Printf("[!] Failed to save rating cache: %v\n    Retrying after each file; until a save succeeds, changes are kept in memory only.\n", err)
-		case err == nil && saveErr != nil:
-			fmt.Println("[i] Rating cache saved.")
-		}
-		if err == nil {
-			lastSaved = d.Name()
-		}
-		saveErr = err
+		stats.add(process(path))
+		saver.save(d.Name())
 		fmt.Println()
 		return nil
 	})
-	if saveErr != nil {
-		// One more try: on Windows the rename fails while another program
-		// (antivirus, an indexer) briefly holds the cache open.
-		beforeFinalSave()
-		if err := cache.Save(); err == nil {
-			fmt.Println("[i] Rating cache saved.")
-		} else if lastSaved == "" {
-			fmt.Printf("[!] The rating cache was never saved; this run's ratings, TMDB IDs and Plex state are lost: %v\n", err)
-		} else {
-			fmt.Printf("[!] The rating cache was last saved after %s; later ratings, TMDB IDs and Plex state are lost: %v\n", lastSaved, err)
-		}
-	}
+	saver.finish()
 	return stats
+}
+
+// add counts one item's result.
+func (s *Stats) add(r FileResult) {
+	switch r {
+	case ResultUpdated:
+		s.Updated++
+	case ResultSkipped:
+		s.Skipped++
+	case ResultError:
+		s.Errors++
+	}
+}
+
+// cacheSaver saves the cache after each item a run processes, so an
+// interrupted run keeps the ratings, TMDB IDs and Plex state resolved so far.
+type cacheSaver struct {
+	cache     *MovieRatingCache
+	saveErr   error  // the last save's error; only the first in a run of failures is printed
+	lastSaved string // the item after which the cache was last saved
+}
+
+// save saves the cache after the item named name.
+func (s *cacheSaver) save(name string) {
+	err := s.cache.Save()
+	switch {
+	case err != nil && s.saveErr == nil:
+		fmt.Printf("[!] Failed to save rating cache: %v\n    Retrying as the run goes on; until a save succeeds, changes are kept in memory only.\n", err)
+	case err == nil && s.saveErr != nil:
+		fmt.Println("[i] Rating cache saved.")
+	}
+	if err == nil {
+		s.lastSaved = name
+	}
+	s.saveErr = err
+}
+
+// finish retries a failed last save once, and says what was lost if it fails
+// again.
+func (s *cacheSaver) finish() {
+	if s.saveErr == nil {
+		return
+	}
+	// One more try: on Windows the rename fails while another program
+	// (antivirus, an indexer) briefly holds the cache open.
+	beforeFinalSave()
+	if err := s.cache.Save(); err == nil {
+		fmt.Println("[i] Rating cache saved.")
+	} else if s.lastSaved == "" {
+		fmt.Printf("[!] The rating cache was never saved; this run's ratings, TMDB IDs and Plex state are lost: %v\n", err)
+	} else {
+		fmt.Printf("[!] The rating cache was last saved after %s; later ratings, TMDB IDs and Plex state are lost: %v\n", s.lastSaved, err)
+	}
 }
 
 // beforeFinalSave runs before walkMKVs's last save attempt; tests replace it.

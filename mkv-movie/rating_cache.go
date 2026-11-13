@@ -125,6 +125,19 @@ func (c *MovieRatingCache) SetFileTMDBID(filePath, tmdbID string) {
 	}
 }
 
+// FilesByMovie returns the recorded files of each movie, keyed by TMDB ID,
+// each list sorted.
+func (c *MovieRatingCache) FilesByMovie() map[string][]string {
+	movies := make(map[string][]string)
+	for path, id := range c.data.Files {
+		movies[id] = append(movies[id], path)
+	}
+	for _, paths := range movies {
+		slices.Sort(paths)
+	}
+	return movies
+}
+
 // IsApplied reports whether filePath's tags already hold rating r.
 func (c *MovieRatingCache) IsApplied(filePath string, r NZRating) bool {
 	return r != RatingNone && NZRating(c.data.Applied[filePath]) == r
