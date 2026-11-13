@@ -16,6 +16,10 @@ import (
 // exists in any Plex library section.
 var ErrPlexMovieNotFound = errors.New("plex: movie not found")
 
+// ErrPlexNoAudioStream is returned by SetMovieStreams when the movie has no
+// audio stream in the requested language.
+var ErrPlexNoAudioStream = errors.New("plex: no audio stream in that language")
+
 // flexBool unmarshals JSON booleans (true/false) or integers (0/1) into a bool.
 // Plex API versions differ: some return selected/forced as int, others as bool.
 type flexBool bool
@@ -69,7 +73,15 @@ type httpPlexMovieClient struct {
 	baseURL       string
 	token         string
 	httpClient    *http.Client
-	movieKeyCache map[string]string // tmdbID → Plex ratingKey
+	movieKeyCache map[string]string          // tmdbID → Plex ratingKey
+	sectionItems  map[string][]plexMovieItem // section key → its last listing
+}
+
+// plexMovieItem is a movie in a Plex section listing.
+type plexMovieItem struct {
+	RatingKey string          `json:"ratingKey"`
+	Guid      json.RawMessage `json:"Guid"`
+	GuidLower string          `json:"guid"`
 }
 
 // newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
@@ -95,6 +107,7 @@ func newHTTPPlexMovieClient(baseURL, token string) *httpPlexMovieClient {
 		token:         token,
 		httpClient:    newPlexHTTPClient(),
 		movieKeyCache: make(map[string]string),
+		sectionItems:  make(map[string][]plexMovieItem),
 	}
 }
 
@@ -143,49 +156,60 @@ func (c *httpPlexMovieClient) FindMovieByTMDBID(tmdbID string) (string, error) {
 		return "", fmt.Errorf("plex: decode sections: %w", err)
 	}
 
-	wantGUID := "tmdb://" + tmdbID
+	var movieSections []string
 	for _, section := range sectionsResp.MediaContainer.Directory {
-		if section.Type != "movie" {
-			continue
+		if section.Type == "movie" {
+			movieSections = append(movieSections, section.Key)
 		}
-		key, err := c.findMovieInSection(section.Key, wantGUID, tmdbID)
-		if err != nil {
-			return "", err
-		}
-		if key != "" {
-			c.movieKeyCache[tmdbID] = key
-			return key, nil
+	}
+
+	// The listings fetched earlier in this run answer most lookups. A movie
+	// they lack is looked for in fresh listings, as Plex may have added it.
+	wantGUID := "tmdb://" + tmdbID
+	fetched := make(map[string]bool) // sections listed by this call
+	for _, fresh := range []bool{false, true} {
+		for _, section := range movieSections {
+			if fresh && fetched[section] {
+				continue
+			}
+			items, wasFetched, err := c.sectionListing(section, fresh)
+			if err != nil {
+				return "", err
+			}
+			fetched[section] = fetched[section] || wasFetched
+			for _, item := range items {
+				if plexMovieItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID) {
+					c.movieKeyCache[tmdbID] = item.RatingKey
+					return item.RatingKey, nil
+				}
+			}
 		}
 	}
 	return "", ErrPlexMovieNotFound
 }
 
-func (c *httpPlexMovieClient) findMovieInSection(sectionKey, wantGUID, tmdbID string) (string, error) {
+// sectionListing returns the movies in a Plex section: the listing fetched
+// earlier in this run, unless fresh or there is none. fetched reports a request.
+func (c *httpPlexMovieClient) sectionListing(sectionKey string, fresh bool) (items []plexMovieItem, fetched bool, err error) {
+	if items, ok := c.sectionItems[sectionKey]; ok && !fresh {
+		return items, false, nil
+	}
 	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=1&includeGuids=1")
 	if err != nil {
-		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
+		return nil, false, fmt.Errorf("plex: list section %s: %w", sectionKey, err)
 	}
 	defer resp.Body.Close()
 
 	var allResp struct {
 		MediaContainer struct {
-			Metadata []struct {
-				RatingKey string          `json:"ratingKey"`
-				Guid      json.RawMessage `json:"Guid"`
-				GuidLower string          `json:"guid"`
-			} `json:"Metadata"`
+			Metadata []plexMovieItem `json:"Metadata"`
 		} `json:"MediaContainer"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
-		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
+		return nil, false, fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
 	}
-
-	for _, item := range allResp.MediaContainer.Metadata {
-		if plexMovieItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID) {
-			return item.RatingKey, nil
-		}
-	}
-	return "", nil
+	c.sectionItems[sectionKey] = allResp.MediaContainer.Metadata
+	return allResp.MediaContainer.Metadata, true, nil
 }
 
 // plexMovieItemHasTMDBID mirrors mkv-tvshow's plexItemHasTMDBID.
@@ -431,7 +455,7 @@ func (c *httpPlexMovieClient) SetMovieStreams(ratingKey string, langs AudioLangs
 	}
 	if !audioOK {
 		if audioID == 0 {
-			return false, false, fmt.Errorf("plex: no %s audio stream in %s", audioLangTag, ratingKey)
+			return false, false, fmt.Errorf("%w: %s, key %s", ErrPlexNoAudioStream, audioLangTag, ratingKey)
 		}
 		if err := c.plexSetStream(part.ID, "audioStreamID", audioID); err != nil {
 			return false, false, fmt.Errorf("plex: set audio stream: %w", err)
@@ -507,9 +531,10 @@ func (c *httpPlexMovieClient) plexSetStream(partID int, param string, streamID i
 
 // multiAccountReporter is implemented by multiPlexMovieClient, the client that
 // fans SetMovieStreams out to more than one Plex account. It lets the caller
-// record what was applied per account and report any per-account failures.
+// set and record streams per account and report any per-account failures.
 type multiAccountReporter interface {
 	appliedSignature(langs AudioLangs) string
+	setStreamsPending(ratingKey string, langs AudioLangs, applied string) (audioSet, subtitleSet bool, record string, err error)
 	altErrSuffix() string
 }
 
@@ -647,16 +672,77 @@ func (m *multiPlexMovieClient) GetContentRating(ratingKey string) (NZRating, err
 func (m *multiPlexMovieClient) SetContentRating(ratingKey string, rating NZRating) error {
 	return m.primary.SetContentRating(ratingKey, rating)
 }
+
+// SetMovieStreams sets every account's streams: setStreamsPending with nothing
+// applied yet.
 func (m *multiPlexMovieClient) SetMovieStreams(ratingKey string, langs AudioLangs) (audioSet, subtitleSet bool, err error) {
+	audioSet, subtitleSet, _, err = m.setStreamsPending(ratingKey, langs, "")
+	return
+}
+
+// setStreamsPending implements multiAccountReporter. It sets the streams only
+// for the accounts whose language in applied (a cached signature, or "") isn't
+// the one langs gives them, so an account that already has its selection —
+// possibly changed by hand in Plex since — is left alone. The primary goes
+// first; only its failure is returned, and then nothing is recorded. Alt
+// failures are kept for altErrSuffix. record is the signature to cache: applied
+// plus each account that succeeded, without a failed alt, so the next run
+// retries that alt alone. The flags report a change on any account.
+func (m *multiPlexMovieClient) setStreamsPending(ratingKey string, langs AudioLangs, applied string) (audioSet, subtitleSet bool, record string, err error) {
 	m.altErrs = make([]error, len(m.alts))
-	audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, langs)
-	if err != nil {
-		return
+	done := parseLangSignature(applied)
+	if lang, ok := done[""]; !ok || lang != langs.Default {
+		if audioSet, subtitleSet, err = m.primary.SetMovieStreams(ratingKey, langs); err != nil {
+			return false, false, "", err
+		}
+		done[""] = langs.Default
 	}
 	for i, a := range m.alts {
-		_, _, m.altErrs[i] = a.client.SetMovieStreams(ratingKey, AudioLangs{Default: langs.forAccount(a.name)})
+		lang := langs.forAccount(a.name)
+		if got, ok := done[a.name]; ok && got == lang {
+			continue
+		}
+		altAudio, altSubtitle, altErr := a.client.SetMovieStreams(ratingKey, AudioLangs{Default: lang})
+		m.altErrs[i] = altErr
+		if altErr != nil {
+			delete(done, a.name)
+			continue
+		}
+		done[a.name] = lang
+		audioSet = audioSet || altAudio
+		subtitleSet = subtitleSet || altSubtitle
 	}
-	return
+	return audioSet, subtitleSet, m.formatSignature(done), nil
+}
+
+// formatSignature writes an account → language map in appliedSignature's form,
+// skipping alts it doesn't hold.
+func (m *multiPlexMovieClient) formatSignature(done map[string]string) string {
+	var b strings.Builder
+	b.WriteString(done[""])
+	for _, a := range m.alts {
+		if lang, ok := done[a.name]; ok {
+			b.WriteString("|" + a.name + "=" + lang)
+		}
+	}
+	return b.String()
+}
+
+// parseLangSignature reads a cached signature ("ja|alt=ja|alt2=en") into an
+// account → language map, with the primary account under "".
+func parseLangSignature(sig string) map[string]string {
+	done := map[string]string{}
+	if sig == "" {
+		return done
+	}
+	parts := strings.Split(sig, "|")
+	done[""] = parts[0]
+	for _, p := range parts[1:] {
+		if name, lang, ok := strings.Cut(p, "="); ok {
+			done[name] = lang
+		}
+	}
+	return done
 }
 func (m *multiPlexMovieClient) RefreshLibraries() error { return m.primary.RefreshLibraries() }
 

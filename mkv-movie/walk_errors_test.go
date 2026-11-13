@@ -33,7 +33,7 @@ func TestWalks_UnreadableRootWarns(t *testing.T) {
 	want := "[!] Skipping unreadable " + root
 	walks := map[string]func(t *testing.T){
 		"walkAndProcess": func(t *testing.T) {
-			walkAndProcess(root, &fakeTMDBMovieClient{}, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false, time.Time{})
+			walkAndProcess(root, &fakeTMDBMovieClient{}, nil, &fakeFileTimer{}, nil, makeCache(t), nil, time.Time{})
 		},
 		"runDebandOnly": func(t *testing.T) {
 			runDebandOnly(root, map[string]MovieManualEntry{}, &fakeMKVTagger{available: true}, &fakeFileTimer{})

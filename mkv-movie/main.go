@@ -11,14 +11,30 @@ import (
 func main() {
 	overwriteRatings := flag.Bool("overwrite-ratings", false, "Re-fetch all ratings, ignoring cached values.")
 	overwriteStreams := flag.Bool("overwrite-streams", false, "Re-select Plex audio/subtitle streams even if already applied for a movie.")
-	force := flag.Bool("force", false, "Re-apply all metadata even if already cached.")
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
-	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, then exit.")
+	ratingsOnly := flag.Bool("ratings-only", false, "Only write NZ content ratings to every file's tags (whatever its age) and to Plex; titles, dates, posters and streams are left alone.")
+	languageOnly := flag.Bool("language-only", false, "Only set Plex audio/subtitle streams, for every movie the cache has a file for, without reading the files; honours --overwrite-streams.")
+	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, and the cached ratings, TMDB IDs and Plex state of movies no remaining file maps to, then exit.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
-	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a movie and reset its applied state (title substring or TMDB ID), then exit.")
+	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached and Plex-pushed rating for a movie (title substring or TMDB ID), then exit. Run with --ratings-only in its folder afterwards to retag it.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every movie in the current directory, overriding any cached value, then exit.")
 	flag.Parse()
+
+	if *languageOnly {
+		for _, m := range []struct {
+			name string
+			set  bool
+		}{
+			{"--clean", *cleanFlag}, {"--reset-rating", *resetRatingQuery != ""}, {"--set-rating", *setRating != ""},
+			{"--deband-only", *debandOnlyMode}, {"--ratings-only", *ratingsOnly},
+		} {
+			if m.set {
+				fmt.Fprintf(os.Stderr, "Error: --language-only can't be combined with %s; run them one at a time.\n", m.name)
+				os.Exit(1)
+			}
+		}
+	}
 
 	if *cleanFlag {
 		runClean()
@@ -41,7 +57,7 @@ func main() {
 	}
 
 	var cutoff time.Time
-	if !*allFlag {
+	if !*allFlag && !*languageOnly {
 		if *cutoffDateStr != "" {
 			var err error
 			cutoff, err = time.Parse("2006-01-02", *cutoffDateStr)
@@ -95,21 +111,12 @@ func main() {
 	}
 	tmdb := newTMDBMovieSource(tmdbKey)
 
-	// A nil *realMKVApplier stored in the interface would be non-nil and panic.
-	var applier MKVApplier
-	if a, err := newRealMKVApplier(); err == nil {
-		applier = a
-	} else {
-		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated; files not yet tagged are skipped (Plex updates still run).\n", err)
-	}
-
 	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not load rating cache: %v\n", err)
-		cache, _ = LoadMovieRatingCache("/dev/null") // empty fallback
+		exitOnCacheLoadError(err)
 	}
 
 	var plex PlexMovieClient
@@ -123,6 +130,18 @@ func main() {
 	}
 	rr := newMovieRatingResolver(sources, cache, *overwriteRatings, *overwriteStreams, plex, stdinPrompter)
 
+	// Before the library refresh: no files are read, so there is nothing new to scan.
+	if *languageOnly {
+		if plex == nil {
+			fmt.Fprintln(os.Stderr, "Error: --language-only sets streams in Plex: set PLEX_URL and PLEX_TOKEN.")
+			os.Exit(1)
+		}
+		fmt.Println("Setting Plex streams for every cached movie...")
+		stats := walkLanguageOnly(tmdb, plex, cache, manualData, *overwriteStreams)
+		fmt.Printf("\nDone. Updated: %d  Skipped: %d  Errors: %d\n", stats.Updated, stats.Skipped, stats.Errors)
+		return
+	}
+
 	if plex != nil {
 		if err := plex.RefreshLibraries(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Plex library refresh failed: %v\n", err)
@@ -131,14 +150,39 @@ func main() {
 		}
 	}
 
+	if *ratingsOnly {
+		// A nil *realMKVTagger stored in the interface would compare non-nil.
+		var tagger MKVTagger
+		if t := newRealMKVTagger(); t.Available() {
+			tagger = t
+		} else if plex == nil {
+			fmt.Fprintln(os.Stderr, "Error: mkvpropedit or mkvextract not found in PATH, and Plex isn't configured: --ratings-only has nothing to write.")
+			os.Exit(1)
+		} else {
+			fmt.Fprintln(os.Stderr, "Warning: mkvpropedit or mkvextract not found in PATH. Tags will not be written (Plex ratings are still pushed).")
+		}
+		fmt.Printf("Updating NZ ratings in %s (all files)...\n", dir)
+		stats := walkRatingsOnly(dir, tmdb, tagger, timer, rr, cache)
+		fmt.Printf("\nDone. Updated: %d  Skipped: %d  Errors: %d\n", stats.Updated, stats.Skipped, stats.Errors)
+		return
+	}
+
+	// A nil *realMKVApplier stored in the interface would be non-nil and panic.
+	var applier MKVApplier
+	if a, err := newRealMKVApplier(); err == nil {
+		applier = a
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: %v. MKV metadata will not be updated and files are skipped, timestamps included (Plex updates still run).\n", err)
+	}
+
 	if cutoff.IsZero() {
 		fmt.Println("--- Cutoff date: none (all files) ---")
 	} else {
 		fmt.Printf("--- Cutoff date: %s ---\n", cutoff.Format("2006-01-02"))
 	}
 	fmt.Printf("Scanning %s...\n", dir)
-	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, manualData, *force, cutoff)
+	stats := walkAndProcess(dir, tmdb, applier, timer, rr, cache, manualData, cutoff)
 
-	fmt.Printf("\nDone. Updated: %d  OK: %d  Skipped: %d  Skipped (old): %d  Errors: %d\n",
-		stats.Updated, stats.OK, stats.Skipped, stats.SkippedOld, stats.Errors)
+	fmt.Printf("\nDone. Updated: %d  Skipped: %d  Skipped (old): %d  Errors: %d\n",
+		stats.Updated, stats.Skipped, stats.SkippedOld, stats.Errors)
 }

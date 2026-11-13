@@ -224,6 +224,27 @@ func TestHTTPPlexMovieClient_SetMovieStreams_SkipsAlreadySelected(t *testing.T) 
 	}
 }
 
+func TestHTTPPlexMovieClient_SetMovieStreams_NoAudioInLanguage(t *testing.T) {
+	var putCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			putCount++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, streamsMetaJSON("ja", false, false))
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+	_, _, err := c.SetMovieStreams("42", AudioLangs{Default: "ko"})
+	if !errors.Is(err, ErrPlexNoAudioStream) {
+		t.Errorf("err = %v; want ErrPlexNoAudioStream", err)
+	}
+	if putCount != 0 {
+		t.Errorf("expected 0 PUT requests, got %d", putCount)
+	}
+}
+
 func plexMetadataJSON(contentRating string) string {
 	return `{"MediaContainer":{"Metadata":[{"contentRating":"` + contentRating + `"}]}}`
 }
@@ -287,6 +308,7 @@ type fakeMultiPlexMovieClient struct {
 	setStreamsLangTag   string
 	setStreamsCalls     int
 	setStreamsErr       error
+	unchanged           bool // SetMovieStreams reports no change
 }
 
 func (f *fakeMultiPlexMovieClient) FindMovieByTMDBID(_ string) (string, error) {
@@ -308,7 +330,34 @@ func (f *fakeMultiPlexMovieClient) SetMovieStreams(rk string, langs AudioLangs) 
 	f.setStreamsCalls++
 	f.setStreamsRatingKey = rk
 	f.setStreamsLangTag = langs.Default
-	return true, true, f.setStreamsErr
+	return !f.unchanged, !f.unchanged, f.setStreamsErr
+}
+
+// An alt account's change counts as a change even when the primary had none;
+// a failed alt's flags don't.
+func TestMultiPlexMovieClient_SetMovieStreams_ReportsAltChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		primary *fakeMultiPlexMovieClient
+		alt     *fakeMultiPlexMovieClient
+		wantSet bool
+	}{
+		{"alt changed", &fakeMultiPlexMovieClient{unchanged: true}, &fakeMultiPlexMovieClient{}, true},
+		{"alt unchanged", &fakeMultiPlexMovieClient{unchanged: true}, &fakeMultiPlexMovieClient{unchanged: true}, false},
+		{"alt failed", &fakeMultiPlexMovieClient{unchanged: true}, &fakeMultiPlexMovieClient{setStreamsErr: errors.New("alt failed")}, false},
+		{"primary changed, alt unchanged", &fakeMultiPlexMovieClient{}, &fakeMultiPlexMovieClient{unchanged: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mc := newMultiPlexMovieClient(tc.primary, namedPlexMovieClient{name: altAccount, client: tc.alt})
+			audioSet, subtitleSet, err := mc.SetMovieStreams("rk1", AudioLangs{Default: "ja"})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if audioSet != tc.wantSet || subtitleSet != tc.wantSet {
+				t.Errorf("audioSet=%v subtitleSet=%v; want %v", audioSet, subtitleSet, tc.wantSet)
+			}
+		})
+	}
 }
 
 func TestMultiPlexMovieClient_SetMovieStreams_CallsAll(t *testing.T) {
@@ -361,6 +410,43 @@ func TestMultiPlexMovieClient_SetMovieStreams_AltErrorStoredNotPropagated(t *tes
 	want := "; alt: alt failed; alt2: not in library"
 	if got := r.altErrSuffix(); got != want {
 		t.Errorf("altErrSuffix() = %q; want %q", got, want)
+	}
+}
+
+// One alt fails, the next still runs; the record holds the primary and the alt
+// that succeeded, and both failures would be joined in the suffix.
+func TestMultiPlexMovieClient_SetStreamsPending_PartialFailure(t *testing.T) {
+	alt := &fakeMultiPlexMovieClient{setStreamsErr: errors.New("alt failed")}
+	alt2 := &fakeMultiPlexMovieClient{}
+	mc := newMultiPlexMovieClient(&fakeMultiPlexMovieClient{unchanged: true},
+		namedPlexMovieClient{name: altAccount, client: alt},
+		namedPlexMovieClient{name: alt2Account, client: alt2}).(*multiPlexMovieClient)
+	langs := AudioLangs{Default: "ja", Alts: map[string]string{alt2Account: "en"}}
+	audioSet, _, record, err := mc.setStreamsPending("rk1", langs, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if alt2.setStreamsCalls != 1 || !audioSet {
+		t.Errorf("alt2 calls %d, audioSet %v; want alt2 set after alt failed", alt2.setStreamsCalls, audioSet)
+	}
+	if record != "ja|alt2=en" {
+		t.Errorf("record = %q; want ja|alt2=en", record)
+	}
+	if got := mc.altErrSuffix(); got != "; alt: alt failed" {
+		t.Errorf("altErrSuffix() = %q", got)
+	}
+
+	// A changed language for one account re-sets only that account.
+	primary := mc.primary.(*fakeMultiPlexMovieClient)
+	alt.setStreamsErr = nil
+	primary.setStreamsCalls, alt.setStreamsCalls, alt2.setStreamsCalls = 0, 0, 0
+	langs.Alts[alt2Account] = "ko"
+	_, _, record, _ = mc.setStreamsPending("rk1", langs, "ja|alt=ja|alt2=en")
+	if primary.setStreamsCalls != 0 || alt.setStreamsCalls != 0 || alt2.setStreamsCalls != 1 {
+		t.Errorf("calls primary %d, alt %d, alt2 %d; want only alt2", primary.setStreamsCalls, alt.setStreamsCalls, alt2.setStreamsCalls)
+	}
+	if record != "ja|alt=ja|alt2=ko" {
+		t.Errorf("record = %q; want ja|alt=ja|alt2=ko", record)
 	}
 }
 

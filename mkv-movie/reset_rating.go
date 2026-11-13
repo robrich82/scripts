@@ -15,8 +15,7 @@ func runResetRating(query string) {
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading rating cache: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError(err)
 	}
 
 	matches := cache.FindTMDBIDByQuery(query)
@@ -39,12 +38,12 @@ func runResetRating(query string) {
 
 	paths := cache.ResetForTMDBID(tmdbID)
 	for _, p := range paths {
-		fmt.Printf("  Reset: %s\n", filepath.Base(p))
+		fmt.Printf("  File: %s\n", p)
 	}
 
 	if err := cache.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving cache: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Done. Rating cleared, %d file(s) reset.\n", len(paths))
+	fmt.Println("Done. Rating cleared. Run 'mkv-movie --ratings-only' in the movie's folder to fetch it again, retag the file and push it to Plex.")
 }

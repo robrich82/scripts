@@ -49,7 +49,7 @@ func TestWalkAndProcess_TMDBRateLimited_CountsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := makeCache(t)
-	stats := walkAndProcess(dir, errorTMDBSource(t, http.StatusTooManyRequests), nil, &fakeFileTimer{}, nil, cache, nil, false, time.Time{})
+	stats := walkAndProcess(dir, errorTMDBSource(t, http.StatusTooManyRequests), nil, &fakeFileTimer{}, nil, cache, nil, time.Time{})
 	if stats.Errors != 1 || stats.Skipped != 0 {
 		t.Errorf("got Errors=%d Skipped=%d, want 1 and 0", stats.Errors, stats.Skipped)
 	}

@@ -107,7 +107,7 @@ func TestProcessFile_TMDBNotFound_PromptedIDIsUsedAndCached(t *testing.T) {
 	cache := makeCache(t)
 	rr := newMovieRatingResolver(nil, cache, false, false, nil, answerPrompter("12345"))
 
-	result := processFile(path, tmdb, applier, &fakeFileTimer{}, rr, cache, nil, false)
+	result := processFile(path, tmdb, applier, &fakeFileTimer{}, rr, cache, nil)
 	if result != ResultUpdated {
 		t.Errorf("got %v, want ResultUpdated", result)
 	}
@@ -119,7 +119,7 @@ func TestProcessFile_TMDBNotFound_PromptedIDIsUsedAndCached(t *testing.T) {
 func TestProcessFile_TMDBNotFound_NoPrompterStillSkips(t *testing.T) {
 	path := makeTempMKVNamed(t, "Obscure.Film.2019.mkv")
 	tmdb := &idLookupTMDBClient{knownID: "12345", details: testDetails()}
-	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil, false)
+	result := processFile(path, tmdb, nil, &fakeFileTimer{}, nil, makeCache(t), nil)
 	if result != ResultSkipped {
 		t.Errorf("got %v, want ResultSkipped", result)
 	}

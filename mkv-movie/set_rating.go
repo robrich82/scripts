@@ -49,6 +49,8 @@ func planSetRating(dir string, cache *MovieRatingCache) (plans []setRatingPlan, 
 			unknown = append(unknown, basename)
 			return nil
 		}
+		// Record the mapping so --clean keeps this override; saved only if the user confirms.
+		cache.SetFileTMDBID(path, tmdbID)
 		if byID[tmdbID] {
 			return nil
 		}
@@ -63,11 +65,10 @@ func planSetRating(dir string, cache *MovieRatingCache) (plans []setRatingPlan, 
 	return plans, unknown
 }
 
-// applySetRating writes r as the cached rating for every planned movie. The
-// previous rating, the Plex-pushed rating, and the applied state of the
-// movie's files are cleared first so the next run rewrites the LAW_RATING tag
-// and re-pushes to Plex. Returns the number of files reset. The cache is not
-// saved — the caller does that.
+// applySetRating writes r as the cached rating for every planned movie, and
+// clears the Plex-pushed rating so the next run that reaches the movie's files
+// re-pushes it. Returns the number of files mapped to those movies. The cache
+// is not saved — the caller does that.
 func applySetRating(cache *MovieRatingCache, plans []setRatingPlan, r NZRating) int {
 	filesReset := 0
 	for _, plan := range plans {
@@ -95,8 +96,7 @@ func runSetRating(ratingStr, dir string, prompter func(string) (string, error)) 
 
 	cache, err := LoadMovieRatingCache(filepath.Join(cfgDir, "movie_rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading rating cache: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError(err)
 	}
 
 	plans, unknown := planSetRating(dir, cache)
@@ -132,6 +132,6 @@ func runSetRating(ratingStr, dir string, prompter func(string) (string, error)) 
 		os.Exit(1)
 	}
 
-	fmt.Printf("Done. %d movie(s) set to %s, %d file(s) reset.\n", len(plans), rating, filesReset)
-	fmt.Println("Run 'mkv-movie --all' to write the tags and push to Plex.")
+	fmt.Printf("Done. %d movie(s) (%d file(s)) set to %s.\n", len(plans), filesReset, rating)
+	fmt.Println("Run 'mkv-movie --ratings-only' in this folder to write the tags and push to Plex.")
 }

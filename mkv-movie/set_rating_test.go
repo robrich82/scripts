@@ -51,6 +51,10 @@ func TestPlanSetRating_ResolvesCachedMoviesAndReportsUnknown(t *testing.T) {
 	if len(unknown) != 1 || unknown[0] != "Unprocessed (2020).mkv" {
 		t.Errorf("unknown = %v, want [Unprocessed (2020).mkv]", unknown)
 	}
+	// Each resolved file is mapped to its movie, so --clean keeps the override.
+	if got := cache.data.Files[filepath.Join(dir, "Coco (2017).mkv")]; got != "354912" {
+		t.Errorf("files[Coco] = %q; want 354912", got)
+	}
 }
 
 func TestPlanSetRating_DeduplicatesFilesSharingATMDBID(t *testing.T) {
@@ -79,7 +83,8 @@ func TestApplySetRating_OverwritesRatingAndResetsAppliedState(t *testing.T) {
 	cache.SetTMDBID("Coco:2017", "354912")
 	cache.Set("354912", RatingPG)
 	cache.SetPlexRating("354912", RatingPG)
-	cache.MarkMetaApplied(moviePath, "354912")
+	cache.SetFileTMDBID(moviePath, "354912")
+	cache.data.Applied[moviePath] = string(RatingPG)
 	cache.Set("999", RatingM) // unrelated movie, must be untouched
 
 	plans := []setRatingPlan{{TMDBID: "354912", Display: "Coco:2017", Current: RatingPG}}
@@ -91,8 +96,8 @@ func TestApplySetRating_OverwritesRatingAndResetsAppliedState(t *testing.T) {
 	if filesReset != 1 {
 		t.Errorf("filesReset = %d, want 1", filesReset)
 	}
-	if cache.IsMetaApplied(moviePath, "354912") {
-		t.Error("meta-applied state survived; the LAW_RATING tag would not be rewritten")
+	if _, ok := cache.data.Applied[moviePath]; ok {
+		t.Error("applied state survived")
 	}
 	if _, ok := cache.GetPlexRating("354912"); ok {
 		t.Error("Plex rating survived; the new rating would not be pushed")

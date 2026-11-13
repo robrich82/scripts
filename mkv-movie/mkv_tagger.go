@@ -237,6 +237,25 @@ func updateDebandInXML(tagsXML string, deband bool) (string, error) {
 	return replaceElement(tagsXML, isDebandElement, el)
 }
 
+// updateRatingInXML removes the NZ COUNTRY/LAW_RATING element from a Matroska
+// tags XML string and, unless rating is RatingNone, adds the new one to the
+// file-level tag block.
+func updateRatingInXML(tagsXML string, rating NZRating) (string, error) {
+	var el string
+	if rating != RatingNone {
+		el = ratingElement(rating)
+	}
+	return replaceElement(tagsXML, isRatingElement, el)
+}
+
+// ratingElement is the NZ COUNTRY/LAW_RATING element for rating.
+func ratingElement(rating NZRating) string {
+	return fmt.Sprintf(
+		"<Simple><Name>COUNTRY</Name><String>NZ</String>"+
+			"<Simple><Name>LAW_RATING</Name><String>%s</String></Simple></Simple>",
+		rating)
+}
+
 // tagBlockRe matches one <Tag> element; Matroska tags don't nest <Tag>.
 var tagBlockRe = regexp.MustCompile(`(?s)<Tag>.*?</Tag>`)
 

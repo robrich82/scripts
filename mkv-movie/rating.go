@@ -86,7 +86,7 @@ type RatingSource interface {
 	// Name returns a human-readable label used in log/prompt messages.
 	Name() string
 	// FetchRating returns the NZ rating for the movie identified by key+title.
-	// key is a TMDB ID (if known) or a "title:YEAR" fallback string.
+	// key is the movie's TMDB ID.
 	// Returns (RatingNone, nil) when the source has no data.
 	// Returns (RatingNone, err) on network or parse failure.
 	FetchRating(key, title string) (NZRating, error)
