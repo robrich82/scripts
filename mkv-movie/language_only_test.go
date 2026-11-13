@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -38,10 +39,12 @@ type langPlex struct {
 	changed   bool
 	streamErr error
 	langs     []string
+	lastLangs AudioLangs
 }
 
 func (p *langPlex) SetMovieStreams(_ string, langs AudioLangs) (bool, bool, error) {
 	p.langs = append(p.langs, langs.Default)
+	p.lastLangs = langs
 	if p.streamErr != nil {
 		return false, false, p.streamErr
 	}
@@ -160,6 +163,28 @@ func TestLanguageOnly_ManualDataLanguage(t *testing.T) {
 	stats, _ = languageOnlyRun(t, tmdb, plex, reloaded(t, cache), manual, false)
 	if stats.Skipped != 1 || tmdb.fetches != 0 {
 		t.Errorf("second run: stats %+v, TMDB calls %d; want a skip with no TMDB call", stats, tmdb.fetches)
+	}
+}
+
+// Each language key comes from the first file whose entry sets it, so an
+// entry with only an alt language doesn't hide another file's "language".
+func TestLanguageOnly_ManualDataMergedPerKey(t *testing.T) {
+	cache := languageCache(t, map[string]string{"Spirited Away (2001).mkv": "129", "Spirited Away (2001) Remastered.mkv": "129"})
+	tmdb := &moviesTMDB{details: map[string]MovieDetails{"129": spiritedDetails}}
+	plex := &langPlex{fakePlexMovieClient: fakePlexMovieClient{tmdbRatingKey: "10"}, changed: true, streamErr: fmt.Errorf("%w: en, key 10", ErrPlexNoAudioStream)}
+	manual := map[string]MovieManualEntry{
+		"Spirited Away (2001)":            {AltLanguage: "ja"},
+		"Spirited Away (2001) Remastered": {Language: "en", AltLanguage: "fr", Alt2Language: "de"},
+	}
+
+	_, out := languageOnlyRun(t, tmdb, plex, cache, manual, false)
+
+	want := map[string]string{altAccount: "ja", alt2Account: "de"}
+	if plex.lastLangs.Default != "en" || !maps.Equal(plex.lastLangs.Alts, want) {
+		t.Errorf("streams set to %+v; want en, alts %v", plex.lastLangs, want)
+	}
+	if !strings.Contains(out, `Set "language" for "Spirited Away (2001) Remastered" in manual_data.json`) {
+		t.Errorf("the hint should name the entry that set \"language\":\n%s", out)
 	}
 }
 
@@ -410,5 +435,99 @@ func TestHTTPPlexMovieClient_ReusesSectionListing(t *testing.T) {
 	}
 	if listings != 2 {
 		t.Errorf("section listed %d times in all; a miss should list it once more", listings)
+	}
+}
+
+// sectionServer serves two movie sections, "1" and "2". Each listing request
+// gets the next body in that section's list (the last repeats), or a 500 for "".
+func sectionServer(t *testing.T, bodies map[string][]string) (*httptest.Server, map[string]int) {
+	t.Helper()
+	var mu sync.Mutex
+	listed := make(map[string]int)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			fmt.Fprint(w, `{"MediaContainer":{"Directory":[{"key":"1","type":"movie"},{"key":"2","type":"movie"}]}}`)
+			return
+		}
+		for section, list := range bodies {
+			if r.URL.Path != "/library/sections/"+section+"/all" {
+				continue
+			}
+			mu.Lock()
+			n := listed[section]
+			listed[section]++
+			mu.Unlock()
+			body := list[min(n, len(list)-1)]
+			if body == "" {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
+			fmt.Fprint(w, body)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, listed
+}
+
+// A miss lists each section once: one the run hasn't listed yet isn't listed
+// again by the fresh pass.
+func TestHTTPPlexMovieClient_MissListsEachSectionOnce(t *testing.T) {
+	srv, listed := sectionServer(t, map[string][]string{
+		"1": {plexAllMoviesJSON("77", "tmdb://129")},
+		"2": {plexAllMoviesJSON("88", "tmdb://354912")},
+	})
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+
+	if rk, err := c.FindMovieByTMDBID("129"); err != nil || rk != "77" {
+		t.Fatalf("FindMovieByTMDBID(129) = %q, %v; want 77", rk, err)
+	}
+	if listed["1"] != 1 || listed["2"] != 0 {
+		t.Fatalf("after a hit in section 1: listings %v; want section 1 once, section 2 never", listed)
+	}
+
+	if _, err := c.FindMovieByTMDBID("999"); !errors.Is(err, ErrPlexMovieNotFound) {
+		t.Fatalf("missing movie: err %v; want ErrPlexMovieNotFound", err)
+	}
+	if listed["1"] != 2 || listed["2"] != 1 {
+		t.Errorf("after a miss: listings %v; want each section listed once more by the miss", listed)
+	}
+}
+
+// A movie Plex added after the run's first listing is found by the fresh pass.
+func TestHTTPPlexMovieClient_FreshPassFindsAddedMovie(t *testing.T) {
+	srv, _ := sectionServer(t, map[string][]string{
+		"1": {
+			plexAllMoviesJSON("77", "tmdb://129"),
+			`{"MediaContainer":{"Metadata":[{"ratingKey":"77","Guid":[{"id":"tmdb://129"}]},{"ratingKey":"78","Guid":[{"id":"tmdb://354912"}]}]}}`,
+		},
+		"2": {`{"MediaContainer":{"Metadata":[]}}`},
+	})
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+
+	if _, err := c.FindMovieByTMDBID("129"); err != nil {
+		t.Fatal(err)
+	}
+	if rk, err := c.FindMovieByTMDBID("354912"); err != nil || rk != "78" {
+		t.Errorf("FindMovieByTMDBID(354912) = %q, %v; want 78 from the fresh listing", rk, err)
+	}
+}
+
+// A listing that fails in the fresh pass is an error, not "not found".
+func TestHTTPPlexMovieClient_FreshPassListingError(t *testing.T) {
+	srv, _ := sectionServer(t, map[string][]string{
+		"1": {plexAllMoviesJSON("77", "tmdb://129"), ""},
+		"2": {plexAllMoviesJSON("88", "tmdb://354912")},
+	})
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+
+	if _, err := c.FindMovieByTMDBID("129"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.FindMovieByTMDBID("999")
+	if err == nil || errors.Is(err, ErrPlexMovieNotFound) || !strings.Contains(err.Error(), "list section 1") {
+		t.Errorf("err %v; want the section 1 listing error", err)
 	}
 }

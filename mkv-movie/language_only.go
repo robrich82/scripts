@@ -15,6 +15,9 @@ import (
 func walkLanguageOnly(tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRatingCache, manualData map[string]MovieManualEntry, overwrite bool) Stats {
 	movies := make(map[string][]string) // TMDB ID → its files' stems, sorted
 	for id, paths := range cache.FilesByMovie() {
+		if id == "" { // only a hand-edited cache; it would match any Plex item
+			continue
+		}
 		for _, p := range paths {
 			base := filepath.Base(p)
 			movies[id] = append(movies[id], strings.TrimSuffix(base, filepath.Ext(base)))
@@ -39,20 +42,29 @@ func walkLanguageOnly(tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRa
 	return stats
 }
 
+// mergedLanguageEntry takes each language key from the first stem whose
+// manual_data.json entry sets it. stem names the entry that set "language",
+// or is the first stem when none did.
+func mergedLanguageEntry(stems []string, manualData map[string]MovieManualEntry) (entry MovieManualEntry, stem string) {
+	stem = stems[0]
+	for _, s := range stems {
+		e := manualData[s]
+		if entry.Language == "" && e.Language != "" {
+			entry.Language, stem = e.Language, s
+		}
+		entry.AltLanguage = cmp.Or(entry.AltLanguage, e.AltLanguage)
+		entry.Alt2Language = cmp.Or(entry.Alt2Language, e.Alt2Language)
+	}
+	return entry, stem
+}
+
 // processLanguageOnly sets the streams of the movie tmdbID, whose files have
-// the given stems, and prints its result line, named by the first stem. Its
-// languages come from the first stem whose manual_data.json entry sets one.
-// TMDB is called only when that entry has no "language", or the streams are due.
+// the given stems, and prints its result line, named by the first stem. Each
+// of its languages comes from the first stem whose manual_data.json entry sets
+// it. TMDB is called only when none sets "language", or the streams are due.
 func processLanguageOnly(tmdbID string, stems []string, tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRatingCache, manualData map[string]MovieManualEntry, overwrite bool) FileResult {
 	name := stems[0]
-	entryStem := name
-	var entry MovieManualEntry
-	for _, s := range stems {
-		if e := manualData[s]; e.Language != "" || e.AltLanguage != "" || e.Alt2Language != "" {
-			entry, entryStem = e, s
-			break
-		}
-	}
+	entry, entryStem := mergedLanguageEntry(stems, manualData)
 
 	var details *MovieDetails
 	fetchDetails := func() bool {
