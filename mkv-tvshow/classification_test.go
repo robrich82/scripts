@@ -2,10 +2,13 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // classificationHTMLWith returns a minimal HTML page that embeds a title and
@@ -164,5 +167,79 @@ func TestParseClassificationHTML_ExtractsRatings(t *testing.T) {
 	}
 	if results[1].Rating != RatingPG {
 		t.Errorf("result[1].Rating = %q; want PG", results[1].Rating)
+	}
+}
+
+// dropServer drops its first drops connections the way mode says, then serves
+// a page rating "Attack on Titan" R16. *requests counts every request.
+func dropServer(t *testing.T, mode string, drops int, requests *atomic.Int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if int(requests.Add(1)) > drops {
+			fmt.Fprint(w, classificationHTMLWith("Attack on Titan", "R16"))
+			return
+		}
+		conn, buf, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		switch mode {
+		case "reset":
+			_ = conn.(*net.TCPConn).SetLinger(0)
+		case "truncated":
+			fmt.Fprint(buf, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n<html><body><h3>Attack on")
+			_ = buf.Flush()
+		}
+		conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// #173: a dropped connection, including a page cut off mid-read, is retried
+// once; dropped twice, the search fails rather than parsing a partial page.
+func TestClassificationSource_RetriesDroppedConnectionOnce(t *testing.T) {
+	for _, mode := range []string{"closed", "reset", "truncated"} {
+		for _, drops := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s/%d", mode, drops), func(t *testing.T) {
+				var requests atomic.Int32
+				srv := dropServer(t, mode, drops, &requests)
+				src := &classificationSource{baseURL: srv.URL, httpClient: &http.Client{}}
+
+				rating, err := src.FetchShowRating("", "Attack on Titan")
+
+				if requests.Load() != 2 {
+					t.Errorf("%d requests; want 2", requests.Load())
+				}
+				if drops == 1 && (err != nil || rating != RatingR16) {
+					t.Errorf("got %q, %v; want R16 from the retry", rating, err)
+				}
+				if drops == 2 && (err == nil || !connectionDropped(err) ||
+					!strings.Contains(err.Error(), "/find-a-rating/") || !strings.HasSuffix(err.Error(), "(after one retry)")) {
+					t.Errorf("got %q, %v; want the dropped-connection error naming the page and the retry", rating, err)
+				}
+			})
+		}
+	}
+}
+
+// A timeout mid-page isn't a dropped connection, so it isn't retried.
+func TestClassificationSource_TimeoutNotRetried(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Length", "1000")
+		fmt.Fprint(w, "<html><body>")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	src := &classificationSource{baseURL: srv.URL, httpClient: &http.Client{Timeout: 100 * time.Millisecond}}
+
+	_, err := src.FetchShowRating("", "Attack on Titan")
+
+	if err == nil || connectionDropped(err) || requests.Load() != 1 {
+		t.Errorf("err %v after %d requests; want a timeout after 1", err, requests.Load())
 	}
 }
