@@ -66,7 +66,9 @@ func (c *classificationSource) scrapeResults(title string) ([]classificationResu
 
 	page, err := c.fetch(searchURL)
 	if connectionDropped(err) { // the site sometimes drops a connection; a second request works
-		page, err = c.fetch(searchURL)
+		if page, err = c.fetch(searchURL); err != nil {
+			err = fmt.Errorf("%w (after one retry)", err)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -74,15 +76,19 @@ func (c *classificationSource) scrapeResults(title string) ([]classificationResu
 	return parseClassificationHTML(bytes.NewReader(page)), nil
 }
 
-// fetch returns the whole body, so a page cut off mid-read is an error rather
-// than parsed as complete.
+// fetch returns the whole body, so a page cut off short of its stated length
+// is an error rather than parsed as complete.
 func (c *classificationSource) fetch(pageURL string) ([]byte, error) {
 	resp, err := c.httpClient.Get(pageURL)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	page, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", pageURL, err)
+	}
+	return page, nil
 }
 
 func connectionDropped(err error) bool {

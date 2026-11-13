@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // classificationHTMLWith returns a minimal HTML page that embeds a title and
@@ -215,27 +215,31 @@ func TestClassificationSource_RetriesDroppedConnectionOnce(t *testing.T) {
 				if drops == 1 && (err != nil || rating != RatingR16) {
 					t.Errorf("got %q, %v; want R16 from the retry", rating, err)
 				}
-				if drops == 2 && (err == nil || !connectionDropped(err)) {
-					t.Errorf("got %q, %v; want the dropped-connection error", rating, err)
+				if drops == 2 && (err == nil || !connectionDropped(err) ||
+					!strings.Contains(err.Error(), "/find-a-rating/") || !strings.HasSuffix(err.Error(), "(after one retry)")) {
+					t.Errorf("got %q, %v; want the dropped-connection error naming the page and the retry", rating, err)
 				}
 			})
 		}
 	}
 }
 
-type countingFailTransport struct{ calls int }
+// A timeout mid-page isn't a dropped connection, so it isn't retried.
+func TestClassificationSource_TimeoutNotRetried(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Length", "1000")
+		fmt.Fprint(w, "<html><body>")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	src := &classificationSource{baseURL: srv.URL, httpClient: &http.Client{Timeout: 100 * time.Millisecond}}
 
-func (f *countingFailTransport) RoundTrip(*http.Request) (*http.Response, error) {
-	f.calls++
-	return nil, errors.New("tls: handshake failure")
-}
+	_, err := src.FetchShowRating("", "Attack on Titan")
 
-// Any other failure isn't retried.
-func TestClassificationSource_OtherErrorNotRetried(t *testing.T) {
-	tr := &countingFailTransport{}
-	src := &classificationSource{baseURL: "http://example.invalid", httpClient: &http.Client{Transport: tr}}
-
-	if _, err := src.FetchShowRating("", "Attack on Titan"); err == nil || tr.calls != 1 {
-		t.Errorf("err %v after %d requests; want an error after 1", err, tr.calls)
+	if err == nil || connectionDropped(err) || requests.Load() != 1 {
+		t.Errorf("err %v after %d requests; want a timeout after 1", err, requests.Load())
 	}
 }
