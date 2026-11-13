@@ -1303,10 +1303,30 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, ent
 		return
 	}
 	sig := appliedLangSignature(p.plex, langs)
-	if applied, ok := p.ratingCache.GetLanguageApplied(tmdbID); ok && applied == sig && !p.cfg.OverwriteLanguage {
+	applied, ok := p.ratingCache.GetLanguageApplied(tmdbID)
+	if ok && applied == sig && !p.cfg.OverwriteLanguage {
 		return
 	}
-	if err := p.plex.SetAudioLanguage(showKey, langs); err != nil {
+	if p.cfg.OverwriteLanguage {
+		applied = ""
+	}
+	// With alt accounts, only those the cached signature doesn't cover yet are
+	// set, so a retry leaves the others (and any choice made in Plex) alone.
+	record := sig
+	pushed := false
+	var err error
+	multi, isMulti := p.plex.(multiAccountReporter)
+	switch {
+	case isMulti:
+		record, pushed, err = multi.setLanguagePending(showKey, langs, applied)
+	case parseLangSignature(applied)[""] == sig:
+		// Only alt entries differ (their tokens were removed): the primary
+		// already has its language, so it isn't pushed again.
+	default:
+		err = p.plex.SetAudioLanguage(showKey, langs)
+		pushed = true
+	}
+	if err != nil {
 		if errors.Is(err, ErrPlexNotFound) {
 			p.ratingCache.ClearPlexKey(tmdbID)
 			return
@@ -1314,10 +1334,14 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, ent
 		fmt.Printf("  [!] Plex: set audio language for %q: %v\n", showName, err)
 		return
 	}
-	p.ratingCache.SetLanguageApplied(tmdbID, sig)
 	altSuffix := ""
-	if r, ok := p.plex.(multiAccountReporter); ok {
-		altSuffix = r.altErrSuffix()
+	if isMulti {
+		altSuffix = multi.altErrSuffix()
 	}
-	fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, sig, altSuffix)
+	// A failed alt account is left out of the record, so the next run retries
+	// it alone.
+	p.ratingCache.SetLanguageApplied(tmdbID, record)
+	if pushed || altSuffix != "" {
+		fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, sig, altSuffix)
+	}
 }
