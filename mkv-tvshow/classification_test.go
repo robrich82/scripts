@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -164,5 +167,75 @@ func TestParseClassificationHTML_ExtractsRatings(t *testing.T) {
 	}
 	if results[1].Rating != RatingPG {
 		t.Errorf("result[1].Rating = %q; want PG", results[1].Rating)
+	}
+}
+
+// dropServer drops its first drops connections the way mode says, then serves
+// a page rating "Attack on Titan" R16. *requests counts every request.
+func dropServer(t *testing.T, mode string, drops int, requests *atomic.Int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if int(requests.Add(1)) > drops {
+			fmt.Fprint(w, classificationHTMLWith("Attack on Titan", "R16"))
+			return
+		}
+		conn, buf, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		switch mode {
+		case "reset":
+			_ = conn.(*net.TCPConn).SetLinger(0)
+		case "truncated":
+			fmt.Fprint(buf, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n<html><body><h3>Attack on")
+			_ = buf.Flush()
+		}
+		conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// #173: a dropped connection, including a page cut off mid-read, is retried
+// once; dropped twice, the search fails rather than parsing a partial page.
+func TestClassificationSource_RetriesDroppedConnectionOnce(t *testing.T) {
+	for _, mode := range []string{"closed", "reset", "truncated"} {
+		for _, drops := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s/%d", mode, drops), func(t *testing.T) {
+				var requests atomic.Int32
+				srv := dropServer(t, mode, drops, &requests)
+				src := &classificationSource{baseURL: srv.URL, httpClient: &http.Client{}}
+
+				rating, err := src.FetchShowRating("", "Attack on Titan")
+
+				if requests.Load() != 2 {
+					t.Errorf("%d requests; want 2", requests.Load())
+				}
+				if drops == 1 && (err != nil || rating != RatingR16) {
+					t.Errorf("got %q, %v; want R16 from the retry", rating, err)
+				}
+				if drops == 2 && (err == nil || !connectionDropped(err)) {
+					t.Errorf("got %q, %v; want the dropped-connection error", rating, err)
+				}
+			})
+		}
+	}
+}
+
+type countingFailTransport struct{ calls int }
+
+func (f *countingFailTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	f.calls++
+	return nil, errors.New("tls: handshake failure")
+}
+
+// Any other failure isn't retried.
+func TestClassificationSource_OtherErrorNotRetried(t *testing.T) {
+	tr := &countingFailTransport{}
+	src := &classificationSource{baseURL: "http://example.invalid", httpClient: &http.Client{Transport: tr}}
+
+	if _, err := src.FetchShowRating("", "Attack on Titan"); err == nil || tr.calls != 1 {
+		t.Errorf("err %v after %d requests; want an error after 1", err, tr.calls)
 	}
 }

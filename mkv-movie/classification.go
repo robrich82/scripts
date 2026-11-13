@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,13 +64,29 @@ func (c *classificationSource) scrapeResults(title string) ([]classificationResu
 	searchURL := fmt.Sprintf("%s/find-a-rating/?search=%s",
 		c.baseURL, url.QueryEscape(title))
 
-	resp, err := c.httpClient.Get(searchURL)
+	page, err := c.fetch(searchURL)
+	if connectionDropped(err) { // the site sometimes drops a connection; a second request works
+		page, err = c.fetch(searchURL)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return parseClassificationHTML(bytes.NewReader(page)), nil
+}
+
+// fetch returns the whole body, so a page cut off mid-read is an error rather
+// than parsed as complete.
+func (c *classificationSource) fetch(pageURL string) ([]byte, error) {
+	resp, err := c.httpClient.Get(pageURL)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
 
-	return parseClassificationHTML(resp.Body), nil
+func connectionDropped(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, errConnReset)
 }
 
 // parseClassificationHTML walks the HTML token stream looking for text nodes
