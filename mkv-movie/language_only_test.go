@@ -134,13 +134,18 @@ func TestLanguageOnly_OverwriteStreams(t *testing.T) {
 	}
 }
 
-// A movie's languages come from the manual_data.json entry of any of its
-// files. With "language" set, TMDB is called only once the streams are due.
+// A movie's languages come from the first of its files' manual_data.json
+// entries that sets one; an entry with only "deband" doesn't hide it. With
+// "language" set, TMDB is called only once the streams are due.
 func TestLanguageOnly_ManualDataLanguage(t *testing.T) {
 	cache := languageCache(t, map[string]string{"Spirited Away (2001).mkv": "129", "Spirited Away (2001) Remastered.mkv": "129"})
 	tmdb := &moviesTMDB{details: map[string]MovieDetails{"129": spiritedDetails}}
 	plex := &langPlex{fakePlexMovieClient: fakePlexMovieClient{tmdbRatingKey: "10"}, changed: true}
-	manual := map[string]MovieManualEntry{"Spirited Away (2001) Remastered": {Language: "en"}}
+	deband := true
+	manual := map[string]MovieManualEntry{
+		"Spirited Away (2001)":            {Deband: &deband},
+		"Spirited Away (2001) Remastered": {Language: "en"},
+	}
 
 	stats, out := languageOnlyRun(t, tmdb, plex, cache, manual, false)
 
@@ -194,16 +199,22 @@ func TestLanguageOnly_Failures(t *testing.T) {
 	}{
 		{"TMDB details", errors.New("timeout"), &langPlex{fakePlexMovieClient: fakePlexMovieClient{tmdbRatingKey: "10"}}, "[ERR]     Coco (2017): TMDB details: timeout\n", ""},
 		{"Plex lookup", nil, &langPlex{fakePlexMovieClient: fakePlexMovieClient{findTMDBErr: errors.New("status 500")}}, "[ERR]     Coco (2017) (failed: Plex lookup)\n", "Plex lookup failed – streams not set: status 500"},
-		{"no audio track", nil, &langPlex{fakePlexMovieClient: fakePlexMovieClient{tmdbRatingKey: "10"}, streamErr: fmt.Errorf("%w: en, key 10", ErrPlexNoAudioStream)}, "[ERR]     Coco (2017) (failed: Plex streams)\n", `Set "language" for "Coco (2017)" in manual_data.json`},
+		// The hint names the file whose entry set the language, not the first.
+		{"no audio track", nil, &langPlex{fakePlexMovieClient: fakePlexMovieClient{tmdbRatingKey: "10"}, streamErr: fmt.Errorf("%w: ko, key 10", ErrPlexNoAudioStream)}, "[ERR]     Coco (2017) (failed: Plex streams)\n", `Set "language" for "Coco (2017) Korean dub" in manual_data.json`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cache := languageCache(t, map[string]string{"Coco (2017).mkv": "354912", "Spirited Away (2001).mkv": "129"})
+			cache := languageCache(t, map[string]string{"Coco (2017).mkv": "354912", "Coco (2017) Korean dub.mkv": "354912", "Spirited Away (2001).mkv": "129"})
 			tmdb := &moviesTMDB{details: map[string]MovieDetails{"354912": cocoDetails, "129": spiritedDetails}, errs: map[string]error{"354912": tc.tmdbErr}}
 			if tc.tmdbErr == nil {
 				tmdb.errs = nil
 			}
 
-			stats, out := languageOnlyRun(t, tmdb, tc.plex, cache, nil, false)
+			manual := map[string]MovieManualEntry{"Coco (2017) Korean dub": {Language: "ko"}}
+			if tc.name == "TMDB details" {
+				manual = nil // so Coco needs TMDB's language
+			}
+
+			stats, out := languageOnlyRun(t, tmdb, tc.plex, cache, manual, false)
 
 			if stats.Errors < 1 || !strings.Contains(out, tc.wantLine) {
 				t.Errorf("stats %+v; output lacks %q:\n%s", stats, tc.wantLine, out)
@@ -310,5 +321,94 @@ func TestLanguageOnly_HTTPPlex(t *testing.T) {
 	}
 	if got, _ := reloaded(t, cache).GetStreamsApplied("129"); got != "ja" {
 		t.Errorf("saved record = %q; want ja", got)
+	}
+}
+
+// Movies go in order of their first file name, whatever the cache's map order.
+func TestLanguageOnly_NameOrder(t *testing.T) {
+	names := []string{"Akira (1988)", "Brazil (1985)", "Coco (2017)", "Dune (2021)", "Elf (2003)", "Fargo (1996)"}
+	files := make(map[string]string)
+	details := make(map[string]MovieDetails)
+	for i, n := range names {
+		id := fmt.Sprint(100 + len(names) - i) // IDs in reverse name order
+		files[n+".mkv"] = id
+		details[id] = MovieDetails{Title: n, ReleaseDate: "2000-01-01", OriginalLanguage: string(rune('a'+i)) + "x"}
+	}
+	plex := &langPlex{fakePlexMovieClient: fakePlexMovieClient{tmdbRatingKey: "10"}, changed: true}
+
+	languageOnlyRun(t, &moviesTMDB{details: details}, plex, languageCache(t, files), nil, false)
+
+	if want := []string{"ax", "bx", "cx", "dx", "ex", "fx"}; !slices.Equal(plex.langs, want) {
+		t.Errorf("streams set in order %v; want %v", plex.langs, want)
+	}
+}
+
+// With no TMDB release date, Plex's title search uses the year in the file
+// name; with no year there either, only the TMDB GUID is tried.
+func TestLanguageOnly_YearFromFileName(t *testing.T) {
+	for _, tc := range []struct {
+		file        string
+		wantLookups [][2]string
+		wantWarning string
+	}{
+		{"Thing 1982.mkv", [][2]string{{"The Thing", "1982"}}, "rerun with --language-only once Plex has it"},
+		{"Thing.mkv", nil, "with no release year it isn't searched by title – streams not set; rerun with --language-only once Plex has matched it"},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			cache := languageCache(t, map[string]string{tc.file: "1091"})
+			tmdb := &moviesTMDB{details: map[string]MovieDetails{"1091": {Title: "The Thing", OriginalLanguage: "en"}}}
+			plex := &langPlex{}
+
+			stats, out := languageOnlyRun(t, tmdb, plex, cache, nil, false)
+
+			if stats.Skipped != 1 || !slices.Equal(plex.titleLookups, tc.wantLookups) {
+				t.Errorf("stats %+v, title lookups %v; want a skip and %v", stats, plex.titleLookups, tc.wantLookups)
+			}
+			if !strings.Contains(out, tc.wantWarning) {
+				t.Errorf("output lacks %q:\n%s", tc.wantWarning, out)
+			}
+		})
+	}
+}
+
+// Integration: a section's listing is fetched once a run and answers later
+// lookups; a movie it lacks is looked for in one fresh listing, as Plex may
+// have added it since.
+func TestHTTPPlexMovieClient_ReusesSectionListing(t *testing.T) {
+	var mu sync.Mutex
+	listings := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/library/sections":
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
+		case "/library/sections/2/all":
+			mu.Lock()
+			listings++
+			mu.Unlock()
+			fmt.Fprint(w, `{"MediaContainer":{"Metadata":[`+
+				`{"ratingKey":"77","Guid":[{"id":"tmdb://129"}]},`+
+				`{"ratingKey":"78","Guid":[{"id":"tmdb://354912"}]}]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+
+	for id, want := range map[string]string{"129": "77", "354912": "78"} {
+		if rk, err := c.FindMovieByTMDBID(id); err != nil || rk != want {
+			t.Errorf("FindMovieByTMDBID(%s) = %q, %v; want %s", id, rk, err, want)
+		}
+	}
+	if listings != 1 {
+		t.Errorf("section listed %d times for two movies; want 1", listings)
+	}
+
+	if _, err := c.FindMovieByTMDBID("999"); !errors.Is(err, ErrPlexMovieNotFound) {
+		t.Errorf("missing movie: err %v; want ErrPlexMovieNotFound", err)
+	}
+	if listings != 2 {
+		t.Errorf("section listed %d times in all; a miss should list it once more", listings)
 	}
 }

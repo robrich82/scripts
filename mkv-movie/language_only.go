@@ -2,7 +2,6 @@ package main
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -10,10 +9,9 @@ import (
 )
 
 // walkLanguageOnly sets the Plex audio and subtitle streams of every movie the
-// cache maps a file to, as a full run would, without reading the files, so an
-// offline drive doesn't matter. Only the accounts a movie's streams are due on
-// are set (see streamsDue). Movies are taken in file-name order, and the cache
-// is saved after each one. plex must not be nil.
+// cache maps a file to, without reading the files, so an offline drive doesn't
+// matter. Movies go in order of their first file name, and the cache is saved
+// after each one. plex must not be nil.
 func walkLanguageOnly(tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRatingCache, manualData map[string]MovieManualEntry, overwrite bool) Stats {
 	movies := make(map[string][]string) // TMDB ID → its files' stems, sorted
 	for id, paths := range cache.FilesByMovie() {
@@ -43,16 +41,14 @@ func walkLanguageOnly(tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRa
 
 // processLanguageOnly sets the streams of the movie tmdbID, whose files have
 // the given stems, and prints its result line, named by the first stem. Its
-// languages come from the first stem with a manual_data.json entry, the
-// primary's falling back to TMDB's original language. TMDB is called for that
-// language, and for the title and year Plex is searched by when the streams
-// are due.
+// languages come from the first stem whose manual_data.json entry sets one.
+// TMDB is called only when that entry has no "language", or the streams are due.
 func processLanguageOnly(tmdbID string, stems []string, tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRatingCache, manualData map[string]MovieManualEntry, overwrite bool) FileResult {
 	name := stems[0]
 	entryStem := name
 	var entry MovieManualEntry
 	for _, s := range stems {
-		if e, ok := manualData[s]; ok {
+		if e := manualData[s]; e.Language != "" || e.AltLanguage != "" || e.Alt2Language != "" {
 			entry, entryStem = e, s
 			break
 		}
@@ -89,8 +85,7 @@ func processLanguageOnly(tmdbID string, stems []string, tmdb TMDBMovieClient, pl
 		return ResultSkipped
 	}
 
-	// Plex is searched by TMDB's title, never the file's, so a remake can't
-	// match; the file's year stands in when TMDB has no release date.
+	// Plex is searched by TMDB's title, so a remake can't match.
 	if !fetchDetails() {
 		return ResultError
 	}
@@ -98,37 +93,25 @@ func processLanguageOnly(tmdbID string, stems []string, tmdb TMDBMovieClient, pl
 	if year == "" {
 		year = extractYear(name)
 	}
-	rk, err := findPlexMovie(plex, tmdbID, details.Title, year)
-	switch {
-	case errors.Is(err, ErrPlexMovieNotFound) && year == "":
-		fmt.Printf("  [!] Plex: %q not found by TMDB GUID, and with no release year it isn't searched by title – streams not set\n", details.Title)
-		fmt.Printf("[SKIP]    %s (not in Plex)\n", name)
-		return ResultSkipped
-	case errors.Is(err, ErrPlexMovieNotFound):
-		fmt.Printf("  [!] Plex: %q not found (tried TMDB GUID, then title and year) – streams not set; rerun with --language-only once Plex has it\n", details.Title)
-		fmt.Printf("[SKIP]    %s (not in Plex)\n", name)
-		return ResultSkipped
-	case err != nil:
-		fmt.Printf("  [!] Plex lookup failed – streams not set: %v\n", err)
-		fmt.Printf("[ERR]     %s", name)
-		printFailed([]string{"Plex lookup"})
+	rk, failed := lookupPlexMovie(plex, tmdbID, details.Title, year, "streams not set", "--language-only")
+	if failed != "" {
+		fmt.Printf("[ERR]     %s (failed: %s)\n", name, failed)
 		return ResultError
+	}
+	if rk == "" {
+		fmt.Printf("[SKIP]    %s (not in Plex)\n", name)
+		return ResultSkipped
 	}
 
 	langSet, altSuffix, ok := pushPlexStreams(plex, cache, rk, tmdbID, entryStem, langs, overwrite)
 	if !ok {
-		fmt.Printf("[ERR]     %s", name)
-		printFailed([]string{"Plex streams"})
+		fmt.Printf("[ERR]     %s (failed: Plex streams)\n", name)
 		return ResultError
 	}
-	tag, result := "[UPDATED]", ResultUpdated
-	note := langNote(langSet, altSuffix)
 	if langSet == "" {
-		tag, result = "[SKIP]   ", ResultSkipped
-		if note == "" {
-			note = "unchanged"
-		}
+		fmt.Printf("[SKIP]    %s (lang: unchanged%s)\n", name, altSuffix)
+		return ResultSkipped
 	}
-	fmt.Printf("%s %s (lang: %s)\n", tag, name, note)
-	return result
+	fmt.Printf("[UPDATED] %s (lang: %s%s)\n", name, langSet, altSuffix)
+	return ResultUpdated
 }

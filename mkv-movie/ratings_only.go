@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 )
@@ -123,18 +122,9 @@ func plexRatingDue(plex PlexMovieClient, cache *MovieRatingCache, tmdbID string,
 // whether it pushed, or names the step that failed. A movie Plex doesn't have
 // is a warning, and nothing is recorded, so the next --ratings-only run retries.
 func pushPlexRating(plex PlexMovieClient, cache *MovieRatingCache, tmdbID, title, year string, rating NZRating) (pushed bool, failed string) {
-	rk, err := findPlexMovie(plex, tmdbID, title, year)
-	if errors.Is(err, ErrPlexMovieNotFound) && year == "" {
-		fmt.Printf("  [!] Plex: %q not found by TMDB GUID, and with no release year it isn't searched by title – rating not pushed\n", title)
-		return false, ""
-	}
-	if errors.Is(err, ErrPlexMovieNotFound) {
-		fmt.Printf("  [!] Plex: %q not found (tried TMDB GUID, then title and year) – rating not pushed; rerun with --ratings-only once Plex has it\n", title)
-		return false, ""
-	}
-	if err != nil {
-		fmt.Printf("  [!] Plex lookup failed – rating not pushed: %v\n", err)
-		return false, "Plex lookup"
+	rk, failed := lookupPlexMovie(plex, tmdbID, title, year, "rating not pushed", "--ratings-only")
+	if rk == "" {
+		return false, failed
 	}
 	if err := plex.SetContentRating(rk, rating); err != nil {
 		fmt.Printf("  [!] Plex rating update failed: %v\n", err)

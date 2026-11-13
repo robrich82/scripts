@@ -25,7 +25,7 @@ type movieRatingCacheData struct {
 	LegacyMeta     map[string]string `json:"meta_applied,omitempty"`    // read on load to back-fill Files, never saved
 	PlexRatings    map[string]string `json:"plex_ratings,omitempty"`    // tmdbID → rating last pushed to Plex
 	StreamsApplied map[string]string `json:"streams_applied,omitempty"` // tmdbID → audio lang tag when streams were last set
-	Files          map[string]string `json:"files,omitempty"`           // absFilePath → tmdbID, for --clean and --reset-rating
+	Files          map[string]string `json:"files,omitempty"`           // absFilePath → tmdbID, for --clean, --reset-rating and --language-only
 }
 
 // exitOnCacheLoadError reports a LoadMovieRatingCache error, with a fix that
@@ -125,15 +125,12 @@ func (c *MovieRatingCache) SetFileTMDBID(filePath, tmdbID string) {
 	}
 }
 
-// FilesByMovie returns the recorded files of each movie, keyed by TMDB ID,
-// each list sorted.
+// FilesByMovie returns the absolute paths of each movie's recorded files,
+// keyed by TMDB ID, in no particular order.
 func (c *MovieRatingCache) FilesByMovie() map[string][]string {
 	movies := make(map[string][]string)
 	for path, id := range c.data.Files {
 		movies[id] = append(movies[id], path)
-	}
-	for _, paths := range movies {
-		slices.Sort(paths)
 	}
 	return movies
 }

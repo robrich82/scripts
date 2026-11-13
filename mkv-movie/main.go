@@ -14,16 +14,26 @@ func main() {
 	cutoffDateStr := flag.String("cutoff-date", "", "Only process files modified on or after this date (YYYY-MM-DD). Defaults to today.")
 	allFlag := flag.Bool("all", false, "Process all files regardless of modification date.")
 	ratingsOnly := flag.Bool("ratings-only", false, "Only write NZ content ratings to every file's tags (whatever its age) and to Plex; titles, dates, posters and streams are left alone.")
-	languageOnly := flag.Bool("language-only", false, "Only set Plex audio/subtitle streams, for every movie in the cache, without reading the files; honours --overwrite-streams.")
+	languageOnly := flag.Bool("language-only", false, "Only set Plex audio/subtitle streams, for every movie the cache has a file for, without reading the files; honours --overwrite-streams.")
 	cleanFlag := flag.Bool("clean", false, "Remove cache entries for files that no longer exist on disk, and the cached ratings, TMDB IDs and Plex state of movies no remaining file maps to, then exit.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached and Plex-pushed rating for a movie (title substring or TMDB ID), then exit. Run with --ratings-only in its folder afterwards to retag it.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every movie in the current directory, overriding any cached value, then exit.")
 	flag.Parse()
 
-	if *ratingsOnly && *languageOnly {
-		fmt.Fprintln(os.Stderr, "Error: --ratings-only and --language-only can't be combined; run them one after the other.")
-		os.Exit(1)
+	if *languageOnly {
+		for _, m := range []struct {
+			name string
+			set  bool
+		}{
+			{"--clean", *cleanFlag}, {"--reset-rating", *resetRatingQuery != ""}, {"--set-rating", *setRating != ""},
+			{"--deband-only", *debandOnlyMode}, {"--ratings-only", *ratingsOnly},
+		} {
+			if m.set {
+				fmt.Fprintf(os.Stderr, "Error: --language-only can't be combined with %s; run them one at a time.\n", m.name)
+				os.Exit(1)
+			}
+		}
 	}
 
 	if *cleanFlag {
@@ -47,7 +57,7 @@ func main() {
 	}
 
 	var cutoff time.Time
-	if !*allFlag {
+	if !*allFlag && !*languageOnly {
 		if *cutoffDateStr != "" {
 			var err error
 			cutoff, err = time.Parse("2006-01-02", *cutoffDateStr)
@@ -120,14 +130,7 @@ func main() {
 	}
 	rr := newMovieRatingResolver(sources, cache, *overwriteRatings, *overwriteStreams, plex, stdinPrompter)
 
-	if plex != nil {
-		if err := plex.RefreshLibraries(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Plex library refresh failed: %v\n", err)
-		} else {
-			fmt.Println("Plex libraries refreshed.")
-		}
-	}
-
+	// Before the library refresh: no files are read, so there is nothing new to scan.
 	if *languageOnly {
 		if plex == nil {
 			fmt.Fprintln(os.Stderr, "Error: --language-only sets streams in Plex: set PLEX_URL and PLEX_TOKEN.")
@@ -137,6 +140,14 @@ func main() {
 		stats := walkLanguageOnly(tmdb, plex, cache, manualData, *overwriteStreams)
 		fmt.Printf("\nDone. Updated: %d  Skipped: %d  Errors: %d\n", stats.Updated, stats.Skipped, stats.Errors)
 		return
+	}
+
+	if plex != nil {
+		if err := plex.RefreshLibraries(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Plex library refresh failed: %v\n", err)
+		} else {
+			fmt.Println("Plex libraries refreshed.")
+		}
 	}
 
 	if *ratingsOnly {

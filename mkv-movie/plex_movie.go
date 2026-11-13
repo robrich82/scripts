@@ -73,7 +73,15 @@ type httpPlexMovieClient struct {
 	baseURL       string
 	token         string
 	httpClient    *http.Client
-	movieKeyCache map[string]string // tmdbID → Plex ratingKey
+	movieKeyCache map[string]string          // tmdbID → Plex ratingKey
+	sectionItems  map[string][]plexMovieItem // section key → its last listing
+}
+
+// plexMovieItem is a movie in a Plex section listing.
+type plexMovieItem struct {
+	RatingKey string          `json:"ratingKey"`
+	Guid      json.RawMessage `json:"Guid"`
+	GuidLower string          `json:"guid"`
 }
 
 // newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
@@ -99,6 +107,7 @@ func newHTTPPlexMovieClient(baseURL, token string) *httpPlexMovieClient {
 		token:         token,
 		httpClient:    newPlexHTTPClient(),
 		movieKeyCache: make(map[string]string),
+		sectionItems:  make(map[string][]plexMovieItem),
 	}
 }
 
@@ -147,49 +156,60 @@ func (c *httpPlexMovieClient) FindMovieByTMDBID(tmdbID string) (string, error) {
 		return "", fmt.Errorf("plex: decode sections: %w", err)
 	}
 
-	wantGUID := "tmdb://" + tmdbID
+	var movieSections []string
 	for _, section := range sectionsResp.MediaContainer.Directory {
-		if section.Type != "movie" {
-			continue
+		if section.Type == "movie" {
+			movieSections = append(movieSections, section.Key)
 		}
-		key, err := c.findMovieInSection(section.Key, wantGUID, tmdbID)
-		if err != nil {
-			return "", err
-		}
-		if key != "" {
-			c.movieKeyCache[tmdbID] = key
-			return key, nil
+	}
+
+	// The listings fetched earlier in this run answer most lookups. A movie
+	// they lack is looked for in fresh listings, as Plex may have added it.
+	wantGUID := "tmdb://" + tmdbID
+	fetched := make(map[string]bool) // sections listed by this call
+	for _, fresh := range []bool{false, true} {
+		for _, section := range movieSections {
+			if fresh && fetched[section] {
+				continue
+			}
+			items, wasFetched, err := c.sectionListing(section, fresh)
+			if err != nil {
+				return "", err
+			}
+			fetched[section] = fetched[section] || wasFetched
+			for _, item := range items {
+				if plexMovieItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID) {
+					c.movieKeyCache[tmdbID] = item.RatingKey
+					return item.RatingKey, nil
+				}
+			}
 		}
 	}
 	return "", ErrPlexMovieNotFound
 }
 
-func (c *httpPlexMovieClient) findMovieInSection(sectionKey, wantGUID, tmdbID string) (string, error) {
+// sectionListing returns the movies in a Plex section: the listing fetched
+// earlier in this run, unless fresh or there is none. fetched reports a request.
+func (c *httpPlexMovieClient) sectionListing(sectionKey string, fresh bool) (items []plexMovieItem, fetched bool, err error) {
+	if items, ok := c.sectionItems[sectionKey]; ok && !fresh {
+		return items, false, nil
+	}
 	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=1&includeGuids=1")
 	if err != nil {
-		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
+		return nil, false, fmt.Errorf("plex: list section %s: %w", sectionKey, err)
 	}
 	defer resp.Body.Close()
 
 	var allResp struct {
 		MediaContainer struct {
-			Metadata []struct {
-				RatingKey string          `json:"ratingKey"`
-				Guid      json.RawMessage `json:"Guid"`
-				GuidLower string          `json:"guid"`
-			} `json:"Metadata"`
+			Metadata []plexMovieItem `json:"Metadata"`
 		} `json:"MediaContainer"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
-		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
+		return nil, false, fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
 	}
-
-	for _, item := range allResp.MediaContainer.Metadata {
-		if plexMovieItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID) {
-			return item.RatingKey, nil
-		}
-	}
-	return "", nil
+	c.sectionItems[sectionKey] = allResp.MediaContainer.Metadata
+	return allResp.MediaContainer.Metadata, true, nil
 }
 
 // plexMovieItemHasTMDBID mirrors mkv-tvshow's plexItemHasTMDBID.

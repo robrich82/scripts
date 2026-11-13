@@ -123,6 +123,18 @@ type Stats struct {
 	Errors     int
 }
 
+// add counts one item's result.
+func (s *Stats) add(r FileResult) {
+	switch r {
+	case ResultUpdated:
+		s.Updated++
+	case ResultSkipped:
+		s.Skipped++
+	case ResultError:
+		s.Errors++
+	}
+}
+
 // FileResult is the outcome of processing a single file.
 type FileResult int
 
@@ -313,6 +325,23 @@ func findPlexMovie(plex PlexMovieClient, tmdbID, title, year string) (string, er
 		return "", ErrPlexMovieNotFound
 	}
 	return rk, err
+}
+
+// lookupPlexMovie is findPlexMovie for the cache-driven modes: rk is "" when
+// the movie wasn't found, with why printed, ending "– <skipped>". A movie
+// Plex lacks is a warning naming rerunFlag; a failed lookup returns failed.
+func lookupPlexMovie(plex PlexMovieClient, tmdbID, title, year, skipped, rerunFlag string) (rk, failed string) {
+	rk, err := findPlexMovie(plex, tmdbID, title, year)
+	switch {
+	case errors.Is(err, ErrPlexMovieNotFound) && year == "":
+		fmt.Printf("  [!] Plex: %q not found by TMDB GUID, and with no release year it isn't searched by title – %s; rerun with %s once Plex has matched it\n", title, skipped, rerunFlag)
+	case errors.Is(err, ErrPlexMovieNotFound):
+		fmt.Printf("  [!] Plex: %q not found (tried TMDB GUID, then title and year) – %s; rerun with %s once Plex has it\n", title, skipped, rerunFlag)
+	case err != nil:
+		fmt.Printf("  [!] Plex lookup failed – %s: %v\n", skipped, err)
+		return "", "Plex lookup"
+	}
+	return rk, ""
 }
 
 // settled reports whether ResolveMovieRating answers for tmdbID without a
@@ -566,10 +595,9 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	return result
 }
 
-// streamsDue reports whether the movie's streams need setting in Plex: langs
-// names a language for the primary account, and the cached record doesn't hold
-// every configured account's language (see appliedLangSignature), so adding an
-// account applies it; or overwrite (--overwrite-streams) is set.
+// streamsDue reports whether the movie's streams need setting: Plex is
+// configured, langs names a primary language, and overwrite is set or the
+// cached record isn't appliedLangSignature's.
 func streamsDue(plex PlexMovieClient, cache *MovieRatingCache, tmdbID string, langs AudioLangs, overwrite bool) bool {
 	if plex == nil || langs.Default == "" {
 		return false
@@ -578,16 +606,12 @@ func streamsDue(plex PlexMovieClient, cache *MovieRatingCache, tmdbID string, la
 	return !ok || applied != appliedLangSignature(plex, langs) || overwrite
 }
 
-// pushPlexStreams selects the movie's audio and subtitle streams in Plex, on
-// rating key rk, for each account the cached record doesn't cover (every
-// account with overwrite), and records the accounts that succeeded. A retry
-// leaves alone the accounts that already have their selection, which may have
-// been changed by hand in Plex since. langSet is the signature when any
-// account's streams changed. altSuffix names failed alt accounts: a warning,
-// not an error, and left out of the record so the next run retries them alone.
-// ok is false when the primary account failed, and nothing is recorded then;
-// stem names the manual_data.json entry to fix when the file has no audio
-// track in the language.
+// pushPlexStreams sets the movie's streams (rating key rk) on each account the
+// cached record doesn't cover (all, with overwrite) and records those that
+// succeeded. langSet is the signature when any account changed. altSuffix names
+// failed alts: a warning, retried alone next run. ok is false, with nothing
+// recorded, when the primary failed; stem is the manual_data.json entry the
+// hint names when the file has no audio track in the language.
 func pushPlexStreams(plex PlexMovieClient, cache *MovieRatingCache, rk, tmdbID, stem string, langs AudioLangs, overwrite bool) (langSet, altSuffix string, ok bool) {
 	langSig := appliedLangSignature(plex, langs)
 	applied, _ := cache.GetStreamsApplied(tmdbID)
@@ -841,18 +865,6 @@ func walkMKVs(root string, cache *MovieRatingCache, cutoff time.Time, process fu
 	return stats
 }
 
-// add counts one item's result.
-func (s *Stats) add(r FileResult) {
-	switch r {
-	case ResultUpdated:
-		s.Updated++
-	case ResultSkipped:
-		s.Skipped++
-	case ResultError:
-		s.Errors++
-	}
-}
-
 // cacheSaver saves the cache after each item a run processes, so an
 // interrupted run keeps the ratings, TMDB IDs and Plex state resolved so far.
 type cacheSaver struct {
@@ -894,7 +906,7 @@ func (s *cacheSaver) finish() {
 	}
 }
 
-// beforeFinalSave runs before walkMKVs's last save attempt; tests replace it.
+// beforeFinalSave runs before cacheSaver.finish's last save attempt; tests replace it.
 var beforeFinalSave = func() { time.Sleep(time.Second) }
 
 // applyDebandOnlyFile updates only the DEBAND MKV tag for filePath, preserving
