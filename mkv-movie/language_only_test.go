@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -185,6 +186,27 @@ func TestLanguageOnly_ManualDataMergedPerKey(t *testing.T) {
 	}
 	if !strings.Contains(out, `Set "language" for "Spirited Away (2001) Remastered" in manual_data.json`) {
 		t.Errorf("the hint should name the entry that set \"language\":\n%s", out)
+	}
+}
+
+// A file a hand-edited cache maps to an empty TMDB ID is left alone: Plex
+// would be searched for "", which can match an unrelated movie.
+func TestLanguageOnly_EmptyTMDBIDSkipped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	if err := os.WriteFile(path, []byte(`{"files":{"C:\\m\\Coco (2017).mkv":""}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := LoadMovieRatingCache(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmdb := &moviesTMDB{}
+	plex := &langPlex{fakePlexMovieClient: fakePlexMovieClient{tmdbRatingKey: "10"}}
+
+	stats, _ := languageOnlyRun(t, tmdb, plex, cache, nil, false)
+
+	if stats != (Stats{}) || tmdb.fetches != 0 || len(plex.langs) != 0 {
+		t.Errorf("stats %+v, TMDB calls %d, stream sets %v; want nothing done", stats, tmdb.fetches, plex.langs)
 	}
 }
 

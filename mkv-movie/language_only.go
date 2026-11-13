@@ -15,7 +15,7 @@ import (
 func walkLanguageOnly(tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRatingCache, manualData map[string]MovieManualEntry, overwrite bool) Stats {
 	movies := make(map[string][]string) // TMDB ID → its files' stems, sorted
 	for id, paths := range cache.FilesByMovie() {
-		if id == "" { // only a hand-edited cache; it would match any Plex item
+		if id == "" { // only in a hand-edited cache; it can match an unrelated Plex item
 			continue
 		}
 		for _, p := range paths {
