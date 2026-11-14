@@ -40,6 +40,14 @@ type httpPlexClient struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
+
+	sectionItems map[string][]plexArtistItem // section key → its last listing
+}
+
+// plexArtistItem is an artist in a Plex section listing.
+type plexArtistItem struct {
+	RatingKey string `json:"ratingKey"`
+	Title     string `json:"title"`
 }
 
 // newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
@@ -61,9 +69,10 @@ func newPlexHTTPClient() *http.Client {
 
 func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 	return &httpPlexClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		token:      token,
-		httpClient: newPlexHTTPClient(),
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		token:        token,
+		httpClient:   newPlexHTTPClient(),
+		sectionItems: make(map[string][]plexArtistItem),
 	}
 }
 
@@ -82,11 +91,48 @@ func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
 }
 
 // FindArtistByTitle implements PlexClient. It scans all "artist" (music)
-// library sections for an item whose normalised title matches title.
+// library sections for an item whose normalised title matches title. A title
+// with no ASCII letters or digits (e.g. 宇多田ヒカル) normalises to "", like
+// every other such title, so it must match exactly, ignoring case.
+//
+// It searches the section listings fetched earlier in this run, then fresh
+// listings, as Plex may have added the artist since; a cached match in any
+// section wins over a copy newly added to another.
 func (c *httpPlexClient) FindArtistByTitle(title string) (string, error) {
+	matches := titleMatcher(title)
+	if matches == nil {
+		return "", ErrArtistNotFound
+	}
+	sections, err := c.artistSectionKeys()
+	if err != nil {
+		return "", err
+	}
+	fetched := make(map[string]bool) // sections listed by this call
+	for _, fresh := range []bool{false, true} {
+		for _, section := range sections {
+			if fresh && fetched[section] {
+				continue
+			}
+			items, wasFetched, err := c.sectionListing(section, fresh)
+			if err != nil {
+				return "", err
+			}
+			fetched[section] = fetched[section] || wasFetched
+			for _, item := range items {
+				if matches(item.Title) {
+					return item.RatingKey, nil
+				}
+			}
+		}
+	}
+	return "", ErrArtistNotFound
+}
+
+// artistSectionKeys returns the keys of Plex's music library sections.
+func (c *httpPlexClient) artistSectionKeys() ([]string, error) {
 	resp, err := c.plexGet("/library/sections")
 	if err != nil {
-		return "", fmt.Errorf("plex: list sections: %w", err)
+		return nil, fmt.Errorf("plex: list sections: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -99,50 +145,40 @@ func (c *httpPlexClient) FindArtistByTitle(title string) (string, error) {
 		} `json:"MediaContainer"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
-		return "", fmt.Errorf("plex: decode sections: %w", err)
+		return nil, fmt.Errorf("plex: decode sections: %w", err)
 	}
-
-	normTitle := normalizeMusicTitle(title)
+	var keys []string
 	for _, section := range sectionsResp.MediaContainer.Directory {
-		if section.Type != "artist" {
-			continue
-		}
-		key, err := c.findArtistInSection(section.Key, normTitle)
-		if err != nil {
-			return "", err
-		}
-		if key != "" {
-			return key, nil
+		if section.Type == "artist" {
+			keys = append(keys, section.Key)
 		}
 	}
-	return "", ErrArtistNotFound
+	return keys, nil
 }
 
-func (c *httpPlexClient) findArtistInSection(sectionKey, normTitle string) (string, error) {
+// sectionListing returns the artists in a Plex section: the listing fetched
+// earlier in this run, unless fresh or there is none. fetched reports a
+// request.
+func (c *httpPlexClient) sectionListing(sectionKey string, fresh bool) (items []plexArtistItem, fetched bool, err error) {
+	if items, ok := c.sectionItems[sectionKey]; ok && !fresh {
+		return items, false, nil
+	}
 	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=8")
 	if err != nil {
-		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
+		return nil, false, fmt.Errorf("plex: list section %s: %w", sectionKey, err)
 	}
 	defer resp.Body.Close()
 
 	var allResp struct {
 		MediaContainer struct {
-			Metadata []struct {
-				RatingKey string `json:"ratingKey"`
-				Title     string `json:"title"`
-			} `json:"Metadata"`
+			Metadata []plexArtistItem `json:"Metadata"`
 		} `json:"MediaContainer"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
-		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
+		return nil, false, fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
 	}
-
-	for _, item := range allResp.MediaContainer.Metadata {
-		if normalizeMusicTitle(item.Title) == normTitle {
-			return item.RatingKey, nil
-		}
-	}
-	return "", nil
+	c.sectionItems[sectionKey] = allResp.MediaContainer.Metadata
+	return allResp.MediaContainer.Metadata, true, nil
 }
 
 // plexPut performs a PUT request to path (relative to baseURL), sending the
@@ -195,6 +231,19 @@ func (c *httpPlexClient) AnalyzeMedia(ratingKey string) error {
 	}
 	resp.Body.Close()
 	return nil
+}
+
+// titleMatcher reports whether a Plex title matches title: by normalised
+// title, or exactly but for case when title has no ASCII letters or digits.
+// It is nil for a blank title, which matches nothing.
+func titleMatcher(title string) func(string) bool {
+	if norm := normalizeMusicTitle(title); norm != "" {
+		return func(t string) bool { return normalizeMusicTitle(t) == norm }
+	}
+	if strings.TrimSpace(title) == "" {
+		return nil
+	}
+	return func(t string) bool { return strings.EqualFold(t, title) }
 }
 
 // normalizeMusicTitle returns a lowercase alphanumeric-only string for fuzzy
