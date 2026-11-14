@@ -473,14 +473,15 @@ func (c *httpPlexClient) GetContentRating(ratingKey string) (NZRating, error) {
 
 // RefreshLibraries implements PlexClient. It scans all "show" library
 // sections, triggering a metadata refresh so Plex picks up any new or changed
-// files without requiring a manual library scan.
+// files without requiring a manual library scan. It sends POST, the method
+// the API defines; GET works today but is undocumented.
 func (c *httpPlexClient) RefreshLibraries() error {
 	sections, err := c.showSectionKeys()
 	if err != nil {
 		return err
 	}
 	for _, section := range sections {
-		refreshResp, err := c.plexGet("/library/sections/" + section + "/refresh")
+		refreshResp, err := c.plexRequest(http.MethodPost, "/library/sections/"+section+"/refresh")
 		if err != nil {
 			return fmt.Errorf("plex: refresh section %s: %w", section, err)
 		}
