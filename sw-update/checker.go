@@ -77,12 +77,14 @@ func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
 	if err != nil || result == nil {
 		return result, err
 	}
-	if app.Checker.AssetURL != "" && result.Version != "" {
+	if app.Checker.AssetURL != "" {
+		// Replaces, not joins, the checker's assets: a same-named scraped or
+		// GitHub asset would otherwise download over it and run twice.
 		a, err := templateAsset(app.Checker.AssetURL, result.Version)
 		if err != nil {
 			return nil, err
 		}
-		result.Assets = append(result.Assets, a)
+		result.Assets = []Asset{a}
 	}
 	for _, a := range result.Assets {
 		if err := requireHTTPS(a.URL); err != nil {
@@ -94,39 +96,47 @@ func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
 
 var reAssetPlaceholder = regexp.MustCompile(`\{[^{}]*\}`)
 
-// templateAsset expands an asset_url template for version, for downloads the
-// checked page doesn't link to directly (e.g. behind a EULA page).
-// {major}, {minor} and {patch} are the version's dot-separated segments.
+// templateAsset expands an asset_url template for version. {version} is the
+// version as checked; {major}, {minor} and {patch} are its dot-separated
+// segments without a leading "v". Each value is path-escaped, so a scraped
+// version can't change the URL's structure.
 func templateAsset(tmpl, version string) (Asset, error) {
-	segs := strings.Split(strings.TrimPrefix(version, "v"), ".")
-	names := []string{"{major}", "{minor}", "{patch}"}
-	var expandErr error
-	expanded := reAssetPlaceholder.ReplaceAllStringFunc(tmpl, func(ph string) string {
-		if ph == "{version}" {
-			return version
+	if version == "" {
+		return Asset{}, fmt.Errorf("asset_url: the check found no version to expand it with")
+	}
+	values := map[string]string{"{version}": url.PathEscape(version)}
+	segNames := []string{"{major}", "{minor}", "{patch}"}
+	segs := strings.Split(strings.TrimLeft(version, "vV"), ".")
+	for i, name := range segNames {
+		if i < len(segs) {
+			values[name] = url.PathEscape(segs[i])
 		}
-		for i, name := range names {
-			if ph != name {
-				continue
-			}
-			if i >= len(segs) {
-				expandErr = fmt.Errorf("asset_url: %s: version %q has no segment %d", ph, version, i+1)
-				return ""
-			}
-			return segs[i]
+	}
+	for _, ph := range reAssetPlaceholder.FindAllString(tmpl, -1) {
+		if _, ok := values[ph]; ok {
+			continue
 		}
-		expandErr = fmt.Errorf("asset_url: unknown placeholder %s", ph)
-		return ""
-	})
-	if expandErr != nil {
-		return Asset{}, expandErr
+		if slices.Contains(segNames, ph) {
+			return Asset{}, fmt.Errorf("asset_url: %s: version %q has no segment %d", ph, version, slices.Index(segNames, ph)+1)
+		}
+		return Asset{}, fmt.Errorf("asset_url: unknown placeholder %s", ph)
+	}
+	expanded := reAssetPlaceholder.ReplaceAllStringFunc(tmpl, func(ph string) string { return values[ph] })
+	if strings.ContainsAny(expanded, "{}") {
+		return Asset{}, fmt.Errorf("asset_url: unbalanced brace in %s", tmpl)
 	}
 	u, err := url.Parse(expanded)
 	if err != nil {
 		return Asset{}, fmt.Errorf("asset_url: %w", err)
 	}
-	name := path.Base(u.Path)
-	if name == "/" || name == "." {
+	// Name from the escaped path, so an escaped "/" in the version can't split it.
+	p := u.EscapedPath()
+	base := path.Base(p)
+	if base == "download" { // SourceForge: .../files/<name>/download
+		base = path.Base(path.Dir(p))
+	}
+	name, err := url.PathUnescape(base)
+	if err != nil || strings.HasSuffix(p, "/") || p == "" {
 		return Asset{}, fmt.Errorf("asset_url: %s has no file name", expanded)
 	}
 	return Asset{Name: name, URL: expanded}, nil
