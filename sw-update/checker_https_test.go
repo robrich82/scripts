@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -166,5 +167,28 @@ func TestCheckerRejectsHTTPAssetFromSourceForge(t *testing.T) {
 	var insecure *insecureURLError
 	if !errors.As(err, &insecure) || insecure.URL != "http://sf.net/app.zip" {
 		t.Errorf("err = %v, result = %v, want an insecureURLError for the zip", err, result)
+	}
+}
+
+func TestHTMLCheckerSendsUserAgent(t *testing.T) {
+	var gotUA string
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		fmt.Fprint(w, `version 1.2 <a href="/app-1.2.exe">x</a>`)
+	})
+
+	res, err := NewChecker(srv.Client()).Check(htmlApp(srv.URL + "/downloads"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if gotUA != userAgent {
+		t.Errorf("User-Agent = %q, want %q", gotUA, userAgent)
+	}
+	// amd.com's Akamai front end resets requests whose UA has a "(...)" comment.
+	if strings.ContainsAny(gotUA, "()") {
+		t.Errorf("User-Agent = %q, want no (...) comment", gotUA)
+	}
+	if res.Version != "1.2" {
+		t.Errorf("Version = %q, want 1.2", res.Version)
 	}
 }

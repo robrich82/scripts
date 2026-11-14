@@ -21,8 +21,10 @@ import (
 
 // userAgent identifies sw-update on every request. Bot-protection front ends
 // 403 both Go's default "Go-http-client/1.1" (falcosoft.hu) and a spoofed
-// browser UA on a non-browser connection (SourceForge), but accept this.
-const userAgent = "sw-update/1.0 (+https://github.com/)"
+// browser UA on a non-browser connection (SourceForge), but accept this. It
+// carries no "(...)" comment: amd.com's Akamai front end resets any request
+// whose UA has one.
+const userAgent = "sw-update/1.0"
 
 // downloadTransport carries download requests; nil means http.DefaultTransport.
 // Tests set it to a TLS test server's transport.
