@@ -240,7 +240,7 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 			if libType == "tv" {
 				sibling.rememberTV(dir, root, id)
 			} else {
-				sibling.rememberMovie(dir, title, year, id, dirFiles[dir])
+				sibling.rememberMovie(dir, root, title, year, id, dirFiles[dir])
 			}
 		}
 	}
@@ -316,16 +316,22 @@ func resolveTMDBID(dir, title, year, libType string, tmdb TMDBOriginClient, prom
 				return ""
 			}
 		}
-		if isTMDBID(ans) {
-			return ans
+		if id, ok := normalizeTMDBID(ans); ok {
+			return id
 		}
-		fmt.Printf("[TMDB]   %q is not a TMDB id, which is digits only\n", ans)
+		fmt.Printf("[TMDB]   %q is not a TMDB id, which is a positive whole number\n", ans)
 	}
 }
 
-// isTMDBID reports whether s is a TMDB ID: one or more ASCII digits.
-func isTMDBID(s string) bool {
-	return s != "" && strings.Trim(s, "0123456789") == ""
+// normalizeTMDBID returns s as TMDB writes the ID, without leading zeros, and
+// whether s is one: ASCII digits, not all zero. The tools key their caches by
+// the ID's text, so "0603" would never match TMDB's "603".
+func normalizeTMDBID(s string) (string, bool) {
+	if s == "" || strings.Trim(s, "0123456789") != "" {
+		return "", false
+	}
+	s = strings.TrimLeft(s, "0")
+	return s, s != ""
 }
 
 // langFix describes a single track that needs its ISO language corrected.
