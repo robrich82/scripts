@@ -92,15 +92,15 @@ func (c *httpPlexClient) plexGet(path string) (*http.Response, error) {
 
 // FindArtistByTitle implements PlexClient. It scans all "artist" (music)
 // library sections for an item whose normalised title matches title. A title
-// with no ASCII letters or digits (e.g. 宇多田ヒカル) normalises to "", which
-// would match every such artist, so it is never found.
+// with no ASCII letters or digits (e.g. 宇多田ヒカル) normalises to "", like
+// every other such title, so it must match exactly, ignoring case.
 //
 // It searches the section listings fetched earlier in this run, then fresh
 // listings, as Plex may have added the artist since; a cached match in any
 // section wins over a copy newly added to another.
 func (c *httpPlexClient) FindArtistByTitle(title string) (string, error) {
-	normTitle := normalizeMusicTitle(title)
-	if normTitle == "" {
+	matches := titleMatcher(title)
+	if matches == nil {
 		return "", ErrArtistNotFound
 	}
 	sections, err := c.artistSectionKeys()
@@ -119,7 +119,7 @@ func (c *httpPlexClient) FindArtistByTitle(title string) (string, error) {
 			}
 			fetched[section] = fetched[section] || wasFetched
 			for _, item := range items {
-				if normalizeMusicTitle(item.Title) == normTitle {
+				if matches(item.Title) {
 					return item.RatingKey, nil
 				}
 			}
@@ -231,6 +231,19 @@ func (c *httpPlexClient) AnalyzeMedia(ratingKey string) error {
 	}
 	resp.Body.Close()
 	return nil
+}
+
+// titleMatcher reports whether a Plex title matches title: by normalised
+// title, or exactly but for case when title has no ASCII letters or digits.
+// It is nil for a blank title, which matches nothing.
+func titleMatcher(title string) func(string) bool {
+	if norm := normalizeMusicTitle(title); norm != "" {
+		return func(t string) bool { return normalizeMusicTitle(t) == norm }
+	}
+	if strings.TrimSpace(title) == "" {
+		return nil
+	}
+	return func(t string) bool { return strings.EqualFold(t, title) }
 }
 
 // normalizeMusicTitle returns a lowercase alphanumeric-only string for fuzzy

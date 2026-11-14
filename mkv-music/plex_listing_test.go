@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,7 +53,20 @@ func newFakeArtistServer(t *testing.T, artists map[string][]string) (*fakeArtist
 func (f *fakeArtistServer) listingCounts() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return map[string]int{"1": f.listings["1"], "2": f.listings["2"], "3": f.listings["3"]}
+	return maps.Clone(f.listings)
+}
+
+func (f *fakeArtistServer) set(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn()
+}
+
+func wantListings(t *testing.T, f *fakeArtistServer, when string, want map[string]int) {
+	t.Helper()
+	if got := f.listingCounts(); !maps.Equal(got, want) {
+		t.Errorf("%s: listings per section = %v; want %v", when, got, want)
+	}
 }
 
 // A run that looks up several artists lists each music section once, not once
@@ -66,9 +80,7 @@ func TestHTTPPlexClient_FindArtistByTitle_ReusesSectionListing(t *testing.T) {
 			t.Errorf("FindArtistByTitle(%q) = %q, %v; want %q", title, got, err, want)
 		}
 	}
-	if got, want := f.listingCounts(), map[string]int{"1": 1, "2": 1, "3": 0}; fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("listings per section = %v; want %v", got, want)
-	}
+	wantListings(t, f, "after three hits", map[string]int{"1": 1, "2": 1})
 }
 
 // A miss re-lists each section once, in case Plex added the artist since, but
@@ -79,32 +91,42 @@ func TestHTTPPlexClient_FindArtistByTitle_MissListsEachSectionOnce(t *testing.T)
 	if _, err := c.FindArtistByTitle("Nobody"); !errors.Is(err, ErrArtistNotFound) {
 		t.Fatalf("err = %v; want ErrArtistNotFound", err)
 	}
-	if got, want := f.listingCounts(), map[string]int{"1": 1, "2": 1, "3": 0}; fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("first miss: listings per section = %v; want %v", got, want)
-	}
+	wantListings(t, f, "first miss", map[string]int{"1": 1, "2": 1})
 	if _, err := c.FindArtistByTitle("Nobody"); !errors.Is(err, ErrArtistNotFound) {
 		t.Fatalf("err = %v; want ErrArtistNotFound", err)
 	}
-	if got, want := f.listingCounts(), map[string]int{"1": 2, "2": 2, "3": 0}; fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("second miss: listings per section = %v; want %v", got, want)
-	}
+	wantListings(t, f, "second miss", map[string]int{"1": 2, "2": 2})
 }
 
-// An artist Plex added after its section was listed is found by the fresh pass.
+// An artist Plex added after its section was listed is found by the fresh
+// pass, which caches the new listing for later lookups.
 func TestHTTPPlexClient_FindArtistByTitle_FreshPassFindsAddedArtist(t *testing.T) {
-	f, c := newFakeArtistServer(t, map[string][]string{"1": {"Alpha"}})
-	if _, err := c.FindArtistByTitle("Alpha"); err != nil {
+	f, c := newFakeArtistServer(t, map[string][]string{"1": {"Alpha"}, "2": {"Gamma"}})
+	if _, err := c.FindArtistByTitle("Gamma"); err != nil { // lists both sections
+		t.Fatalf("FindArtistByTitle(Gamma): %v", err)
+	}
+	f.set(func() { f.artists["2"] = append(f.artists["2"], "Delta") })
+
+	for range 2 {
+		if got, err := c.FindArtistByTitle("Delta"); err != nil || got != "21" {
+			t.Errorf("FindArtistByTitle(Delta) = %q, %v; want 21", got, err)
+		}
+	}
+	wantListings(t, f, "after the fresh hit and a repeat", map[string]int{"1": 2, "2": 2})
+}
+
+// A cached match wins over a copy Plex added to another section since.
+func TestHTTPPlexClient_FindArtistByTitle_CachedMatchWins(t *testing.T) {
+	f, c := newFakeArtistServer(t, map[string][]string{"2": {"Alpha"}})
+	if _, err := c.FindArtistByTitle("Alpha"); err != nil { // lists both sections
 		t.Fatalf("FindArtistByTitle(Alpha): %v", err)
 	}
+	f.set(func() { f.artists["1"] = []string{"Alpha"} })
 
-	f.mu.Lock()
-	f.artists["2"] = []string{"Delta"}
-	f.mu.Unlock()
-
-	got, err := c.FindArtistByTitle("Delta")
-	if err != nil || got != "20" {
-		t.Errorf("FindArtistByTitle(Delta) = %q, %v; want 20", got, err)
+	if got, err := c.FindArtistByTitle("Alpha"); err != nil || got != "20" {
+		t.Errorf("FindArtistByTitle(Alpha) = %q, %v; want the cached 20", got, err)
 	}
+	wantListings(t, f, "after the cached hit", map[string]int{"1": 1, "2": 1})
 }
 
 // A failed section listing is returned, not reported as a missing artist.
@@ -118,16 +140,37 @@ func TestHTTPPlexClient_FindArtistByTitle_ListingError(t *testing.T) {
 	}
 }
 
-// A title with no ASCII letters or digits normalises to "", the same as every
-// other such artist; it must not match one of them, nor cost a request.
-func TestHTTPPlexClient_FindArtistByTitle_NonASCIITitle(t *testing.T) {
-	f, c := newFakeArtistServer(t, map[string][]string{"1": {"椎名林檎"}})
-
-	key, err := c.FindArtistByTitle("宇多田ヒカル")
-	if !errors.Is(err, ErrArtistNotFound) {
-		t.Errorf("got key %q, err %v; want ErrArtistNotFound", key, err)
+// A failed re-listing on a miss is returned too, and the cached listing still
+// serves later hits.
+func TestHTTPPlexClient_FindArtistByTitle_FreshPassListingError(t *testing.T) {
+	f, c := newFakeArtistServer(t, map[string][]string{"1": {"Alpha"}})
+	if _, err := c.FindArtistByTitle("Alpha"); err != nil {
+		t.Fatalf("FindArtistByTitle(Alpha): %v", err)
 	}
-	if got := f.listingCounts(); got["1"] != 0 {
-		t.Errorf("listed section 1 %d times; want 0", got["1"])
+	f.set(func() { f.listErr = true })
+
+	_, err := c.FindArtistByTitle("Nobody")
+	if err == nil || errors.Is(err, ErrArtistNotFound) || !strings.Contains(err.Error(), "list section") {
+		t.Errorf("miss: err = %v; want a section listing error", err)
+	}
+	if got, err := c.FindArtistByTitle("Alpha"); err != nil || got != "10" {
+		t.Errorf("FindArtistByTitle(Alpha) after the error = %q, %v; want the cached 10", got, err)
+	}
+}
+
+// A title with no ASCII letters or digits normalises to "", like every other
+// such title, so it matches only its exact title (ignoring case).
+func TestHTTPPlexClient_FindArtistByTitle_NonASCIITitle(t *testing.T) {
+	_, c := newFakeArtistServer(t, map[string][]string{"1": {"椎名林檎", "宇多田ヒカル", "ÉÈ"}})
+
+	for title, want := range map[string]string{"宇多田ヒカル": "11", "éè": "12"} {
+		if got, err := c.FindArtistByTitle(title); err != nil || got != want {
+			t.Errorf("FindArtistByTitle(%q) = %q, %v; want %s", title, got, err, want)
+		}
+	}
+	for _, title := range []string{"浜崎あゆみ", " "} {
+		if got, err := c.FindArtistByTitle(title); !errors.Is(err, ErrArtistNotFound) {
+			t.Errorf("FindArtistByTitle(%q) = %q, %v; want ErrArtistNotFound", title, got, err)
+		}
 	}
 }
