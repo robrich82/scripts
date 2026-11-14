@@ -462,7 +462,8 @@ func TestHTTPPlexMovieClient_ReusesSectionListing(t *testing.T) {
 
 // sectionServer serves two movie sections, "1" and "2". Each listing request
 // gets the next body in that section's list (the last repeats), or a 500 for "".
-func sectionServer(t *testing.T, bodies map[string][]string) (*httptest.Server, map[string]int) {
+// It returns how often each section was listed.
+func sectionServer(t *testing.T, bodies map[string][]string) (*httptest.Server, func() map[string]int) {
 	t.Helper()
 	var mu sync.Mutex
 	listed := make(map[string]int)
@@ -491,7 +492,11 @@ func sectionServer(t *testing.T, bodies map[string][]string) (*httptest.Server, 
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	return srv, listed
+	return srv, func() map[string]int {
+		mu.Lock()
+		defer mu.Unlock()
+		return maps.Clone(listed)
+	}
 }
 
 // A miss lists each section once: one the run hasn't listed yet isn't listed
@@ -506,15 +511,15 @@ func TestHTTPPlexMovieClient_MissListsEachSectionOnce(t *testing.T) {
 	if rk, err := c.FindMovieByTMDBID("129"); err != nil || rk != "77" {
 		t.Fatalf("FindMovieByTMDBID(129) = %q, %v; want 77", rk, err)
 	}
-	if listed["1"] != 1 || listed["2"] != 0 {
-		t.Fatalf("after a hit in section 1: listings %v; want section 1 once, section 2 never", listed)
+	if listed()["1"] != 1 || listed()["2"] != 0 {
+		t.Fatalf("after a hit in section 1: listings %v; want section 1 once, section 2 never", listed())
 	}
 
 	if _, err := c.FindMovieByTMDBID("999"); !errors.Is(err, ErrPlexMovieNotFound) {
 		t.Fatalf("missing movie: err %v; want ErrPlexMovieNotFound", err)
 	}
-	if listed["1"] != 2 || listed["2"] != 1 {
-		t.Errorf("after a miss: listings %v; want each section listed once more by the miss", listed)
+	if listed()["1"] != 2 || listed()["2"] != 1 {
+		t.Errorf("after a miss: listings %v; want each section listed once more by the miss", listed())
 	}
 }
 
@@ -551,5 +556,66 @@ func TestHTTPPlexMovieClient_FreshPassListingError(t *testing.T) {
 	_, err := c.FindMovieByTMDBID("999")
 	if err == nil || errors.Is(err, ErrPlexMovieNotFound) || !strings.Contains(err.Error(), "list section 1") {
 		t.Errorf("err %v; want the section 1 listing error", err)
+	}
+}
+
+func moviesJSON(movies ...string) string {
+	return `{"MediaContainer":{"Metadata":[` + strings.Join(movies, ",") + `]}}`
+}
+
+func movieJSON(ratingKey, title string, year int, guid string) string {
+	return fmt.Sprintf(`{"ratingKey":%q,"title":%q,"year":%d,"Guid":[{"id":%q}]}`, ratingKey, title, year, guid)
+}
+
+// #172: findPlexMovie searches by title right after a GUID miss; the miss has
+// just listed every section, so the title search reuses those listings.
+func TestHTTPPlexMovieClient_TitleLookupReusesListing(t *testing.T) {
+	srv, listed := sectionServer(t, map[string][]string{
+		"1": {moviesJSON(movieJSON("77", "Spirited Away", 2001, "imdb://tt0245429"))},
+		"2": {moviesJSON(movieJSON("88", "Your Name.", 2016, "tmdb://372058"))},
+	})
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+
+	if _, err := c.FindMovieByTMDBID("129"); !errors.Is(err, ErrPlexMovieNotFound) {
+		t.Fatalf("FindMovieByTMDBID(129): err %v; want ErrPlexMovieNotFound", err)
+	}
+	if listed()["1"] != 1 || listed()["2"] != 1 {
+		t.Fatalf("after the GUID miss: listings %v; want each section once", listed())
+	}
+	if rk, err := c.FindMovieByTitle("Spirited Away", "2001"); err != nil || rk != "77" {
+		t.Errorf("FindMovieByTitle(Spirited Away) = %q, %v; want 77", rk, err)
+	}
+	if rk, err := c.FindMovieByTitle("your name", ""); err != nil || rk != "88" {
+		t.Errorf("FindMovieByTitle(your name) = %q, %v; want 88", rk, err)
+	}
+	if listed()["1"] != 1 || listed()["2"] != 1 {
+		t.Errorf("after two title hits: listings %v; want no more", listed())
+	}
+}
+
+// The title search keeps its year tolerance of one year either way when it
+// matches against a cached listing.
+func TestHTTPPlexMovieClient_TitleLookupYearTolerance(t *testing.T) {
+	srv, listed := sectionServer(t, map[string][]string{
+		"1": {moviesJSON(movieJSON("10", "Dune", 1984, "tmdb://841"))},
+		"2": {moviesJSON(movieJSON("20", "Dune", 2021, "tmdb://438631"))},
+	})
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+
+	for _, tc := range []struct{ year, want string }{
+		{"2021", "20"},
+		{"2022", "20"},
+		{"1985", "10"},
+		{"", "10"}, // no year: the first title match
+	} {
+		if rk, err := c.FindMovieByTitle("Dune", tc.year); err != nil || rk != tc.want {
+			t.Errorf("FindMovieByTitle(Dune, %q) = %q, %v; want %s", tc.year, rk, err, tc.want)
+		}
+	}
+	if listed()["1"] != 1 || listed()["2"] != 1 {
+		t.Errorf("after four title hits: listings %v; want each section once", listed())
+	}
+	if _, err := c.FindMovieByTitle("Dune", "2000"); !errors.Is(err, ErrPlexMovieNotFound) {
+		t.Errorf("FindMovieByTitle(Dune, 2000): err %v; want ErrPlexMovieNotFound", err)
 	}
 }
