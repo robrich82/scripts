@@ -80,10 +80,14 @@ func TestResolveMovieRating_PlexDefaultPrefersTMDBGUID(t *testing.T) {
 		titleRatingKey: "20",
 		ratingsByKey:   map[string]NZRating{"10": RatingR16, "20": RatingPG},
 	}
-	rr := newMovieRatingResolver(nil, makeCache(t), false, false, plex, answerPrompter(""))
+	cache := makeCache(t)
+	rr := newMovieRatingResolver(nil, cache, false, false, plex, answerPrompter(""))
 
 	if got := rr.ResolveMovieRating("12345", "Coco", "2017"); got != RatingR16 {
 		t.Errorf("got %q, want R16 from the GUID match", got)
+	}
+	if cached, _ := cache.Get("12345"); cached != RatingR16 {
+		t.Errorf("cached %q; want Plex's R16, accepted with a blank answer", cached)
 	}
 	if len(plex.titleLookups) != 0 {
 		t.Errorf("title lookups %v; want none after a GUID match", plex.titleLookups)
@@ -169,13 +173,17 @@ func TestResolveMovieRating_RepromptNamesWhatBlankDoes(t *testing.T) {
 func TestResolveMovieRating_PlexGUIDErrorGivesNoDefault(t *testing.T) {
 	plex := &fakePlexMovieClient{findTMDBErr: errors.New("plex: 500"), titleRatingKey: "77", contentRating: RatingR16}
 	p := &recordingPrompter{}
-	rr := newMovieRatingResolver(nil, makeCache(t), false, false, plex, p.ask)
+	cache := makeCache(t)
+	rr := newMovieRatingResolver(nil, cache, false, false, plex, p.ask)
 
 	var got NZRating
 	out := captureStdout(t, func() { got = rr.ResolveMovieRating("12345", "Coco", "2017") })
 
 	if got != RatingNone {
 		t.Errorf("got %q; want no rating (blank answer, no default)", got)
+	}
+	if _, ok := cache.Get("12345"); ok {
+		t.Error("a skipped rating was cached")
 	}
 	if len(plex.titleLookups) != 0 {
 		t.Errorf("title lookups %v; want none after a lookup error", plex.titleLookups)

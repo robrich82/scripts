@@ -26,7 +26,7 @@ func TestAskRating(t *testing.T) {
 	}{
 		{"code", []string{"R16"}, RatingNone, RatingR16, 1},
 		{"code with spaces and lower case", []string{" rp 16 "}, RatingG, RatingRP16, 1},
-		// The bare age codes are ratings, not menu positions.
+		// Bare age codes (13/15/16/18) are ratings in their own right.
 		{"13", []string{"13"}, RatingNone, Rating13, 1},
 		{"15", []string{"15"}, RatingNone, Rating15, 1},
 		{"16", []string{"16"}, RatingNone, Rating16, 1},

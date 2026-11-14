@@ -727,6 +727,9 @@ func TestResolveEpisodeRating_BlankWithNoPlexDefault_Skips(t *testing.T) {
 	if got != RatingNone {
 		t.Errorf("got %q, want RatingNone when Plex has no rating and user skips", got)
 	}
+	if _, ok := rc.GetShowRating("12345"); ok {
+		t.Error("a skipped rating was cached")
+	}
 }
 
 func TestResolveEpisodeRating_BlankUsesPlexTitleFallback(t *testing.T) {

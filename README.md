@@ -352,8 +352,8 @@ The NZ rating is asked for once per movie and then cached. A rating found on
 TMDB or by the Classification Office is shown for you to confirm (blank) or
 override. With neither, you're prompted, with the rating Plex already has as the
 blank-input default (the movie is found in Plex by TMDB ID, then by title and
-release year). The default is shown in brackets (`[M]`), and the rating you
-enter is echoed back (`→ R16`) before it is cached.
+release year). The default is shown in brackets (`[M]`), and the chosen rating
+is echoed back (`→ R16`) before it is cached.
 
 ### Usage
 
@@ -545,7 +545,7 @@ Episode files must contain a season/episode pattern in their name, e.g.
 
 The NZ rating is asked for once per show and then cached. A source's rating, or
 else the one Plex already has, is the blank-input default, shown in brackets
-(`[M]`). The rating you enter is echoed back (`→ R16`) before it is cached.
+(`[M]`). The chosen rating is echoed back (`→ R16`) before it is cached.
 
 ### Usage
 
