@@ -198,8 +198,10 @@ func (c *httpPlexClient) FindShowByTMDBID(tmdbID string) (string, error) {
 }
 
 // findInSection scans a single library section for a show with the given GUID.
+// Without includeGuids=1, Plex lists a modern-agent show with only its plex://
+// guid, so the TMDB ID would never match.
 func (c *httpPlexClient) findInSection(sectionKey, wantGUID string) (string, error) {
-	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=2")
+	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=2&includeGuids=1")
 	if err != nil {
 		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
 	}

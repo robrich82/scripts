@@ -123,15 +123,21 @@ func plexAllShowsJSONLegacyLower(ratingKey, guidStr string) string {
 	return `{"MediaContainer":{"Metadata":[{"ratingKey":"` + ratingKey + `","guid":"` + guidStr + `"}]}}`
 }
 
+// Like Plex, the fake server lists a modern-agent show's Guid array only when
+// asked with includeGuids=1; otherwise the show has just its plex:// guid.
 func TestHTTPPlexClient_FindShowByTMDBID_Found(t *testing.T) {
 	var gotSectionPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/library/sections" {
+		switch {
+		case r.URL.Path == "/library/sections":
 			fmt.Fprint(w, plexSectionsJSON("1", "show"))
-		} else {
+		case r.URL.Query().Get("includeGuids") == "1":
 			gotSectionPath = r.URL.Path
 			fmt.Fprint(w, plexAllShowsJSON("42", "tmdb://12345"))
+		default:
+			gotSectionPath = r.URL.Path
+			fmt.Fprint(w, plexAllShowsJSONLegacyLower("42", "plex://show/5d9c086c46115600200aa2fe"))
 		}
 	}))
 	defer srv.Close()
