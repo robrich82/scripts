@@ -94,9 +94,7 @@ type httpPlexClient struct {
 	token      string
 	httpClient *http.Client
 
-	// showKeyCache caches tmdbID → Plex ratingKey within a single run to avoid
-	// repeatedly scanning the full library.
-	showKeyCache map[string]string
+	showKeyCache map[string]string         // tmdbID → Plex ratingKey
 	sectionItems map[string][]plexShowItem // section key → its last listing
 }
 
@@ -182,7 +180,8 @@ func (c *httpPlexClient) FindShowByTMDBID(tmdbID string) (string, error) {
 
 // findShow returns the rating key of the first show that match accepts, or
 // ErrPlexNotFound. It searches the section listings fetched earlier in this
-// run, then fresh listings, as Plex may have added the show since.
+// run, then fresh listings, as Plex may have added the show since; a cached
+// match in any section wins over a copy newly added to another.
 func (c *httpPlexClient) findShow(match func(plexShowItem) bool) (string, error) {
 	sections, err := c.showSectionKeys()
 	if err != nil {

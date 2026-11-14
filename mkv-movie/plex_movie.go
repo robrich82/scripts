@@ -149,8 +149,10 @@ func (c *httpPlexMovieClient) FindMovieByTMDBID(tmdbID string) (string, error) {
 	return key, err
 }
 
-// findMovie mirrors mkv-tvshow's findShow: the rating key of the first movie
-// that match accepts, from this run's listings and then fresh ones.
+// findMovie returns the rating key of the first movie that match accepts, or
+// ErrPlexMovieNotFound. It searches the section listings fetched earlier in
+// this run, then fresh listings, as Plex may have added the movie since; a
+// cached match in any section wins over a copy newly added to another.
 func (c *httpPlexMovieClient) findMovie(match func(plexMovieItem) bool) (string, error) {
 	sections, err := c.movieSectionKeys()
 	if err != nil {
@@ -206,7 +208,9 @@ func (c *httpPlexMovieClient) movieSectionKeys() ([]string, error) {
 }
 
 // sectionListing returns the movies in a Plex section: the listing fetched
-// earlier in this run, unless fresh or there is none. fetched reports a request.
+// earlier in this run, unless fresh or there is none. fetched reports a
+// request. Without includeGuids=1, Plex lists a modern-agent movie with only
+// its plex:// guid, so a TMDB ID would never match.
 func (c *httpPlexMovieClient) sectionListing(sectionKey string, fresh bool) (items []plexMovieItem, fetched bool, err error) {
 	if items, ok := c.sectionItems[sectionKey]; ok && !fresh {
 		return items, false, nil

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,10 +11,11 @@ import (
 	"testing"
 )
 
-// listingServer serves two show sections, "1" and "2". Each listing request
-// gets the next body in that section's list (the last repeats), or a 500 for "".
-// It returns how often each section was listed.
-func listingServer(t *testing.T, bodies map[string][]string) (*httptest.Server, func() map[string]int) {
+// sectionServer serves two show sections, "1" and "2", plus a movie section the
+// client must skip. Each listing request gets the next body in that section's
+// list (the last repeats), or a 500 for "". It returns how often each section
+// was listed.
+func sectionServer(t *testing.T, bodies map[string][]string) (*httptest.Server, func() map[string]int) {
 	t.Helper()
 	var mu sync.Mutex
 	listed := make(map[string]int)
@@ -45,11 +47,7 @@ func listingServer(t *testing.T, bodies map[string][]string) (*httptest.Server, 
 	return srv, func() map[string]int {
 		mu.Lock()
 		defer mu.Unlock()
-		out := make(map[string]int, len(listed))
-		for k, v := range listed {
-			out[k] = v
-		}
-		return out
+		return maps.Clone(listed)
 	}
 }
 
@@ -57,16 +55,16 @@ func showsJSON(shows ...string) string {
 	return `{"MediaContainer":{"Metadata":[` + strings.Join(shows, ",") + `]}}`
 }
 
-func showJSON(ratingKey, title, tmdbID string) string {
-	return `{"ratingKey":"` + ratingKey + `","title":"` + title + `","Guid":[{"id":"tmdb://` + tmdbID + `"}]}`
+func showJSON(ratingKey, title, guid string) string {
+	return fmt.Sprintf(`{"ratingKey":%q,"title":%q,"Guid":[{"id":%q}]}`, ratingKey, title, guid)
 }
 
 // #172: a section's listing is fetched once a run and answers later lookups,
 // by TMDB ID and by title alike.
 func TestHTTPPlexClient_ReusesSectionListing(t *testing.T) {
-	srv, listed := listingServer(t, map[string][]string{
-		"1": {showsJSON(showJSON("77", "Show A", "129"), showJSON("78", "Show B", "354912"))},
-		"2": {showsJSON(showJSON("88", "Show C", "1399"))},
+	srv, listed := sectionServer(t, map[string][]string{
+		"1": {showsJSON(showJSON("77", "Show A", "tmdb://129"), showJSON("78", "Show B", "tmdb://354912"))},
+		"2": {showsJSON(showJSON("88", "Show C", "tmdb://1399"))},
 	})
 	c := newHTTPPlexClient(srv.URL, "tok")
 
@@ -86,9 +84,9 @@ func TestHTTPPlexClient_ReusesSectionListing(t *testing.T) {
 // A miss lists each section once more: one the run hasn't listed yet isn't
 // listed again by the fresh pass.
 func TestHTTPPlexClient_MissListsEachSectionOnce(t *testing.T) {
-	srv, listed := listingServer(t, map[string][]string{
-		"1": {showsJSON(showJSON("77", "Show A", "129"))},
-		"2": {showsJSON(showJSON("88", "Show C", "1399"))},
+	srv, listed := sectionServer(t, map[string][]string{
+		"1": {showsJSON(showJSON("77", "Show A", "tmdb://129"))},
+		"2": {showsJSON(showJSON("88", "Show C", "tmdb://1399"))},
 	})
 	c := newHTTPPlexClient(srv.URL, "tok")
 
@@ -109,10 +107,10 @@ func TestHTTPPlexClient_MissListsEachSectionOnce(t *testing.T) {
 
 // A show Plex added after the run's first listing is found by the fresh pass.
 func TestHTTPPlexClient_FreshPassFindsAddedShow(t *testing.T) {
-	srv, _ := listingServer(t, map[string][]string{
+	srv, _ := sectionServer(t, map[string][]string{
 		"1": {
-			showsJSON(showJSON("77", "Show A", "129")),
-			showsJSON(showJSON("77", "Show A", "129"), showJSON("78", "Show B", "354912")),
+			showsJSON(showJSON("77", "Show A", "tmdb://129")),
+			showsJSON(showJSON("77", "Show A", "tmdb://129"), showJSON("78", "Show B", "tmdb://354912")),
 		},
 		"2": {showsJSON()},
 	})
@@ -128,9 +126,9 @@ func TestHTTPPlexClient_FreshPassFindsAddedShow(t *testing.T) {
 
 // A listing that fails in the fresh pass is an error, not "not found".
 func TestHTTPPlexClient_FreshPassListingError(t *testing.T) {
-	srv, _ := listingServer(t, map[string][]string{
-		"1": {showsJSON(showJSON("77", "Show A", "129")), ""},
-		"2": {showsJSON(showJSON("88", "Show C", "1399"))},
+	srv, _ := sectionServer(t, map[string][]string{
+		"1": {showsJSON(showJSON("77", "Show A", "tmdb://129")), ""},
+		"2": {showsJSON(showJSON("88", "Show C", "tmdb://1399"))},
 	})
 	c := newHTTPPlexClient(srv.URL, "tok")
 
@@ -140,5 +138,31 @@ func TestHTTPPlexClient_FreshPassListingError(t *testing.T) {
 	_, err := c.FindShowByTMDBID("999")
 	if err == nil || errors.Is(err, ErrPlexNotFound) || !strings.Contains(err.Error(), "list section 1") {
 		t.Errorf("err %v; want the section 1 listing error", err)
+	}
+}
+
+// A listing that fails on the title path is an error, not "not found".
+func TestHTTPPlexClient_TitleLookupListingError(t *testing.T) {
+	srv, _ := sectionServer(t, map[string][]string{
+		"1": {""},
+		"2": {showsJSON(showJSON("88", "Show C", "tmdb://1399"))},
+	})
+
+	_, err := newHTTPPlexClient(srv.URL, "tok").FindShowByTitle("Show C")
+	if err == nil || errors.Is(err, ErrPlexNotFound) || !strings.Contains(err.Error(), "list section 1") {
+		t.Errorf("err %v; want the section 1 listing error", err)
+	}
+}
+
+// RefreshLibraries reports a failed request for the section list.
+func TestHTTPPlexClient_RefreshLibraries_SectionsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	err := newHTTPPlexClient(srv.URL, "tok").RefreshLibraries()
+	if err == nil || !strings.Contains(err.Error(), "list sections") {
+		t.Errorf("err %v; want the section list error", err)
 	}
 }

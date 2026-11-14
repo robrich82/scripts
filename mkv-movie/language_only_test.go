@@ -511,15 +511,15 @@ func TestHTTPPlexMovieClient_MissListsEachSectionOnce(t *testing.T) {
 	if rk, err := c.FindMovieByTMDBID("129"); err != nil || rk != "77" {
 		t.Fatalf("FindMovieByTMDBID(129) = %q, %v; want 77", rk, err)
 	}
-	if listed()["1"] != 1 || listed()["2"] != 0 {
-		t.Fatalf("after a hit in section 1: listings %v; want section 1 once, section 2 never", listed())
+	if got := listed(); got["1"] != 1 || got["2"] != 0 {
+		t.Fatalf("after a hit in section 1: listings %v; want section 1 once, section 2 never", got)
 	}
 
 	if _, err := c.FindMovieByTMDBID("999"); !errors.Is(err, ErrPlexMovieNotFound) {
 		t.Fatalf("missing movie: err %v; want ErrPlexMovieNotFound", err)
 	}
-	if listed()["1"] != 2 || listed()["2"] != 1 {
-		t.Errorf("after a miss: listings %v; want each section listed once more by the miss", listed())
+	if got := listed(); got["1"] != 2 || got["2"] != 1 {
+		t.Errorf("after a miss: listings %v; want each section listed once more by the miss", got)
 	}
 }
 
@@ -579,8 +579,8 @@ func TestHTTPPlexMovieClient_TitleLookupReusesListing(t *testing.T) {
 	if _, err := c.FindMovieByTMDBID("129"); !errors.Is(err, ErrPlexMovieNotFound) {
 		t.Fatalf("FindMovieByTMDBID(129): err %v; want ErrPlexMovieNotFound", err)
 	}
-	if listed()["1"] != 1 || listed()["2"] != 1 {
-		t.Fatalf("after the GUID miss: listings %v; want each section once", listed())
+	if got := listed(); got["1"] != 1 || got["2"] != 1 {
+		t.Fatalf("after the GUID miss: listings %v; want each section once", got)
 	}
 	if rk, err := c.FindMovieByTitle("Spirited Away", "2001"); err != nil || rk != "77" {
 		t.Errorf("FindMovieByTitle(Spirited Away) = %q, %v; want 77", rk, err)
@@ -588,8 +588,8 @@ func TestHTTPPlexMovieClient_TitleLookupReusesListing(t *testing.T) {
 	if rk, err := c.FindMovieByTitle("your name", ""); err != nil || rk != "88" {
 		t.Errorf("FindMovieByTitle(your name) = %q, %v; want 88", rk, err)
 	}
-	if listed()["1"] != 1 || listed()["2"] != 1 {
-		t.Errorf("after two title hits: listings %v; want no more", listed())
+	if got := listed(); got["1"] != 1 || got["2"] != 1 {
+		t.Errorf("after two title hits: listings %v; want no more", got)
 	}
 }
 
@@ -612,10 +612,76 @@ func TestHTTPPlexMovieClient_TitleLookupYearTolerance(t *testing.T) {
 			t.Errorf("FindMovieByTitle(Dune, %q) = %q, %v; want %s", tc.year, rk, err, tc.want)
 		}
 	}
-	if listed()["1"] != 1 || listed()["2"] != 1 {
-		t.Errorf("after four title hits: listings %v; want each section once", listed())
+	if got := listed(); got["1"] != 1 || got["2"] != 1 {
+		t.Errorf("after four title hits: listings %v; want each section once", got)
 	}
-	if _, err := c.FindMovieByTitle("Dune", "2000"); !errors.Is(err, ErrPlexMovieNotFound) {
-		t.Errorf("FindMovieByTitle(Dune, 2000): err %v; want ErrPlexMovieNotFound", err)
+	for _, year := range []string{"2023", "1986", "2000"} { // two years off is too far
+		if _, err := c.FindMovieByTitle("Dune", year); !errors.Is(err, ErrPlexMovieNotFound) {
+			t.Errorf("FindMovieByTitle(Dune, %s): err %v; want ErrPlexMovieNotFound", year, err)
+		}
+	}
+}
+
+// A movie Plex added after the run's first listing is found by title in the
+// fresh pass.
+func TestHTTPPlexMovieClient_TitleLookupFreshPassFindsAddedMovie(t *testing.T) {
+	srv, _ := sectionServer(t, map[string][]string{
+		"1": {
+			moviesJSON(movieJSON("77", "Spirited Away", 2001, "tmdb://129")),
+			moviesJSON(movieJSON("77", "Spirited Away", 2001, "tmdb://129"), movieJSON("78", "Your Name.", 2016, "imdb://tt5311514")),
+		},
+		"2": {moviesJSON()},
+	})
+	c := newHTTPPlexMovieClient(srv.URL, "tok")
+
+	if _, err := c.FindMovieByTMDBID("129"); err != nil {
+		t.Fatal(err)
+	}
+	if rk, err := c.FindMovieByTitle("Your Name", "2016"); err != nil || rk != "78" {
+		t.Errorf("FindMovieByTitle(Your Name) = %q, %v; want 78 from the fresh listing", rk, err)
+	}
+}
+
+// A listing that fails on the title path is an error, not "not found".
+func TestHTTPPlexMovieClient_TitleLookupListingError(t *testing.T) {
+	srv, _ := sectionServer(t, map[string][]string{
+		"1": {""},
+		"2": {moviesJSON(movieJSON("88", "Your Name.", 2016, "tmdb://372058"))},
+	})
+
+	_, err := newHTTPPlexMovieClient(srv.URL, "tok").FindMovieByTitle("Your Name", "2016")
+	if err == nil || errors.Is(err, ErrPlexMovieNotFound) || !strings.Contains(err.Error(), "list section 1") {
+		t.Errorf("err %v; want the section 1 listing error", err)
+	}
+}
+
+// The title search never lists a show section.
+func TestHTTPPlexMovieClient_TitleLookupSkipsShowSections(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/library/sections" {
+			t.Errorf("listed %s; want only the section list", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, plexMovieSectionsJSON("1", "show"))
+	}))
+	defer srv.Close()
+
+	if _, err := newHTTPPlexMovieClient(srv.URL, "tok").FindMovieByTitle("Spirited Away", "2001"); !errors.Is(err, ErrPlexMovieNotFound) {
+		t.Errorf("err %v; want ErrPlexMovieNotFound", err)
+	}
+}
+
+// RefreshLibraries reports a failed request for the section list.
+func TestHTTPPlexMovieClient_RefreshLibraries_SectionsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	err := newHTTPPlexMovieClient(srv.URL, "tok").RefreshLibraries()
+	if err == nil || !strings.Contains(err.Error(), "list sections") {
+		t.Errorf("err %v; want the section list error", err)
 	}
 }
