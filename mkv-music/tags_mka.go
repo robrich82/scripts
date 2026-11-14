@@ -118,7 +118,6 @@ func readMKVHeaderTitle(mkvmergePath, mkvPath string) string {
 }
 
 // readMKVHeaderDate returns the date stored in the MKV container header.
-// date_utc from mkvmerge JSON is a Unix timestamp in seconds (UTC).
 // Returns false when the header has no date, and an error when mkvmerge
 // can't read the file.
 func readMKVHeaderDate(mkvmergePath, mkvPath string) (time.Time, bool, error) {
@@ -126,7 +125,8 @@ func readMKVHeaderDate(mkvmergePath, mkvPath string) (time.Time, bool, error) {
 	cmd := exec.Command(mkvmergePath, "--identify", "--identification-format", "json", mkvPath)
 	cmd.Stdout = &buf
 	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
+	// Exit code 1 means warnings only.
+	if err := cmd.Run(); err != nil && (cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != 1) {
 		return time.Time{}, false, fmt.Errorf("mkvmerge --identify: %w", err)
 	}
 	var info mkvmergeIdentify
