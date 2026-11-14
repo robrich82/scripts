@@ -28,7 +28,7 @@ const (
 // in case-insensitive order of their first folder name, and the rating cache
 // is saved after each one. plex must not be nil.
 func (p *Processor) RunLanguageOnly() LanguageOnlyStats {
-	shows := make(map[string][]string) // TMDB ID → its folders' names, sorted
+	shows := make(map[string][]string) // TMDB ID → its folders' base names
 	for folder, id := range p.cache.AllEntries() {
 		if id != "" {
 			shows[id] = append(shows[id], filepath.Base(folder))
@@ -64,35 +64,30 @@ func (p *Processor) RunLanguageOnly() LanguageOnlyStats {
 }
 
 // mergedLanguageEntry takes each language key from the first folder whose
-// manual_data.json entry sets it. folder names the entry that set "language",
-// or is the first folder when none did.
-func mergedLanguageEntry(folders []string, manualData map[string]ManualEntry) (entry ManualEntry, folder string) {
-	folder = folders[0]
+// manual_data.json entry sets it.
+func mergedLanguageEntry(folders []string, manualData map[string]ManualEntry) ManualEntry {
+	var entry ManualEntry
 	for _, f := range folders {
 		e := manualData[f]
-		if entry.Language == "" && e.Language != "" {
-			entry.Language, folder = e.Language, f
-		}
+		entry.Language = cmp.Or(entry.Language, e.Language)
 		entry.AltLanguage = cmp.Or(entry.AltLanguage, e.AltLanguage)
 		entry.Alt2Language = cmp.Or(entry.Alt2Language, e.Alt2Language)
 	}
-	return entry, folder
+	return entry
 }
 
 // languageOnlyShow sets the audio language of the show tmdbID, cached under
-// the given folder names, and prints its result line, named by the first
-// folder. Each language comes from the first folder whose manual_data.json
-// entry sets it. Plex is searched only when the language is due.
+// the given sorted folder names, and prints its result line, named by the
+// first folder. Plex is searched only when the language is due.
 func (p *Processor) languageOnlyShow(tmdbID string, folders []string) languageOnlyResult {
 	name := folders[0]
-	entry, entryFolder := mergedLanguageEntry(folders, p.manualData)
-	langs, err := p.showAudioLangs(tmdbID, entry)
+	langs, err := p.showAudioLangs(tmdbID, mergedLanguageEntry(folders, p.manualData))
 	if err != nil {
 		fmt.Printf("[ERR]     %s: TMDB show: %v\n", name, err)
 		return languageError
 	}
 	if langs.Default == "" {
-		fmt.Printf("[SKIP]    %s (TMDB has no original language; set \"language\" for %q in manual_data.json)\n", name, entryFolder)
+		fmt.Printf("[SKIP]    %s (TMDB has no original language; set \"language\" for %q in manual_data.json)\n", name, name)
 		return languageSkipped
 	}
 	applied, due := p.languageDue(tmdbID, langs)
@@ -154,7 +149,7 @@ type cacheSaver struct {
 	lastSaved string // the show after which the cache was last saved
 }
 
-// save saves the cache after the show named name.
+// save saves the cache; name is the show finish names if a later save fails.
 func (s *cacheSaver) save(name string) {
 	err := s.cache.Save()
 	switch {

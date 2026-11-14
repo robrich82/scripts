@@ -190,7 +190,7 @@ func TestRunLanguageOnly_GUIDNotFound_FallsBackToTitle(t *testing.T) {
 func TestRunLanguageOnly_StaleShowKey_ClearedAndReported(t *testing.T) {
 	rc := ratingCacheWithShows(t, filepath.Join(t.TempDir(), "rating_cache.json"), "1")
 	rc.SetPlexKey("1", "old")
-	plex := &fakePlexClient{setLangErr: ErrPlexNotFound}
+	plex := &fakePlexClient{setLangErr: fmt.Errorf("plex: prefs old: %w", ErrPlexNotFound)}
 	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "1"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plex, nil)
 
 	var stats LanguageOnlyStats
@@ -236,7 +236,7 @@ func TestMain_LanguageOnlyWithoutPlex_Exits(t *testing.T) {
 }
 
 // #172: with Plex set and no cached shows, --language-only prints its header
-// and a summary, and makes no Plex call (the URL is unreachable).
+// and a summary.
 func TestMain_LanguageOnly_PrintsSummary(t *testing.T) {
 	out, err := runMainEnv(t, t.TempDir(), t.TempDir(), []string{"TMDB_API_KEY=unused", "PLEX_URL=http://127.0.0.1:1", "PLEX_TOKEN=unused"}, "--language-only")
 	if err != nil {
@@ -248,32 +248,60 @@ func TestMain_LanguageOnly_PrintsSummary(t *testing.T) {
 	}
 }
 
-// #172: a show cached under several folders gets one result line, named by
-// the first folder. Each language comes from the first folder whose
-// manual_data.json entry sets it, so the run agrees with a full run of the
-// folder that set "language". A show only the show cache has is set too.
+// #172: a show cached under several folders (here an absolute path, its
+// legacy bare-name key, and a second folder) gets one result line, named by
+// the first folder. Each language key comes from the first folder whose
+// manual_data.json entry sets it. A show only the show cache has is set too.
 func TestRunLanguageOnly_SeveralFolders_MergesManualData(t *testing.T) {
 	rc := emptyRatingCache(t)
-	primary, alt := &fakePlexClient{showRatingKey: "k1"}, &fakePlexClient{}
-	plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
-	cache := cacheWith(t, map[string]string{"show (2005)": "1", "Show": "1"})
+	primary, alt, alt2 := &fakePlexClient{showRatingKey: "k1"}, &fakePlexClient{}, &fakePlexClient{}
+	plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt}, namedPlexClient{name: alt2Account, client: alt2})
+	tv := filepath.Join(t.TempDir(), "TV")
+	cache := cacheWith(t, map[string]string{filepath.Join(tv, "show (2005)"): "1", filepath.Join(tv, "Show"): "1", "Show": "1"})
 	manualData := map[string]ManualEntry{
 		"Show":        {AltLanguage: "en"},
-		"show (2005)": {Language: "ko", AltLanguage: "fr"},
+		"show (2005)": {Language: "ko", AltLanguage: "fr", Alt2Language: "de"},
 	}
 	p := NewProcessor(Config{}, cache, manualData, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
 
 	var stats LanguageOnlyStats
 	out := captureStdout(t, func() { stats = p.RunLanguageOnly() })
 
-	if got := strings.TrimSpace(out); got != "[UPDATED] Show (lang: ko-KR|alt=en-US)" {
-		t.Errorf("output %q; want one line for Show, with ko from show (2005) and en from Show", got)
+	if got := strings.TrimSpace(out); got != "[UPDATED] Show (lang: ko-KR|alt=en-US|alt2=de-DE)" {
+		t.Errorf("output %q; want one line for Show: ko and de from show (2005), en from Show", got)
 	}
 	if stats != (LanguageOnlyStats{Updated: 1}) {
 		t.Errorf("stats %+v; want 1 updated", stats)
 	}
-	if len(primary.setLangCalls) != 1 || primary.setLangCalls[0].lang != "ko" || len(alt.setLangCalls) != 1 || alt.setLangCalls[0].lang != "en" {
-		t.Errorf("calls primary %+v, alt %+v; want ko and en", primary.setLangCalls, alt.setLangCalls)
+	if len(primary.setLangCalls) != 1 || primary.setLangCalls[0].lang != "ko" || len(alt.setLangCalls) != 1 || alt.setLangCalls[0].lang != "en" ||
+		len(alt2.setLangCalls) != 1 || alt2.setLangCalls[0].lang != "de" {
+		t.Errorf("calls primary %+v, alt %+v, alt2 %+v; want ko, en and de", primary.setLangCalls, alt.setLangCalls, alt2.setLangCalls)
+	}
+}
+
+// A show-cache entry with no TMDB ID is left out.
+func TestRunLanguageOnly_EmptyID_Skipped(t *testing.T) {
+	plex := &langPlex{fakePlexClient: &fakePlexClient{}}
+	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": ""}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, emptyRatingCache(t), nil, plex, nil)
+
+	var stats LanguageOnlyStats
+	out := captureStdout(t, func() { stats = p.RunLanguageOnly() })
+
+	if out != "" || stats != (LanguageOnlyStats{}) || plex.lookups != 0 {
+		t.Errorf("output %q, stats %+v, lookups %d; want nothing", out, stats, plex.lookups)
+	}
+}
+
+// A title search that fails, after the GUID lookup found nothing, is an error.
+func TestRunLanguageOnly_TitleSearchFails_IsError(t *testing.T) {
+	plex := &fakePlexClient{findErr: ErrPlexNotFound, findTitleErr: errors.New("plex: HTTP 500")}
+	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "1"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, emptyRatingCache(t), nil, plex, nil)
+
+	var stats LanguageOnlyStats
+	out := captureStdout(t, func() { stats = p.RunLanguageOnly() })
+
+	if got := strings.TrimSpace(out); got != "[ERR]     Show A (failed: Plex lookup: plex: HTTP 500)" || stats != (LanguageOnlyStats{Errors: 1}) {
+		t.Errorf("output %q, stats %+v; want one lookup error", got, stats)
 	}
 }
 
@@ -389,6 +417,46 @@ func TestRunLanguageOnly_FailedSave_NamesLastSaved(t *testing.T) {
 
 	if !strings.Contains(out, "[!] The rating cache was last saved after Show A; later Plex keys and audio languages are lost") {
 		t.Errorf("no warning naming Show A:\n%s", out)
+	}
+}
+
+// A save that recovers mid-run says so, and a later failure is printed again.
+func TestRunLanguageOnly_FailedSave_RecoversMidRun(t *testing.T) {
+	setBeforeFinalSave(t, func() {})
+	dir := filepath.Join(t.TempDir(), "missing")
+	rc, err := LoadRatingCache(filepath.Join(dir, "rating_cache.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmdb := &langTMDB{
+		fakeTMDB: &fakeTMDB{},
+		langs:    map[string]string{"1": "ja", "2": "ko", "3": "fr"},
+		onGet: func(id string) {
+			switch id {
+			case "2": // Show A's save failed; Show B's succeeds
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			case "3": // Show C's fails again
+				if err := os.RemoveAll(dir); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+	}
+	plex := &langPlex{fakePlexClient: &fakePlexClient{}, byTMDB: map[string]string{"1": "k1", "2": "k2", "3": "k3"}}
+	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "1", "Show B": "2", "Show C": "3"}), nil, tmdb, nil, nil, nil, nil, rc, nil, plex, nil)
+
+	out := captureStdout(t, func() { p.RunLanguageOnly() })
+
+	if n := strings.Count(out, "Failed to save rating cache"); n != 2 {
+		t.Errorf("save failure printed %d times; want twice:\n%s", n, out)
+	}
+	if !strings.Contains(out, "[UPDATED] Show B (lang: ko-KR)\n[i] Rating cache saved.\n") {
+		t.Errorf("recovery after Show B not reported:\n%s", out)
+	}
+	if !strings.Contains(out, "last saved after Show B") {
+		t.Errorf("end-of-run warning doesn't name Show B:\n%s", out)
 	}
 }
 

@@ -1295,10 +1295,10 @@ func (p *Processor) languageDue(tmdbID string, langs AudioLangs) (applied string
 // alt accounts, only those applied doesn't cover yet are set, so a retry
 // leaves the others (and any choice made in Plex) alone; a failed alt is
 // reported in altSuffix and left out of the record, so the next run retries it
-// alone. set is the signature recorded for langs, or "" when no account was
-// pushed to: only removed alt accounts differed, or every alt that needed it
-// failed (see altSuffix). A show key Plex no longer has is cleared, and err is
-// ErrPlexNotFound.
+// alone. set is the signature langs give every account, failed alts included,
+// or "" when no account was pushed to: only removed alt accounts differed, or
+// every alt that needed it failed. A show key Plex no longer has is cleared,
+// and err is ErrPlexNotFound.
 func (p *Processor) setAudioLanguage(showKey, tmdbID string, langs AudioLangs, applied string) (set, altSuffix string, err error) {
 	sig := appliedLangSignature(p.plex, langs)
 	record := sig

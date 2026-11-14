@@ -1910,13 +1910,43 @@ func TestApplyPlexRatings_AudioLanguage(t *testing.T) {
 		t.Errorf("TMDB error: %d calls; want none and a warning:\n%s", len(plexClient.setLangCalls), out)
 	}
 
-	plexClient = &fakePlexClient{showRatingKey: "plex-99", setLangErr: ErrPlexNotFound}
+	plexClient = &fakePlexClient{showRatingKey: "plex-99", setLangErr: fmt.Errorf("plex: prefs: %w", ErrPlexNotFound)}
 	out = run(Config{OverwriteLanguage: true}, plexClient)
 	if key, _ := rc.GetPlexKey("111"); key != "" {
 		t.Errorf("stale key %q kept", key)
 	}
 	if strings.Contains(out, "audio language") {
 		t.Errorf("stale key reported:\n%s", out)
+	}
+}
+
+// With alt accounts, the full run reports a failed alt even when only that
+// alt was due, and a retry pushes the alt alone.
+func TestApplyPlexRatings_AudioLanguage_AltAccounts(t *testing.T) {
+	rc := emptyRatingCache(t)
+	run := func(altErr error) (out string, primary, alt *fakePlexClient) {
+		primary, alt = &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{setLangErr: altErr}
+		plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
+		p := NewProcessor(Config{}, emptyCache(t), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
+		out = captureStdout(t, func() { p.applyPlexRatings("111", nil, "Show A", "Show A", false, ManualEntry{}) })
+		return out, primary, alt
+	}
+	const failed = `[i] Plex: audio language for "Show A" set to "ja-JP|alt=ja-JP"; alt: alt failed`
+
+	out, primary, _ := run(errors.New("alt failed"))
+	if !strings.Contains(out, failed) || len(primary.setLangCalls) != 1 {
+		t.Errorf("first run: %d primary calls; want 1 and the alt failure:\n%s", len(primary.setLangCalls), out)
+	}
+	out, primary, _ = run(errors.New("alt failed"))
+	if !strings.Contains(out, failed) || len(primary.setLangCalls) != 0 {
+		t.Errorf("retry: %d primary calls; want 0 and the alt failure:\n%s", len(primary.setLangCalls), out)
+	}
+	out, primary, alt := run(nil)
+	if !strings.Contains(out, `set to "ja-JP|alt=ja-JP"`+"\n") || len(primary.setLangCalls) != 0 || len(alt.setLangCalls) != 1 {
+		t.Errorf("alt recovers: primary %d, alt %d calls; want 0 and 1:\n%s", len(primary.setLangCalls), len(alt.setLangCalls), out)
+	}
+	if got, _ := rc.GetLanguageApplied("111"); got != "ja-JP|alt=ja-JP" {
+		t.Errorf("recorded %q; want ja-JP|alt=ja-JP", got)
 	}
 }
 
