@@ -59,7 +59,7 @@ type Processor struct {
 	sessionOriginalLang   map[string]string   // tmdbID → original_language from TMDB (ISO 639-1)
 
 	// Run saves the show and rating caches through these; NewProcessor sets them.
-	showSaver   *cacheSaver
+	showSaver   *cacheSaver // nil when cache is
 	ratingSaver *cacheSaver // nil when ratingCache is
 }
 
@@ -96,7 +96,9 @@ func NewProcessor(
 		sessionPromptedRating: make(map[string]NZRating),
 		sessionPlexKey:        make(map[string]string),
 		sessionOriginalLang:   make(map[string]string),
-		showSaver:             &cacheSaver{cache: cache, name: "show cache", holds: "show matches"},
+	}
+	if cache != nil { // --deband-only runs without one
+		p.showSaver = &cacheSaver{cache: cache, name: "show cache", path: cache.path, holds: "show matches"}
 	}
 	if ratingCache != nil {
 		p.ratingSaver = newRatingSaver(ratingCache, "ratings and Plex state")
@@ -421,9 +423,9 @@ func (p *Processor) Run() Stats {
 		p.ratingSaver.finish()
 	}
 
-	if err := p.retryList.Save(); err != nil {
-		fmt.Printf("[!] Failed to save retry list: %v\n", err)
-	}
+	retrySaver := &cacheSaver{cache: p.retryList, name: "retry list", path: p.retryList.path,
+		holds: "changes to the episodes to retry"}
+	retrySaver.saveOnce()
 
 	// After all shows are processed, trigger a full library scan when extras were
 	// processed. The startup RefreshLibraries fires before tagging, so extras get

@@ -125,7 +125,7 @@ func main() {
 
 	cache, err := LoadCache(filepath.Join(cfgDir, "show_cache.json"))
 	if err != nil {
-		exitOnCacheLoadError("show_cache.json", err)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "show_cache.json"), err)
 	}
 
 	tmdb := newHTTPTMDBClient(apiKey, "https://api.themoviedb.org/3")
@@ -134,7 +134,7 @@ func main() {
 	if *missingMode {
 		ignoreList, err := LoadMissingIgnoreList(filepath.Join(cfgDir, "missing_ignore.json"))
 		if err != nil {
-			exitOnCacheLoadError("missing_ignore.json", err)
+			exitOnCacheLoadError(filepath.Join(cfgDir, "missing_ignore.json"), err)
 		}
 		missingManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
 		if err != nil {
@@ -153,14 +153,14 @@ func main() {
 
 	titleCache, err := LoadTitleCache(filepath.Join(cfgDir, "title_cache.json"))
 	if err != nil {
-		exitOnCacheLoadError("title_cache.json", err)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "title_cache.json"), err)
 	}
 
 	// --language-only mode: apply Plex audio language preference for all cached shows.
 	if *languageOnly {
 		ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 		if err != nil {
-			exitOnCacheLoadError("rating_cache.json", err)
+			exitOnCacheLoadError(filepath.Join(cfgDir, "rating_cache.json"), err)
 		}
 		langManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
 		if err != nil {
@@ -201,12 +201,12 @@ func main() {
 
 	retryList, err := LoadRetryList(filepath.Join(cfgDir, "pending_dates.json"))
 	if err != nil {
-		exitOnCacheLoadError("pending_dates.json", err)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "pending_dates.json"), err)
 	}
 
 	ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 	if err != nil {
-		exitOnCacheLoadError("rating_cache.json", err)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "rating_cache.json"), err)
 	}
 
 	cfg := Config{

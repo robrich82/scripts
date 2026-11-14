@@ -103,6 +103,8 @@ func (tc *TitleChecker) Run() {
 		return nil
 	})
 
+	saver := &cacheSaver{cache: tc.titleCache, name: "title cache", path: tc.titleCache.path,
+		holds: "full titles"}
 	for _, showFolder := range showOrder {
 		cacheKey := filepath.Join(tc.cfg.MediaDir, showFolder)
 		showID, ok := tc.cache.Get(cacheKey)
@@ -219,10 +221,9 @@ func (tc *TitleChecker) Run() {
 			tc.applyFullTitle(effectivePath, buildFullMKVTitle(stem, tmdbTitles))
 		}
 
-		if err := tc.titleCache.Save(); err != nil {
-			fmt.Printf("[!] Failed to save title cache: %v\n", err)
-		}
+		saver.save(showFolder)
 	}
+	saver.finish()
 }
 
 // checkMismatch compares fileTitles against expectedTitles and, when they

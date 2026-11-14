@@ -108,11 +108,11 @@ func runSetRating(ratingStr, mediaDir string, prompter Prompter) {
 
 	showCache, err := LoadCache(filepath.Join(cfgDir, "show_cache.json"))
 	if err != nil {
-		exitOnCacheLoadError("show_cache.json", err)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "show_cache.json"), err)
 	}
 	ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 	if err != nil {
-		exitOnCacheLoadError("rating_cache.json", err)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "rating_cache.json"), err)
 	}
 
 	plans, unknown := planSetRating(mediaDir, showCache, ratingCache)
@@ -144,7 +144,7 @@ func runSetRating(ratingStr, mediaDir string, prompter Prompter) {
 
 	episodesCleared, filesReset := applySetRating(ratingCache, mediaDir, plans, rating)
 	if err := ratingCache.Save(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving rating_cache.json: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error saving %s: %v\n%sNo rating was set.\n", ratingCache.path, err, hintLine(err))
 		os.Exit(1)
 	}
 

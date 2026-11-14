@@ -86,6 +86,8 @@ func (mc *MissingChecker) Run() error {
 	}
 
 	anyFound := false
+	saver := &cacheSaver{cache: mc.ignoreList, name: "ignore list", path: mc.ignoreList.path,
+		holds: "ignore choices"}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -318,10 +320,9 @@ func (mc *MissingChecker) Run() error {
 			}
 		}
 
-		if err := mc.ignoreList.Save(); err != nil {
-			fmt.Printf("Warning: could not save ignore list: %v\n", err)
-		}
+		saver.save(showName)
 	}
+	saver.finish()
 
 	if !anyFound {
 		fmt.Println("No missing episodes found.")

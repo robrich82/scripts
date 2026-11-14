@@ -15,7 +15,7 @@ func runResetRating(query, mediaDir string) {
 
 	showCache, err := LoadCache(filepath.Join(cfgDir, "show_cache.json"))
 	if err != nil {
-		exitOnCacheLoadError("show_cache.json", err)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "show_cache.json"), err)
 	}
 
 	matches := showCache.FindByQuery(query)
@@ -45,7 +45,7 @@ func runResetRating(query, mediaDir string) {
 
 	ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 	if err != nil {
-		exitOnCacheLoadError("rating_cache.json", err)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "rating_cache.json"), err)
 	}
 
 	epCleared := ratingCache.ResetForShowID(tmdbID)
@@ -55,7 +55,7 @@ func runResetRating(query, mediaDir string) {
 	}
 
 	if err := ratingCache.Save(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving rating_cache.json: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error saving %s: %v\n%sNothing was reset.\n", ratingCache.path, err, hintLine(err))
 		os.Exit(1)
 	}
 	fmt.Printf("Done. Rating cleared, %d episode rating(s) removed, %d file(s) reset.\n", epCleared, len(paths))
