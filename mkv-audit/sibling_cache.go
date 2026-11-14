@@ -60,8 +60,8 @@ var errAbs = errors.New("can't resolve path")
 // tvEntry is a confirmed show ID to save to mkv-tvshow's cache.
 type tvEntry struct{ dir, absPath, id string }
 
-// movieEntry is a confirmed movie ID to save to mkv-movie's cache. files
-// are the .mkv files to map to it; none for a collection.
+// movieEntry is a confirmed movie ID to save to mkv-movie's cache, with the
+// .mkv files to map to it.
 type movieEntry struct {
 	dir, title, year, id string
 	files                []string
@@ -292,8 +292,12 @@ func loadSiblingCaches(libType string) *siblingTMDBCaches {
 		sc.movie = &siblingSaver[movieEntry]{cache: movieSibling, save: saveMovieTMDBIDEntries,
 			describe: func(e movieEntry) string { return fmt.Sprintf("%s (id %s)", e.dir, e.id) }}
 		sc.movie.open(func(path string) error {
+			// A type error still fills the other sections; none is used, as
+			// the load warning says.
 			_, shape, err := readMovieCache(path)
-			sc.movieIDs, sc.movieFiles = shape.TMDBIDs, shape.fileView()
+			if err == nil {
+				sc.movieIDs, sc.movieFiles = shape.TMDBIDs, shape.fileView()
+			}
 			return err
 		})
 	}
@@ -309,16 +313,10 @@ func (sc *siblingTMDBCaches) rememberTV(dir, absPath, id string) {
 	sc.tv.add(tvEntry{dir, absPath, id})
 }
 
-// rememberMovie records a confirmed movie ID for the content root at root,
-// for this run and in mkv-movie's cache. In a collection (mkv-movie maps
-// files under root to another movie) only the title key is saved: the
-// root's other files are other movies, so none is mapped to id.
-func (sc *siblingTMDBCaches) rememberMovie(dir, root, title, year, id string, files []string) {
-	for other := range sc.rootMovieIDs(root) {
-		if other != id {
-			files = nil
-		}
-	}
+// rememberMovie records a movie ID for a content root none of whose files
+// mkv-movie maps yet, for this run and in mkv-movie's cache: under its title
+// key, and for each of files, so mkv-movie --clean keeps the ID.
+func (sc *siblingTMDBCaches) rememberMovie(dir, title, year, id string, files []string) {
 	if sc.movieIDs == nil {
 		sc.movieIDs = map[string]string{}
 	}
@@ -355,31 +353,53 @@ func (sc *siblingTMDBCaches) lookupTV(folderName, libraryRoot string) string {
 }
 
 // lookupMovie returns the TMDB movie ID for the content root at root (a
-// folder, or the file itself in a flat library), or "". The ID mkv-movie
-// recorded for the files under root comes first, used only when they all
-// agree. Failing that, as for a collection (its files are different movies),
-// the "title:YEAR" key is tried ("title:" when year is empty). mkv-movie
-// builds its titles differently, so that key is mostly mkv-audit's own.
-func (sc *siblingTMDBCaches) lookupMovie(title, year, root string) string {
-	if ids := sc.rootMovieIDs(root); len(ids) == 1 {
-		for id := range ids {
-			return id
-		}
+// folder, or the file itself in a flat library), or "". The ID mkv-movie maps
+// the files under root to comes first. When they map to different movies (a
+// collection), the one most of them map to is used: mkv-audit takes one
+// origin per root, and asking would only pick among mkv-movie's answers.
+// Failing that, the "title:YEAR" key is tried ("title:" when year is empty);
+// unmapped reports that the ID came from it and no file under root is mapped.
+func (sc *siblingTMDBCaches) lookupMovie(title, year, root string) (id string, unmapped bool) {
+	if id := mostMappedID(sc.rootMovieIDs(root)); id != "" {
+		return id, false
 	}
-	return sc.movieIDs[title+":"+year]
+	id = sc.movieIDs[title+":"+year]
+	return id, id != ""
 }
 
-// rootMovieIDs returns the IDs mkv-movie maps the files under root to.
-func (sc *siblingTMDBCaches) rootMovieIDs(root string) map[string]bool {
+// rootMovieIDs counts the files under root mkv-movie maps to each ID.
+func (sc *siblingTMDBCaches) rootMovieIDs(root string) map[string]int {
 	rootKey := pathKey(root)
 	prefix := rootKey + string(filepath.Separator)
-	ids := map[string]bool{}
+	ids := map[string]int{}
 	for k, v := range sc.movieFiles {
 		if v != "" && (k == rootKey || strings.HasPrefix(k, prefix)) {
-			ids[v] = true
+			ids[v]++
 		}
 	}
 	return ids
+}
+
+// mostMappedID returns the ID with the most files, a tie going to the lowest
+// ID (as a number), so the answer doesn't change from run to run. "" when
+// counts is empty.
+func mostMappedID(counts map[string]int) string {
+	best := ""
+	for id, n := range counts {
+		if best == "" || n > counts[best] || n == counts[best] && lowerID(id, best) {
+			best = id
+		}
+	}
+	return best
+}
+
+// lowerID reports whether TMDB ID a is below b. IDs are digit strings with no
+// leading zeros, so the shorter one is the smaller.
+func lowerID(a, b string) bool {
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	return a < b
 }
 
 // siblingSaver saves confirmed IDs to one sibling cache as they come. A

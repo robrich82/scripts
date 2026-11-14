@@ -209,12 +209,13 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		root := filepath.Join(libraryRoot, dir)
 
 		var id string
+		var unmapped bool // a movie found by title key, with no file mapped to it
 		getOrigin := tmdb.GetMovieOriginByID
 		if libType == "tv" {
 			id = sibling.lookupTV(dir, libraryRoot)
 			getOrigin = tmdb.GetTVOriginByID
 		} else {
-			id = sibling.lookupMovie(title, year, root)
+			id, unmapped = sibling.lookupMovie(title, year, root)
 		}
 		cached := id != ""
 		if !cached && !skipAll {
@@ -236,12 +237,13 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 			continue
 		}
 		origins[dir] = info
-		if !cached {
-			if libType == "tv" {
-				sibling.rememberTV(dir, root, id)
-			} else {
-				sibling.rememberMovie(dir, root, title, year, id, dirFiles[dir])
-			}
+		switch {
+		case !cached && libType == "tv":
+			sibling.rememberTV(dir, root, id)
+		// A title key alone (as older mkv-audit saved) is pruned by
+		// mkv-movie --clean, so map the root's files to it too.
+		case !cached || unmapped && slices.ContainsFunc(dirFiles[dir], isMKV):
+			sibling.rememberMovie(dir, title, year, id, dirFiles[dir])
 		}
 	}
 	return origins

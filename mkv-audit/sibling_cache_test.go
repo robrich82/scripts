@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -636,6 +637,28 @@ func TestFetchOrigins_ShowPathAnySpelling(t *testing.T) {
 	})
 }
 
+// A write replaces the file's contents, leaves no temp file, and (where
+// modes mean anything) leaves the file readable by the sibling tools.
+func TestAtomicWriteFile_ReplacesFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "cache.json")
+	writeSibling(t, target, `{"old":true}`)
+
+	if err := atomicWriteFile(target, []byte(`{"new":true}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if b, err := os.ReadFile(target); err != nil || string(b) != `{"new":true}` {
+		t.Errorf("contents = %q (%v); want the new JSON", b, err)
+	}
+	if fi, err := os.Stat(target); err != nil {
+		t.Fatal(err)
+	} else if runtime.GOOS != "windows" && fi.Mode().Perm() != 0644 {
+		t.Errorf("mode = %v; want 0644", fi.Mode().Perm())
+	}
+	assertNoTempFiles(t, dir)
+}
+
 // A rename that fails leaves the target as it was and no temp file behind.
 func TestAtomicWriteFile_FailedRenameCleansUp(t *testing.T) {
 	dir := t.TempDir()
@@ -724,32 +747,45 @@ func TestFetchOrigins_UnloadableIDNotSaved(t *testing.T) {
 func TestFetchOrigins_ManualIDMustBeDigits(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
+		libType string // "" → movie
 		ids     map[string]string
 		answers []string
 		wantID  string
 	}{
-		{"accept prompt", map[string]string{"Amelie": "42"}, []string{"tt0133093", "yes", "603"}, "603"},
-		{"no results prompt", nil, []string{"skip", "603"}, "603"},
-		{"no results then blank", nil, []string{"skip", ""}, ""},
+		{"accept prompt", "", map[string]string{"Amelie": "42"}, []string{"tt0133093", "yes", "603"}, "603"},
+		{"no results prompt", "", nil, []string{"skip", "603"}, "603"},
+		{"no results then blank", "", nil, []string{"skip", ""}, ""},
 		// The tools key their caches by the ID's text, as TMDB writes it.
-		{"leading zeros dropped", nil, []string{"0603"}, "603"},
-		{"all zeros", map[string]string{"Amelie": "42"}, []string{"000", "603"}, "603"},
+		{"leading zeros dropped", "", nil, []string{"0603"}, "603"},
+		{"all zeros", "", map[string]string{"Amelie": "42"}, []string{"000", "603"}, "603"},
+		{"show", "tv", map[string]string{"Amelie": "42"}, []string{"-1", "0603"}, "603"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
 			tmdb := titleTMDB{ids: tc.ids, langs: map[string]string{"42": "fr", "603": "en"}}
 			p := &scriptPrompter{answers: tc.answers}
+			libType, cachePath := "movie", movieRatingCachePath()
+			if tc.libType == "tv" {
+				libType, cachePath = "tv", tvShowCachePath()
+			}
 
 			captureStdout(t, func() {
-				fetchOrigins(paths, root, "movie", tmdb, p)
+				fetchOrigins(paths, root, libType, tmdb, p)
 			})
 
 			if len(p.asked) != len(tc.answers) {
 				t.Errorf("asked %d times; want %d:\n%s", len(p.asked), len(tc.answers), strings.Join(p.asked, "\n"))
 			}
 			if tc.wantID == "" {
-				if _, err := os.Stat(movieRatingCachePath()); !os.IsNotExist(err) {
+				if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
 					t.Errorf("cache saved; want nothing saved (%v)", err)
+				}
+				return
+			}
+			if libType == "tv" {
+				saved := readSibling(t, cachePath)
+				if key := filepath.Join(root, "Amelie (2001)"); len(saved) != 1 || string(saved[key]) != `"`+tc.wantID+`"` {
+					t.Errorf("show cache = %v; want only %s → %s", saved, key, tc.wantID)
 				}
 				return
 			}
@@ -758,6 +794,29 @@ func TestFetchOrigins_ManualIDMustBeDigits(t *testing.T) {
 				t.Errorf("tmdb_ids = %v, files = %v; want only %s", ids, files, tc.wantID)
 			}
 		})
+	}
+}
+
+func TestNormalizeTMDBID(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{"603", "603", true},
+		{"00603", "603", true},
+		{strings.Repeat("9", 40), strings.Repeat("9", 40), true}, // TMDB answers "not found"
+		{"0", "", false},
+		{"000", "", false},
+		{"", "", false},
+		{" 603", "", false}, // the prompt trims; the ID itself has no spaces
+		{"+5", "", false},
+		{"-1", "", false},
+		{"６０３", "", false}, // full-width digits
+		{"tt0133093", "", false},
+	} {
+		if got, ok := normalizeTMDBID(tc.in); got != tc.want || ok != tc.ok {
+			t.Errorf("normalizeTMDBID(%q) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
+		}
 	}
 }
 
@@ -927,54 +986,97 @@ func TestFetchOrigins_SameMovieKeyAskedOnce(t *testing.T) {
 	}
 }
 
-// A root whose files mkv-movie maps to different movies (a collection) is
-// asked about once: the answer is saved under its title key only, which the
-// next run uses. None of the root's files is mapped to the answer, whether
-// it is one of the collection's movies or not, and every existing mapping
-// (in files under another spelling, or in legacy meta_applied) is kept.
-func TestFetchOrigins_CollectionAskedOnceAcrossRuns(t *testing.T) {
-	for _, answer := range []string{"y", "393"} {
-		t.Run(answer, func(t *testing.T) {
+// A root whose files mkv-movie maps to different movies (a collection) takes
+// the ID most of them map to, the lowest on a tie, counting files under any
+// spelling and in legacy meta_applied. Nothing is asked or saved, so
+// mkv-movie --clean has nothing of mkv-audit's to prune.
+func TestFetchOrigins_CollectionUsesMostMappedID(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cache  func(paths []string) map[string]map[string]string
+		wantID string
+	}{
+		{"most files", func(p []string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {p[0]: "24", p[1]: "393"}, "meta_applied": {p[2]: "393"}}
+		}, "393"},
+		{"tie goes to the lowest", func(p []string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {p[0]: "393", p[1]: "24"}}
+		}, "24"},
+		{"lowest as a number", func(p []string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {p[0]: "1000", p[1]: "999"}}
+		}, "999"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			root, paths := siblingLibrary(t, "Kill Bill Collection", "Vol 1.mkv", "Vol 2.mkv", "Extra.mkv")
-			vol1 := paths[0]
+			mapped := slices.Clone(paths)
 			if runtime.GOOS == "windows" {
-				vol1 = strings.ToUpper(vol1)
+				mapped[0] = strings.ToUpper(mapped[0])
 			}
-			writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{
-				"files":        {vol1: "24"},
-				"meta_applied": {paths[1]: "393"},
-			}))
-			want := map[string]string{"y": "42", "393": "393"}[answer]
-			tmdb := titleTMDB{ids: map[string]string{"Kill Bill Collection": "42"}, langs: map[string]string{"24": "en", "42": "fr", "393": "ja"}}
-			p := &scriptPrompter{answers: []string{answer}}
+			writeSibling(t, movieRatingCachePath(), mustJSON(t, tc.cache(mapped)))
+			before, _ := os.ReadFile(movieRatingCachePath())
+			tmdb := titleTMDB{ids: map[string]string{"Kill Bill Collection": "42"},
+				langs: map[string]string{"24": "en", "42": "fr", "393": "ja", "999": "de", "1000": "it"}}
 
-			captureStdout(t, func() {
-				fetchOrigins(paths, root, "movie", tmdb, p)
-			})
-
-			if len(p.asked) != 1 {
-				t.Errorf("asked %d times; want once", len(p.asked))
-			}
-			ids, files := readMovieSections(t)
-			if len(ids) != 1 || ids["Kill Bill Collection:"] != want {
-				t.Errorf("tmdb_ids = %v; want only the title key → %s", ids, want)
-			}
-			if len(files) != 1 || files[vol1] != "24" {
-				t.Errorf("files = %v; want only Vol 1 → 24 under its spelling, and Extra left unmapped", files)
-			}
-			var meta map[string]string
-			if err := json.Unmarshal(readSibling(t, movieRatingCachePath())["meta_applied"], &meta); err != nil || meta[paths[1]] != "393" || len(meta) != 1 {
-				t.Errorf("meta_applied = %v (%v); want it kept as it was", meta, err)
-			}
-
-			// The next run finds the collection by its title key, and asks nothing.
 			captureStdout(t, func() {
 				origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t})
-				if got, wantLang := origins["Kill Bill Collection"].OrigLang, tmdb.langs[want]; got != wantLang {
-					t.Errorf("second run origin = %q; want %q from the saved title key", got, wantLang)
+				if got, want := origins["Kill Bill Collection"].OrigLang, tmdb.langs[tc.wantID]; got != want {
+					t.Errorf("origin = %q; want %q from ID %s", got, want, tc.wantID)
 				}
 			})
+
+			if after, _ := os.ReadFile(movieRatingCachePath()); string(after) != string(before) {
+				t.Errorf("cache rewritten:\n%s\nwant it left as\n%s", after, before)
+			}
 		})
+	}
+}
+
+// A movie found by a title key alone (as older mkv-audit saved it) gets its
+// .mkv files mapped to the ID, so mkv-movie --clean keeps it; the next run
+// finds the mapping and leaves the cache alone.
+func TestFetchOrigins_TitleKeyHitMapsFiles(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv", "b.mkv")
+	writeSibling(t, movieRatingCachePath(), `{"tmdb_ids":{"Amelie:2001":"194"}}`)
+	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
+
+	captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("origins = %v; want fr from the title key", origins)
+		}
+	})
+
+	ids, files := readMovieSections(t)
+	if len(ids) != 1 || ids["Amelie:2001"] != "194" || len(files) != 2 || files[paths[0]] != "194" || files[paths[1]] != "194" {
+		t.Errorf("tmdb_ids = %v, files = %v; want the title key kept and both files → 194", ids, files)
+	}
+	before, _ := os.ReadFile(movieRatingCachePath())
+	captureStdout(t, func() { fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}) })
+	if after, _ := os.ReadFile(movieRatingCachePath()); string(after) != string(before) {
+		t.Errorf("second run rewrote the cache:\n%s", after)
+	}
+}
+
+// A cache mkv-movie would refuse to load (here a rating that isn't a string)
+// isn't used at all, though its other sections parse: the movie is searched
+// and asked about, as the warning says, and the cache is left alone.
+func TestFetchOrigins_UnloadableMovieCacheNotUsed(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	bad := mustJSON(t, map[string]any{"movies": map[string]int{"194": 5}, "files": map[string]string{paths[0]: "194"}})
+	writeSibling(t, movieRatingCachePath(), bad)
+	tmdb := titleTMDB{ids: map[string]string{"Amelie": "42"}, langs: map[string]string{"42": "fr", "194": "ja"}}
+	p := &scriptPrompter{answers: []string{"y"}}
+
+	out := captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", tmdb, p); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("origins = %v; want fr from the confirmed search result", origins)
+		}
+	})
+
+	if len(p.asked) != 1 || !strings.Contains(out, "Every movie is searched") {
+		t.Errorf("asked %d times; want once, after the load warning:\n%s", len(p.asked), out)
+	}
+	if after, _ := os.ReadFile(movieRatingCachePath()); string(after) != bad {
+		t.Errorf("cache = %s; want it left as %s", after, bad)
 	}
 }
 

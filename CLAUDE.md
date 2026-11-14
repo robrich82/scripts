@@ -49,7 +49,7 @@ Common shape of each tool:
 - Config, caches and state live in `%APPDATA%\<tool>\` (`$XDG_CONFIG_HOME/<tool>/` elsewhere). `configs/` in the repo holds gitignored junctions to those dirs for viewing real config.
 - Platform-specific code uses `//go:build windows` / `!windows` file pairs (Windows file creation time, process detection in sw-update).
 
-Cross-tool coupling: mkv-audit's track trimming reads `manual_data.json` from `%APPDATA%\mkv-tvshow\` or `%APPDATA%\mkv-movie\` (by library `type`) to know which audio languages each Plex account uses. Changing that file's `language`/`alt-language`/`alt2-language` keys affects both tools.
+Cross-tool coupling: mkv-audit's track trimming reads `manual_data.json` from `%APPDATA%\mkv-tvshow\` or `%APPDATA%\mkv-movie\` (by library `type`) to know which audio languages each Plex account uses. Changing that file's `language`/`alt-language`/`alt2-language` keys affects both tools. mkv-audit also reads and writes mkv-movie's `movie_rating_cache.json` (`tmdb_ids`/`files`, whose types `movieCacheShape` in `mkv-audit/sibling_cache.go` mirrors) and mkv-tvshow's `show_cache.json`, so changing either format affects mkv-audit.
 
 Environment: `TMDB_API_KEY` (mkv-movie, mkv-tvshow; optional for mkv-audit), `PLEX_URL`, `PLEX_TOKEN` (optional Plex integration in mkv-movie, mkv-tvshow, mkv-music), `PLEX_ALT_TOKEN`, `PLEX_ALT2_TOKEN` (mkv-movie/mkv-tvshow: only per-account stream/language prefs use these), `GITHUB_PERSONAL_ACCESS_TOKEN` (sw-update rate limit).
 
