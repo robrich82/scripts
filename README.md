@@ -571,6 +571,8 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--reset-rating <query>` | — | Clear the cached NZ rating for a show and reset the applied state on all its files so the next run re-fetches and re-applies it. `query` is a folder name substring or TMDB ID |
 | `--set-rating <RATING>` | — | Set `RATING` as the NZ rating for **every** show in the current directory, overriding any cached value, then exit (see below) |
 
+`--clean`, `--reset-rating`, `--set-rating`, `--deband-only`, `--missing`, `--language-only`, `--title-check` and `--ratings-only` each run on their own: setting two of them exits with an error before anything runs.
+
 #### Output
 
 ```
