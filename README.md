@@ -922,7 +922,9 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 
 Downloads send a `sw-update/1.0` `User-Agent` and a `Referer` (the app's `url`
 when it shares the asset's host, otherwise the asset's own origin) — Cloudflare
-front ends 403 both Go's default user agent and a spoofed browser one.
+front ends 403 both Go's default user agent and a spoofed browser one. Checks
+send the same `User-Agent`; it has no `(...)` comment because amd.com resets
+requests whose user agent has one.
 Each asset is tried up to three times with a short backoff on transient
 failures (403, 408, 429, 5xx, and connection errors); a 404 or 401 fails
 immediately. A web page served in place of the file (SourceForge `/download`

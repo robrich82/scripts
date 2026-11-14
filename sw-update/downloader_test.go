@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -25,8 +24,8 @@ func TestDownloadAssetSendsUserAgentAndReferer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("downloadAsset: %v", err)
 	}
-	if !strings.HasPrefix(gotUA, "sw-update/") {
-		t.Errorf("User-Agent = %q, want sw-update/...", gotUA)
+	if gotUA != userAgent {
+		t.Errorf("User-Agent = %q, want %q", gotUA, userAgent)
 	}
 	if want := srv.URL + "/page.html"; gotReferer != want {
 		t.Errorf("Referer = %q, want %q", gotReferer, want)

@@ -168,3 +168,22 @@ func TestCheckerRejectsHTTPAssetFromSourceForge(t *testing.T) {
 		t.Errorf("err = %v, result = %v, want an insecureURLError for the zip", err, result)
 	}
 }
+
+func TestHTMLCheckerSendsUserAgent(t *testing.T) {
+	var gotUA string
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		fmt.Fprint(w, `version 1.2 <a href="/app-1.2.exe">x</a>`)
+	})
+
+	res, err := NewChecker(srv.Client()).Check(htmlApp(srv.URL + "/downloads"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if gotUA != userAgent {
+		t.Errorf("User-Agent = %q, want %q", gotUA, userAgent)
+	}
+	if res.Version != "1.2" {
+		t.Errorf("Version = %q, want 1.2", res.Version)
+	}
+}
