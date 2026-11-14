@@ -145,6 +145,9 @@ func writeIgnoreFile(ignoreFile string, data IgnoreData) error {
 		return err
 	}
 	_, werr := tmp.Write(b)
+	if werr == nil { // flush before the rename, so a power loss can't leave zeros
+		werr = tmp.Sync()
+	}
 	if cerr := tmp.Close(); werr == nil {
 		werr = cerr
 	}
