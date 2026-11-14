@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +114,118 @@ func TestRun_TagOutcome_UpToDate_NotCounted(t *testing.T) {
 	}
 }
 
+func TestRun_TagOutcome_DateHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		tagger     *fakeTagger
+		timer      *fakeFileTimer // nil → no timer configured
+		wantCopied int
+		wantFailed string // "" → none
+		wantOut    string
+	}{
+		{"no date header", &fakeTagger{}, &fakeFileTimer{}, 1, "", ""},
+		{"no timer", &fakeTagger{date: headerDate}, nil, 1, "", ""},
+		{"header unreadable", &fakeTagger{dateErr: errors.New("exit status 2")}, &fakeFileTimer{}, 0, "date",
+			"[ERROR] read date failed for " + outcomeVideo + ": exit status 2"},
+		{"ctime only fails", &fakeTagger{date: headerDate}, &fakeFileTimer{setCreationTimeErr: errors.New("denied")}, 0, "ctime", ""},
+		{"mtime only fails", &fakeTagger{date: headerDate}, &fakeFileTimer{setTimesErr: errors.New("denied")}, 0, "mtime", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := musicDir(t, "Artist - Song.flac", outcomeVideo)
+			p := NewProcessor(dir, "", &fakePrompter{})
+			p.tagger = tt.tagger
+			if tt.timer != nil {
+				p.timer = tt.timer
+			}
+			out := captureStdout(t, func() { p.Run() })
+			tags := p.Tags()
+
+			if tags.Copied != tt.wantCopied {
+				t.Errorf("Copied = %d, want %d", tags.Copied, tt.wantCopied)
+			}
+			var want []string
+			if tt.wantFailed != "" {
+				want = []string{filepath.Join(dir, outcomeVideo) + " (failed: " + tt.wantFailed + ")"}
+			}
+			if !slices.Equal(tags.Failed, want) {
+				t.Errorf("Failed = %v, want %v", tags.Failed, want)
+			}
+			if tt.timer != nil && tt.tagger.date.IsZero() && len(tt.timer.setTimes) != 0 {
+				t.Errorf("SetTimes called %v without a header date", tt.timer.setTimes)
+			}
+			if !strings.Contains(out, tt.wantOut) {
+				t.Errorf("output missing %q:\n%s", tt.wantOut, out)
+			}
+		})
+	}
+}
+
+// A renamed video's outcome is recorded under its new name.
+func TestRun_TagOutcome_Renamed_RecordsNewPath(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		copyErr    error
+		wantCopied int
+		wantFailed bool
+	}{
+		{"copied", nil, 1, false},
+		{"copy fails", errors.New("mkvpropedit exited 2"), 0, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := musicDir(t, "01 - New.flac", "01 - Old - Old-video.mkv")
+			p := NewProcessor(dir, "", &fakePrompter{answers: []string{"r"}})
+			p.tagger = &fakeTagger{err: tt.copyErr, date: headerDate}
+			p.timer = &fakeFileTimer{}
+			var stats Stats
+			captureStdout(t, func() { stats, _, _ = p.Run() })
+			if stats.Renamed != 1 {
+				t.Fatalf("Renamed = %d, want 1", stats.Renamed)
+			}
+			newPath := filepath.Join(dir, "01 - New - New-video.mkv")
+			tags := p.Tags()
+			if tags.Copied != tt.wantCopied {
+				t.Errorf("Copied = %d, want %d", tags.Copied, tt.wantCopied)
+			}
+			var want []string
+			if tt.wantFailed {
+				want = []string{newPath + " (failed: tags)"}
+			}
+			if !slices.Equal(tags.Failed, want) {
+				t.Errorf("Failed = %v, want %v", tags.Failed, want)
+			}
+		})
+	}
+}
+
+// Outcomes add up over the videos of a run, and an upper-case .MKV is tagged.
+func TestRun_TagOutcome_Accumulates(t *testing.T) {
+	dir := musicDir(t, "Artist - Good.flac", "Artist - Bad.flac",
+		"Artist - Good - Good-video.MKV", "Artist - Bad - Bad-video.mkv")
+	p := NewProcessor(dir, "", &fakePrompter{})
+	p.tagger = &fakeTagger{date: headerDate}
+	p.timer = &failOnTimer{fail: "Artist - Bad - Bad-video.mkv"}
+	captureStdout(t, func() { p.Run() })
+
+	tags := p.Tags()
+	want := []string{filepath.Join(dir, "Artist - Bad - Bad-video.mkv") + " (failed: mtime)"}
+	if tags.Copied != 1 || !slices.Equal(tags.Failed, want) {
+		t.Errorf("Copied = %d, Failed = %v; want 1 and %v", tags.Copied, tags.Failed, want)
+	}
+}
+
+// failOnTimer fails SetTimes for the file named fail only.
+type failOnTimer struct{ fail string }
+
+func (f *failOnTimer) CreationTimeNeedsUpdate(string, int64) bool { return false }
+func (f *failOnTimer) SetCreationTime(string, time.Time) error    { return nil }
+func (f *failOnTimer) SetTimes(path string, _ time.Time) error {
+	if filepath.Base(path) == f.fail {
+		return errors.New("denied")
+	}
+	return nil
+}
+
 func TestRun_TagOutcome_NonMKV_NotTagged(t *testing.T) {
 	for _, video := range []string{"Artist - Song - Song-video.mp4", "Artist - Song - Song-video.AVI"} {
 		t.Run(video, func(t *testing.T) {
@@ -162,6 +275,8 @@ func TestPrintTagSummary(t *testing.T) {
 	}{
 		{"nothing tagged", TagOutcome{}, nil},
 		{"all copied", TagOutcome{Copied: 3}, []string{"Tags: 3 copied, 0 failed"}},
+		{"only failures", TagOutcome{Failed: []string{`C:\m\a.mkv (failed: date)`}},
+			[]string{"--- TAGGING FAILURES (1) ---", "Tags: 0 copied, 1 failed"}},
 		{"failures listed", TagOutcome{Copied: 1, Failed: []string{`C:\m\a.mkv (failed: tags)`, `C:\m\b.mkv (failed: mtime)`}},
 			[]string{"--- TAGGING FAILURES (2) ---", `C:\m\a.mkv (failed: tags)`, `C:\m\b.mkv (failed: mtime)`, "Tags: 1 copied, 2 failed"}},
 	}

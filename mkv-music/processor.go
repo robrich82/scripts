@@ -30,7 +30,7 @@ type Stats struct {
 
 // TagOutcome is a run's tag-copying result.
 type TagOutcome struct {
-	Copied int      // MKVs whose tags were copied and timestamps synced
+	Copied int      // MKVs whose tags were copied and, when they have a date header, timestamps synced
 	Failed []string // "<path> (failed: …)" for each MKV a tagging step failed on
 }
 
@@ -629,14 +629,18 @@ func (p *Processor) recordTagFailure(mkvPath string, failed []string) {
 }
 
 // syncTimestamps sets mkvPath's modified and created timestamps to match the
-// date stored in the MKV container header, and returns the ones that failed
-// ("ctime", "mtime"). No-op if timer or tagger is nil, or if the MKV has no
-// date header.
+// date stored in the MKV container header, and returns the steps that failed
+// ("date" when the header can't be read, "ctime", "mtime"). No-op if timer or
+// tagger is nil, or if the MKV has no date header.
 func (p *Processor) syncTimestamps(mkvPath string) (failed []string) {
 	if p.timer == nil || p.tagger == nil {
 		return nil
 	}
-	dt, ok := p.tagger.MKVDate(mkvPath)
+	dt, ok, err := p.tagger.MKVDate(mkvPath)
+	if err != nil {
+		fmt.Printf("    [ERROR] read date failed for %s: %v\n", filepath.Base(mkvPath), err)
+		return []string{"date"}
+	}
 	if !ok {
 		return nil
 	}

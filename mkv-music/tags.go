@@ -23,8 +23,8 @@ type MusicVideoTagger interface {
 	TagsMatchMKV(audioPath, mkvPath, titleSuffix string) (bool, error)
 	CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error
 	// MKVDate returns the date stored in the MKV container header and true,
-	// or zero time and false when absent or on error.
-	MKVDate(mkvPath string) (time.Time, bool)
+	// false when the header has no date, or an error when it can't be read.
+	MKVDate(mkvPath string) (time.Time, bool, error)
 }
 
 // AudioTags holds the metadata extracted from an audio file.
@@ -252,7 +252,7 @@ func newRealMusicVideoTagger() (*realMusicVideoTagger, error) {
 }
 
 // MKVDate implements MusicVideoTagger.
-func (t *realMusicVideoTagger) MKVDate(mkvPath string) (time.Time, bool) {
+func (t *realMusicVideoTagger) MKVDate(mkvPath string) (time.Time, bool, error) {
 	return readMKVHeaderDate(t.mkvmergePath, mkvPath)
 }
 
@@ -311,7 +311,7 @@ func (t *realMusicVideoTagger) TagsMatchMKV(audioPath, mkvPath, titleSuffix stri
 
 	// Check MKV header date matches the audio date.
 	if wantDt, ok := parseAudioDate(want.Date); ok {
-		mkvDate, hasMKVDate := readMKVHeaderDate(t.mkvmergePath, mkvPath)
+		mkvDate, hasMKVDate, _ := readMKVHeaderDate(t.mkvmergePath, mkvPath) // unreadable → no match → copy
 		if !hasMKVDate || mkvDate.UTC().Format("2006-01-02") != wantDt.UTC().Format("2006-01-02") {
 			return false, nil
 		}

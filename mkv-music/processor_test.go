@@ -33,6 +33,7 @@ type fakeTagger struct {
 	err       error
 	tagsMatch bool      // return value for TagsMatchMKV; default false → copy always runs
 	date      time.Time // MKVDate's result; zero → no date header
+	dateErr   error     // MKVDate's error: the header couldn't be read
 }
 
 type taggerCall struct {
@@ -50,8 +51,11 @@ func (f *fakeTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error
 	return f.err
 }
 
-func (f *fakeTagger) MKVDate(mkvPath string) (time.Time, bool) {
-	return f.date, !f.date.IsZero()
+func (f *fakeTagger) MKVDate(mkvPath string) (time.Time, bool, error) {
+	if f.dateErr != nil {
+		return time.Time{}, false, f.dateErr
+	}
+	return f.date, !f.date.IsZero(), nil
 }
 
 // --- buildAudioData tests ---
