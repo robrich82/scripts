@@ -123,15 +123,21 @@ func plexAllShowsJSONLegacyLower(ratingKey, guidStr string) string {
 	return `{"MediaContainer":{"Metadata":[{"ratingKey":"` + ratingKey + `","guid":"` + guidStr + `"}]}}`
 }
 
+// Like Plex, the fake server lists a modern-agent show's Guid array only when
+// asked with includeGuids=1; otherwise the show has just its plex:// guid.
 func TestHTTPPlexClient_FindShowByTMDBID_Found(t *testing.T) {
 	var gotSectionPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/library/sections" {
+		switch {
+		case r.URL.Path == "/library/sections":
 			fmt.Fprint(w, plexSectionsJSON("1", "show"))
-		} else {
+		case r.URL.Query().Get("includeGuids") == "1":
 			gotSectionPath = r.URL.Path
 			fmt.Fprint(w, plexAllShowsJSON("42", "tmdb://12345"))
+		default:
+			gotSectionPath = r.URL.Path
+			fmt.Fprint(w, plexAllShowsJSONLegacyLower("42", "plex://show/5d9c086c46115600200aa2fe"))
 		}
 	}))
 	defer srv.Close()
@@ -394,24 +400,32 @@ func TestHTTPPlexClient_FindShowByTMDBID_LegacyGuidString(t *testing.T) {
 }
 
 func TestHTTPPlexClient_FindShowByTMDBID_LegacyLowercaseGuid(t *testing.T) {
-	// Plex returns guid (lowercase) as "com.plexapp.agents.themoviedb://12345?lang=en".
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/library/sections" {
-			fmt.Fprint(w, plexSectionsJSON("1", "show"))
-		} else {
-			fmt.Fprint(w, plexAllShowsJSONLegacyLower("55", "com.plexapp.agents.themoviedb://12345?lang=en"))
-		}
-	}))
-	defer srv.Close()
+	// Plex returns guid (lowercase) as "com.plexapp.agents.themoviedb://12345?lang=en",
+	// with or without an empty Guid array (includeGuids=1 on a legacy agent).
+	for name, body := range map[string]string{
+		"no Guid":    plexAllShowsJSONLegacyLower("55", "com.plexapp.agents.themoviedb://12345?lang=en"),
+		"empty Guid": `{"MediaContainer":{"Metadata":[{"ratingKey":"55","guid":"com.plexapp.agents.themoviedb://12345?lang=en","Guid":[]}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/library/sections" {
+					fmt.Fprint(w, plexSectionsJSON("1", "show"))
+				} else {
+					fmt.Fprint(w, body)
+				}
+			}))
+			defer srv.Close()
 
-	c := newHTTPPlexClient(srv.URL, "token")
-	key, err := c.FindShowByTMDBID("12345")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if key != "55" {
-		t.Errorf("got ratingKey %q; want 55", key)
+			c := newHTTPPlexClient(srv.URL, "token")
+			key, err := c.FindShowByTMDBID("12345")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if key != "55" {
+				t.Errorf("got ratingKey %q; want 55", key)
+			}
+		})
 	}
 }
 

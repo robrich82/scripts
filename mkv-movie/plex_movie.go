@@ -80,6 +80,8 @@ type httpPlexMovieClient struct {
 // plexMovieItem is a movie in a Plex section listing.
 type plexMovieItem struct {
 	RatingKey string          `json:"ratingKey"`
+	Title     string          `json:"title"`
+	Year      int             `json:"year"`
 	Guid      json.RawMessage `json:"Guid"`
 	GuidLower string          `json:"guid"`
 }
@@ -137,10 +139,51 @@ func (c *httpPlexMovieClient) FindMovieByTMDBID(tmdbID string) (string, error) {
 	if key, ok := c.movieKeyCache[tmdbID]; ok {
 		return key, nil
 	}
+	wantGUID := "tmdb://" + tmdbID
+	key, err := c.findMovie(func(item plexMovieItem) bool {
+		return plexMovieItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID)
+	})
+	if err == nil {
+		c.movieKeyCache[tmdbID] = key
+	}
+	return key, err
+}
 
+// findMovie returns the rating key of the first movie that match accepts, or
+// ErrPlexMovieNotFound. It searches the section listings fetched earlier in
+// this run, then fresh listings, as Plex may have added the movie since; a
+// cached match in any section wins over a copy newly added to another.
+func (c *httpPlexMovieClient) findMovie(match func(plexMovieItem) bool) (string, error) {
+	sections, err := c.movieSectionKeys()
+	if err != nil {
+		return "", err
+	}
+	fetched := make(map[string]bool) // sections listed by this call
+	for _, fresh := range []bool{false, true} {
+		for _, section := range sections {
+			if fresh && fetched[section] {
+				continue
+			}
+			items, wasFetched, err := c.sectionListing(section, fresh)
+			if err != nil {
+				return "", err
+			}
+			fetched[section] = fetched[section] || wasFetched
+			for _, item := range items {
+				if match(item) {
+					return item.RatingKey, nil
+				}
+			}
+		}
+	}
+	return "", ErrPlexMovieNotFound
+}
+
+// movieSectionKeys returns the keys of Plex's movie library sections.
+func (c *httpPlexMovieClient) movieSectionKeys() ([]string, error) {
 	resp, err := c.plexGet("/library/sections")
 	if err != nil {
-		return "", fmt.Errorf("plex: list sections: %w", err)
+		return nil, fmt.Errorf("plex: list sections: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -153,43 +196,21 @@ func (c *httpPlexMovieClient) FindMovieByTMDBID(tmdbID string) (string, error) {
 		} `json:"MediaContainer"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
-		return "", fmt.Errorf("plex: decode sections: %w", err)
+		return nil, fmt.Errorf("plex: decode sections: %w", err)
 	}
-
-	var movieSections []string
+	var keys []string
 	for _, section := range sectionsResp.MediaContainer.Directory {
 		if section.Type == "movie" {
-			movieSections = append(movieSections, section.Key)
+			keys = append(keys, section.Key)
 		}
 	}
-
-	// The listings fetched earlier in this run answer most lookups. A movie
-	// they lack is looked for in fresh listings, as Plex may have added it.
-	wantGUID := "tmdb://" + tmdbID
-	fetched := make(map[string]bool) // sections listed by this call
-	for _, fresh := range []bool{false, true} {
-		for _, section := range movieSections {
-			if fresh && fetched[section] {
-				continue
-			}
-			items, wasFetched, err := c.sectionListing(section, fresh)
-			if err != nil {
-				return "", err
-			}
-			fetched[section] = fetched[section] || wasFetched
-			for _, item := range items {
-				if plexMovieItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID) {
-					c.movieKeyCache[tmdbID] = item.RatingKey
-					return item.RatingKey, nil
-				}
-			}
-		}
-	}
-	return "", ErrPlexMovieNotFound
+	return keys, nil
 }
 
 // sectionListing returns the movies in a Plex section: the listing fetched
-// earlier in this run, unless fresh or there is none. fetched reports a request.
+// earlier in this run, unless fresh or there is none. fetched reports a
+// request. Without includeGuids=1, Plex lists a modern-agent movie with only
+// its plex:// guid, so a TMDB ID would never match.
 func (c *httpPlexMovieClient) sectionListing(sectionKey string, fresh bool) (items []plexMovieItem, fetched bool, err error) {
 	if items, ok := c.sectionItems[sectionKey]; ok && !fresh {
 		return items, false, nil
@@ -225,7 +246,8 @@ func plexMovieItemHasTMDBID(guidRaw json.RawMessage, guidLower, wantGUID, tmdbID
 				}
 			}
 		}
-		return false
+		// A legacy-agent movie may come with an empty array; its guid field still counts.
+		return plexMovieGuidMatchesTMDBID(guidLower, tmdbID)
 	}
 	if len(guidRaw) > 0 {
 		var s string
@@ -243,74 +265,17 @@ func plexMovieGuidMatchesTMDBID(s, tmdbID string) bool {
 
 // FindMovieByTitle implements PlexMovieClient.
 func (c *httpPlexMovieClient) FindMovieByTitle(title, year string) (string, error) {
-	resp, err := c.plexGet("/library/sections")
-	if err != nil {
-		return "", fmt.Errorf("plex: list sections: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var sectionsResp struct {
-		MediaContainer struct {
-			Directory []struct {
-				Key  string `json:"key"`
-				Type string `json:"type"`
-			} `json:"Directory"`
-		} `json:"MediaContainer"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
-		return "", fmt.Errorf("plex: decode sections: %w", err)
-	}
-
 	normTitle := normalizePlexTitle(title)
 	wantYear := 0
 	if year != "" {
 		wantYear, _ = strconv.Atoi(year)
 	}
-	for _, section := range sectionsResp.MediaContainer.Directory {
-		if section.Type != "movie" {
-			continue
-		}
-		key, err := c.findMovieInSectionByTitle(section.Key, normTitle, wantYear)
-		if err != nil {
-			return "", err
-		}
-		if key != "" {
-			return key, nil
-		}
-	}
-	return "", ErrPlexMovieNotFound
-}
-
-func (c *httpPlexMovieClient) findMovieInSectionByTitle(sectionKey, normTitle string, wantYear int) (string, error) {
-	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=1")
-	if err != nil {
-		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
-	}
-	defer resp.Body.Close()
-
-	var allResp struct {
-		MediaContainer struct {
-			Metadata []struct {
-				RatingKey string `json:"ratingKey"`
-				Title     string `json:"title"`
-				Year      int    `json:"year"`
-			} `json:"Metadata"`
-		} `json:"MediaContainer"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
-		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
-	}
-
-	for _, item := range allResp.MediaContainer.Metadata {
+	return c.findMovie(func(item plexMovieItem) bool {
 		if normalizePlexTitle(item.Title) != normTitle {
-			continue
+			return false
 		}
-		if wantYear != 0 && abs(item.Year-wantYear) > 1 {
-			continue
-		}
-		return item.RatingKey, nil
-	}
-	return "", nil
+		return wantYear == 0 || abs(item.Year-wantYear) <= 1
+	})
 }
 
 func abs(x int) int {
@@ -365,31 +330,14 @@ func (c *httpPlexMovieClient) GetContentRating(ratingKey string) (NZRating, erro
 // sections, triggering a metadata refresh so Plex picks up any new or changed
 // files without requiring a manual library scan.
 func (c *httpPlexMovieClient) RefreshLibraries() error {
-	resp, err := c.plexGet("/library/sections")
+	sections, err := c.movieSectionKeys()
 	if err != nil {
-		return fmt.Errorf("plex: list sections: %w", err)
+		return err
 	}
-	defer resp.Body.Close()
-
-	var sectionsResp struct {
-		MediaContainer struct {
-			Directory []struct {
-				Key  string `json:"key"`
-				Type string `json:"type"`
-			} `json:"Directory"`
-		} `json:"MediaContainer"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
-		return fmt.Errorf("plex: decode sections: %w", err)
-	}
-
-	for _, section := range sectionsResp.MediaContainer.Directory {
-		if section.Type != "movie" {
-			continue
-		}
-		refreshResp, err := c.plexGet("/library/sections/" + section.Key + "/refresh")
+	for _, section := range sections {
+		refreshResp, err := c.plexGet("/library/sections/" + section + "/refresh")
 		if err != nil {
-			return fmt.Errorf("plex: refresh section %s: %w", section.Key, err)
+			return fmt.Errorf("plex: refresh section %s: %w", section, err)
 		}
 		refreshResp.Body.Close()
 	}
