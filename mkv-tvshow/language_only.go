@@ -12,6 +12,7 @@ import (
 // LanguageOnlyStats counts the shows of a --language-only run.
 type LanguageOnlyStats struct {
 	Updated, Skipped, Errors int
+	LostSaves                int // 1 when the rating cache changes couldn't be saved
 }
 
 type languageOnlyResult int
@@ -58,7 +59,9 @@ func (p *Processor) RunLanguageOnly() LanguageOnlyStats {
 		}
 		saver.save(shows[id][0])
 	}
-	saver.finish()
+	if saver.finish() {
+		stats.LostSaves = 1
+	}
 	return stats
 }
 

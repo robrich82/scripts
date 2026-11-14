@@ -38,8 +38,15 @@ func runMain(t *testing.T, dir, cfgHome string, args ...string) (string, error) 
 // runMainEnv is runMain with extra environment entries, e.g. TMDB_API_KEY.
 func runMainEnv(t *testing.T, dir, cfgHome string, extraEnv []string, args ...string) (string, error) {
 	t.Helper()
+	return runMainStdin(t, dir, cfgHome, extraEnv, "", args...)
+}
+
+// runMainStdin is runMainEnv with stdin, for the prompts a mode asks.
+func runMainStdin(t *testing.T, dir, cfgHome string, extraEnv []string, stdin string, args ...string) (string, error) {
+	t.Helper()
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestRunMainHelper$", "--"}, args...)...)
 	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(stdin)
 	var env []string
 	for _, kv := range os.Environ() {
 		switch {

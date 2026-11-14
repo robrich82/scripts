@@ -21,6 +21,7 @@ func main() {
 	titleCheckMode := flag.Bool("title-check", false, "Check episode titles in filenames against TMDB and offer to rename.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	cleanFlag := flag.Bool("clean", false, "Remove stale cache entries for shows and files that no longer exist on disk, then exit.")
+	allIDsFlag := flag.Bool("all-ids", false, "With --clean, also remove ratings and ignores for every show ID not in show_cache.json, not only those of show folders this --clean removes.")
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a show and reset its applied state (folder substring or TMDB ID), then exit.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every show in the current directory, overriding any cached value, then exit.")
 	flag.Parse()
@@ -34,8 +35,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *allIDsFlag && !*cleanFlag {
+		fmt.Fprintln(os.Stderr, "Error: --all-ids only works with --clean.")
+		os.Exit(1)
+	}
+
 	if *cleanFlag {
-		runClean()
+		runClean(*allIDsFlag)
 		return
 	}
 
@@ -148,6 +154,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
+		exitIfSavesLost(checker.LostSaves)
 		return
 	}
 
@@ -173,6 +180,7 @@ func main() {
 		fmt.Println("Setting the Plex audio language for every cached show...")
 		stats := processor.RunLanguageOnly()
 		fmt.Printf("\nDone. Updated: %d  Skipped: %d  Errors: %d\n", stats.Updated, stats.Skipped, stats.Errors)
+		exitIfSavesLost(stats.LostSaves)
 		return
 	}
 
@@ -187,6 +195,7 @@ func main() {
 		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter, mkv, titleCache, timer)
 		fmt.Printf("Checking episode titles in %s...\n", mediaDir)
 		checker.Run()
+		exitIfSavesLost(checker.LostSaves)
 		return
 	}
 
@@ -241,6 +250,7 @@ func main() {
 
 	fmt.Printf("\nDone. Success: %d  Failed: %d  Skipped (old): %d\n",
 		stats.Success, stats.Failed, stats.SkippedOld)
+	exitIfSavesLost(stats.LostSaves)
 }
 
 // oneShotMode is a flag that picks what a run does instead of the main pass.

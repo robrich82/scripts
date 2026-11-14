@@ -13,7 +13,8 @@ import (
 
 // cacheSaver saves a cache after each show a run processes, so an
 // interrupted run keeps what it already resolved. A failed save is printed
-// once, retried as the run goes on, and once more by finish.
+// once, retried as the run goes on, and once more by finish. A nil
+// *cacheSaver, for a cache the run has none of, saves nothing.
 type cacheSaver struct {
 	cache     interface{ Save() error }
 	name      string // the cache, as messages name it, e.g. "rating cache"
@@ -23,17 +24,51 @@ type cacheSaver struct {
 	lastSaved string // the show after which the cache was last saved
 }
 
-func newRatingSaver(cache *RatingCache, holds string) *cacheSaver {
-	return &cacheSaver{cache: cache, name: "rating cache", path: cache.path, holds: holds}
+func newShowSaver(c *ShowCache) *cacheSaver {
+	if c == nil {
+		return nil
+	}
+	return &cacheSaver{cache: c, name: "show cache", path: c.path, holds: "show matches"}
+}
+
+func newRatingSaver(c *RatingCache, holds string) *cacheSaver {
+	if c == nil {
+		return nil
+	}
+	return &cacheSaver{cache: c, name: "rating cache", path: c.path, holds: holds}
+}
+
+func newTitleSaver(c *TitleCache) *cacheSaver {
+	if c == nil {
+		return nil
+	}
+	return &cacheSaver{cache: c, name: "title cache", path: c.path, holds: "full titles"}
+}
+
+func newIgnoreSaver(c *MissingIgnoreList) *cacheSaver {
+	if c == nil {
+		return nil
+	}
+	return &cacheSaver{cache: c, name: "ignore list", path: c.path, holds: "ignore choices"}
+}
+
+func newRetrySaver(c *RetryList) *cacheSaver {
+	if c == nil {
+		return nil
+	}
+	return &cacheSaver{cache: c, name: "retry list", path: c.path, holds: "changes to the episodes to retry"}
 }
 
 // save saves the cache; name is the show finish names if a later save fails.
 func (s *cacheSaver) save(name string) {
+	if s == nil {
+		return
+	}
 	err := s.cache.Save()
 	switch {
 	case err != nil && s.saveErr == nil:
 		fmt.Printf("[!] Failed to save %s %s: %v\n%s    Retrying as the run goes on; until a save succeeds, changes are kept in memory only.\n",
-			s.name, s.path, err, hintLine(err))
+			s.name, s.path, withoutPaths(err), hintLine(err))
 	case err == nil && s.saveErr != nil:
 		fmt.Printf("[i] %s saved.\n", capitalize(s.name))
 	}
@@ -43,46 +78,86 @@ func (s *cacheSaver) save(name string) {
 	s.saveErr = err
 }
 
-// finish retries a failed last save once, and says what was lost if it fails
-// again.
-func (s *cacheSaver) finish() {
-	if s.saveErr == nil {
-		return
+// finish retries a failed last save once, says on stderr what was lost if it
+// fails again, and reports whether it did.
+func (s *cacheSaver) finish() (lost bool) {
+	if s == nil || s.saveErr == nil {
+		return false
 	}
 	// One more try: on Windows the rename fails while another program
 	// (antivirus, an indexer) briefly holds the cache open.
 	beforeFinalSave()
-	if err := s.cache.Save(); err == nil {
+	err := s.cache.Save()
+	switch {
+	case err == nil:
 		fmt.Printf("[i] %s saved.\n", capitalize(s.name))
-	} else if s.lastSaved == "" {
-		fmt.Printf("[!] The %s was never saved; this run's %s are lost: %v\n%s", s.name, s.holds, err, hintLine(err))
-	} else {
-		fmt.Printf("[!] The %s was last saved after %s; later %s are lost: %v\n%s", s.name, s.lastSaved, s.holds, err, hintLine(err))
+	case s.lastSaved == "":
+		fmt.Fprintf(os.Stderr, "[!] The %s was never saved; this run's %s are lost: %v\n%s",
+			s.name, s.holds, withoutPaths(err), hintLine(err))
+	default:
+		fmt.Fprintf(os.Stderr, "[!] The %s was last saved after %s; later %s are lost: %v\n%s",
+			s.name, s.lastSaved, s.holds, withoutPaths(err), hintLine(err))
 	}
 	s.saveErr = nil
+	return err != nil
 }
 
 // saveOnce saves a cache a run writes only at its end, retrying once like
-// finish, and says what was lost if both tries fail.
-func (s *cacheSaver) saveOnce() {
-	if s.cache.Save() == nil {
-		return
+// finish, says on stderr what was lost if both tries fail, and reports
+// whether they did.
+func (s *cacheSaver) saveOnce() (lost bool) {
+	if s == nil || s.cache.Save() == nil {
+		return false
 	}
 	beforeFinalSave()
-	if err := s.cache.Save(); err != nil {
-		fmt.Printf("[!] Failed to save %s %s; this run's %s are lost: %v\n%s", s.name, s.path, s.holds, err, hintLine(err))
+	err := s.cache.Save()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[!] Failed to save %s %s; this run's %s are lost: %v\n%s",
+			s.name, s.path, s.holds, withoutPaths(err), hintLine(err))
 	}
+	return err != nil
 }
 
 // beforeFinalSave runs before the last save attempt of finish and saveOnce; tests replace it.
 var beforeFinalSave = func() { time.Sleep(time.Second) }
 
-// hintLine is accessHint(err) as an indented line, or "" without one.
+// withoutPaths drops the file names a failed save's error carries (the temp
+// file, and the cache a rename targets): the message names the cache already.
+func withoutPaths(err error) error {
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		return linkErr.Err
+	}
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
+}
+
+// hintLine is the save hint for err as an indented line, or "" without one.
 func hintLine(err error) string {
-	if hint := accessHint(err); hint != "" {
+	if hint := accessHint(err, true); hint != "" {
 		return "    " + hint + "\n"
 	}
 	return ""
+}
+
+// lostSavesLine is the line a run's summary ends with when n cache saves
+// were lost, or "" when none were.
+func lostSavesLine(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Cache saves failed: %d (see the [!] lines above); exiting with status 1.\n", n)
+}
+
+// exitIfSavesLost prints lostSavesLine to stderr and exits 1 when n > 0.
+func exitIfSavesLost(n int) {
+	if line := lostSavesLine(n); line != "" {
+		fmt.Fprint(os.Stderr, line)
+		os.Exit(1)
+	}
 }
 
 func capitalize(s string) string {
@@ -109,7 +184,7 @@ func exitOnCacheLoadError(path string, err error) {
 	if errors.As(err, &pathErr) && pathErr.Path == path {
 		err = pathErr.Err
 	}
-	hint := accessHint(err)
+	hint := accessHint(err, false)
 	var syntaxErr *json.SyntaxError
 	var typeErr *json.UnmarshalTypeError
 	// show_cache.json is read with a json.Decoder, which reports an empty or

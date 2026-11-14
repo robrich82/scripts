@@ -36,6 +36,7 @@ type TitleChecker struct {
 	mkv        MKVRunner   // nil → MKV title setting is skipped
 	titleCache *TitleCache // nil → caching/setting skipped
 	timer      FileTimer
+	LostSaves  int // set by Run: 1 when its title cache changes couldn't be saved
 }
 
 // NewTitleChecker creates a TitleChecker.
@@ -103,8 +104,7 @@ func (tc *TitleChecker) Run() {
 		return nil
 	})
 
-	saver := &cacheSaver{cache: tc.titleCache, name: "title cache", path: tc.titleCache.path,
-		holds: "full titles"}
+	saver := newTitleSaver(tc.titleCache)
 	for _, showFolder := range showOrder {
 		cacheKey := filepath.Join(tc.cfg.MediaDir, showFolder)
 		showID, ok := tc.cache.Get(cacheKey)
@@ -223,7 +223,9 @@ func (tc *TitleChecker) Run() {
 
 		saver.save(showFolder)
 	}
-	saver.finish()
+	if saver.finish() {
+		tc.LostSaves = 1
+	}
 }
 
 // checkMismatch compares fileTitles against expectedTitles and, when they

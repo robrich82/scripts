@@ -87,25 +87,25 @@ func (l *MissingIgnoreList) IsEpisodeIgnored(showID string, season, episode int)
 }
 
 // CleanStaleShowIDs removes Shows, Seasons, and Episodes entries whose TMDB
-// show ID is not present in knownIDs. Returns the number of entries removed.
-func (l *MissingIgnoreList) CleanStaleShowIDs(knownIDs map[string]bool) int {
+// show ID stale reports. Returns the number removed.
+func (l *MissingIgnoreList) CleanStaleShowIDs(stale func(showID string) bool) int {
 	removed := 0
 	for id := range l.Shows {
-		if !knownIDs[id] {
+		if stale(id) {
 			delete(l.Shows, id)
 			removed++
 		}
 	}
 	for key := range l.Seasons {
 		showID, _, _ := strings.Cut(key, "/")
-		if !knownIDs[showID] {
+		if stale(showID) {
 			delete(l.Seasons, key)
 			removed++
 		}
 	}
 	for key := range l.Episodes {
 		showID, _, _ := strings.Cut(key, "/")
-		if !knownIDs[showID] {
+		if stale(showID) {
 			delete(l.Episodes, key)
 			removed++
 		}

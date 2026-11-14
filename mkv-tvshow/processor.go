@@ -33,6 +33,7 @@ type Stats struct {
 	Success    int
 	Failed     int
 	SkippedOld int
+	LostSaves  int // caches whose changes this run couldn't save
 }
 
 // Processor orchestrates the scan loop, TMDB lookups, and MKV metadata updates.
@@ -97,12 +98,8 @@ func NewProcessor(
 		sessionPlexKey:        make(map[string]string),
 		sessionOriginalLang:   make(map[string]string),
 	}
-	if cache != nil { // --deband-only runs without one
-		p.showSaver = &cacheSaver{cache: cache, name: "show cache", path: cache.path, holds: "show matches"}
-	}
-	if ratingCache != nil {
-		p.ratingSaver = newRatingSaver(ratingCache, "ratings and Plex state")
-	}
+	p.showSaver = newShowSaver(cache) // --deband-only runs without one
+	p.ratingSaver = newRatingSaver(ratingCache, "ratings and Plex state")
 	return p
 }
 
@@ -414,18 +411,13 @@ func (p *Processor) Run() Stats {
 
 		// Update Plex, then save the rating cache with the Plex state that recorded.
 		p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, p.manualData[showFolder])
-		if p.ratingSaver != nil {
-			p.ratingSaver.save(showFolder)
+		p.ratingSaver.save(showFolder)
+	}
+	for _, lost := range []bool{p.showSaver.finish(), p.ratingSaver.finish(), newRetrySaver(p.retryList).saveOnce()} {
+		if lost {
+			stats.LostSaves++
 		}
 	}
-	p.showSaver.finish()
-	if p.ratingSaver != nil {
-		p.ratingSaver.finish()
-	}
-
-	retrySaver := &cacheSaver{cache: p.retryList, name: "retry list", path: p.retryList.path,
-		holds: "changes to the episodes to retry"}
-	retrySaver.saveOnce()
 
 	// After all shows are processed, trigger a full library scan when extras were
 	// processed. The startup RefreshLibraries fires before tagging, so extras get

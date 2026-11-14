@@ -144,7 +144,7 @@ func runSetRating(ratingStr, mediaDir string, prompter Prompter) {
 
 	episodesCleared, filesReset := applySetRating(ratingCache, mediaDir, plans, rating)
 	if err := ratingCache.Save(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving %s: %v\n%sNo rating was set.\n", ratingCache.path, err, hintLine(err))
+		fmt.Fprintf(os.Stderr, "Error saving %s: %v\n%sNo rating was set.\n", ratingCache.path, withoutPaths(err), hintLine(err))
 		os.Exit(1)
 	}
 

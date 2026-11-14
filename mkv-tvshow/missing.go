@@ -51,6 +51,7 @@ type MissingChecker struct {
 	tmdb       TMDBClient
 	prompter   Prompter
 	ignoreList *MissingIgnoreList
+	LostSaves  int // set by Run: 1 when its ignore list changes couldn't be saved
 }
 
 // NewMissingChecker constructs a MissingChecker.
@@ -86,8 +87,7 @@ func (mc *MissingChecker) Run() error {
 	}
 
 	anyFound := false
-	saver := &cacheSaver{cache: mc.ignoreList, name: "ignore list", path: mc.ignoreList.path,
-		holds: "ignore choices"}
+	saver := newIgnoreSaver(mc.ignoreList)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -322,7 +322,9 @@ func (mc *MissingChecker) Run() error {
 
 		saver.save(showName)
 	}
-	saver.finish()
+	if saver.finish() {
+		mc.LostSaves = 1
+	}
 
 	if !anyFound {
 		fmt.Println("No missing episodes found.")
