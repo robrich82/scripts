@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -21,19 +22,12 @@ func main() {
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every movie in the current directory, overriding any cached value, then exit.")
 	flag.Parse()
 
-	if *languageOnly {
-		for _, m := range []struct {
-			name string
-			set  bool
-		}{
-			{"--clean", *cleanFlag}, {"--reset-rating", *resetRatingQuery != ""}, {"--set-rating", *setRating != ""},
-			{"--deband-only", *debandOnlyMode}, {"--ratings-only", *ratingsOnly},
-		} {
-			if m.set {
-				fmt.Fprintf(os.Stderr, "Error: --language-only can't be combined with %s; run them one at a time.\n", m.name)
-				os.Exit(1)
-			}
-		}
+	if names := conflictingModes([]oneShotMode{
+		{"--clean", *cleanFlag}, {"--reset-rating", *resetRatingQuery != ""}, {"--set-rating", *setRating != ""},
+		{"--deband-only", *debandOnlyMode}, {"--ratings-only", *ratingsOnly}, {"--language-only", *languageOnly},
+	}); names != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s can't be combined; run them one at a time.\n", joinNames(names))
+		os.Exit(1)
 	}
 
 	if *cleanFlag {
@@ -185,4 +179,33 @@ func main() {
 
 	fmt.Printf("\nDone. Updated: %d  Skipped: %d  Skipped (old): %d  Errors: %d\n",
 		stats.Updated, stats.Skipped, stats.SkippedOld, stats.Errors)
+}
+
+// oneShotMode is a flag that picks what a run does instead of the main pass.
+type oneShotMode struct {
+	name string
+	set  bool
+}
+
+// conflictingModes returns the names of the set modes, in the order given,
+// when more than one is set; nil otherwise.
+func conflictingModes(modes []oneShotMode) []string {
+	var set []string
+	for _, m := range modes {
+		if m.set {
+			set = append(set, m.name)
+		}
+	}
+	if len(set) < 2 {
+		return nil
+	}
+	return set
+}
+
+// joinNames joins names as "a and b" or "a, b and c".
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
