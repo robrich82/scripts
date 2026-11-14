@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -66,17 +68,20 @@ func ratingCacheWithShows(t *testing.T, path string, ids ...string) *RatingCache
 	return rc
 }
 
-// #172: every show gets a result line, in folder-name order whatever the map
-// order, and the counts add up. A show whose language is already set costs no
-// Plex lookup.
+// #172: every show with a folder gets a result line, in case-insensitive
+// folder-name order whatever the map order, and the counts add up. A show
+// whose language is already set costs no Plex lookup. A TMDB ID only the
+// rating cache has (a season override's) is left out: it has no show in Plex.
 func TestRunLanguageOnly_ResultLinesInNameOrder(t *testing.T) {
 	rc := ratingCacheWithShows(t, filepath.Join(t.TempDir(), "rating_cache.json"), "1", "2", "3", "4", "5", "6", "7")
 	rc.SetLanguageApplied("2", "ja-JP")
 	cache := cacheWith(t, map[string]string{"Zeta": "1", "alpha": "2", "Mid": "3", "Beta": "4", "Gamma": "5", "Delta": "6"})
+	var tmdbCalls []string
 	tmdb := &langTMDB{
 		fakeTMDB: &fakeTMDB{},
 		langs:    map[string]string{"1": "ja", "2": "ja", "4": "ja", "6": "ja"},
 		errs:     map[string]error{"5": errors.New("tmdb down")},
+		onGet:    func(id string) { tmdbCalls = append(tmdbCalls, id) },
 	}
 	plex := &langPlex{
 		fakePlexClient: &fakePlexClient{},
@@ -89,7 +94,6 @@ func TestRunLanguageOnly_ResultLinesInNameOrder(t *testing.T) {
 	out := captureStdout(t, func() { stats = p.RunLanguageOnly() })
 
 	want := []string{
-		`[SKIP]    TMDB 7 (TMDB has no original language, and no show folder is cached to set "language" for)`,
 		`[SKIP]    alpha (language set earlier)`,
 		`[SKIP]    Beta (not in Plex; rerun with --language-only once Plex has it)`,
 		`[ERR]     Delta (failed: Plex lookup: plex: HTTP 500)`,
@@ -100,8 +104,11 @@ func TestRunLanguageOnly_ResultLinesInNameOrder(t *testing.T) {
 	if got := strings.Split(strings.TrimSpace(out), "\n"); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("output:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if stats != (LanguageOnlyStats{Updated: 1, Skipped: 4, Errors: 2}) {
-		t.Errorf("stats %+v; want 1 updated, 4 skipped, 2 errors", stats)
+	if stats != (LanguageOnlyStats{Updated: 1, Skipped: 3, Errors: 2}) {
+		t.Errorf("stats %+v; want 1 updated, 3 skipped, 2 errors", stats)
+	}
+	if slices.Contains(tmdbCalls, "7") {
+		t.Error("TMDB was asked about 7, which has no show folder")
 	}
 	// Beta: GUID then title; Delta: GUID only (an error isn't "not found"); Zeta: GUID.
 	if plex.lookups != 4 {
@@ -217,8 +224,7 @@ func TestRunLanguageOnly_SetFails_IsError(t *testing.T) {
 	}
 }
 
-// #172: without Plex, --language-only exits 1 instead of printing to stderr
-// and exiting 0.
+// #172: without Plex, --language-only exits 1 with the Plex error.
 func TestMain_LanguageOnlyWithoutPlex_Exits(t *testing.T) {
 	out, err := runMainEnv(t, t.TempDir(), t.TempDir(), []string{"TMDB_API_KEY=unused"}, "--language-only")
 	if err == nil {
@@ -227,4 +233,168 @@ func TestMain_LanguageOnlyWithoutPlex_Exits(t *testing.T) {
 	if got := strings.TrimSpace(out); got != "Error: --language-only sets the audio language in Plex: set PLEX_URL and PLEX_TOKEN." {
 		t.Errorf("output %q; want only the Plex error", got)
 	}
+}
+
+// #172: with Plex set and no cached shows, --language-only prints its header
+// and a summary, and makes no Plex call (the URL is unreachable).
+func TestMain_LanguageOnly_PrintsSummary(t *testing.T) {
+	out, err := runMainEnv(t, t.TempDir(), t.TempDir(), []string{"TMDB_API_KEY=unused", "PLEX_URL=http://127.0.0.1:1", "PLEX_TOKEN=unused"}, "--language-only")
+	if err != nil {
+		t.Fatalf("--language-only failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Setting the Plex audio language for every cached show...") ||
+		!strings.Contains(out, "Done. Updated: 0  Skipped: 0  Errors: 0") {
+		t.Errorf("no header or summary:\n%s", out)
+	}
+}
+
+// #172: a show cached under several folders gets one result line, named by
+// the first folder. Each language comes from the first folder whose
+// manual_data.json entry sets it, so the run agrees with a full run of the
+// folder that set "language". A show only the show cache has is set too.
+func TestRunLanguageOnly_SeveralFolders_MergesManualData(t *testing.T) {
+	rc := emptyRatingCache(t)
+	primary, alt := &fakePlexClient{showRatingKey: "k1"}, &fakePlexClient{}
+	plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
+	cache := cacheWith(t, map[string]string{"show (2005)": "1", "Show": "1"})
+	manualData := map[string]ManualEntry{
+		"Show":        {AltLanguage: "en"},
+		"show (2005)": {Language: "ko", AltLanguage: "fr"},
+	}
+	p := NewProcessor(Config{}, cache, manualData, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
+
+	var stats LanguageOnlyStats
+	out := captureStdout(t, func() { stats = p.RunLanguageOnly() })
+
+	if got := strings.TrimSpace(out); got != "[UPDATED] Show (lang: ko-KR|alt=en-US)" {
+		t.Errorf("output %q; want one line for Show, with ko from show (2005) and en from Show", got)
+	}
+	if stats != (LanguageOnlyStats{Updated: 1}) {
+		t.Errorf("stats %+v; want 1 updated", stats)
+	}
+	if len(primary.setLangCalls) != 1 || primary.setLangCalls[0].lang != "ko" || len(alt.setLangCalls) != 1 || alt.setLangCalls[0].lang != "en" {
+		t.Errorf("calls primary %+v, alt %+v; want ko and en", primary.setLangCalls, alt.setLangCalls)
+	}
+}
+
+// The hint for a show with no known language names the folder to set it for.
+func TestRunLanguageOnly_NoLanguage_HintNamesFirstFolder(t *testing.T) {
+	cache := cacheWith(t, map[string]string{"Show B": "1", "Show A": "1"})
+	p := NewProcessor(Config{}, cache, nil, &fakeTMDB{}, nil, nil, nil, nil, emptyRatingCache(t), nil, &fakePlexClient{}, nil)
+
+	out := captureStdout(t, func() { p.RunLanguageOnly() })
+
+	if got := strings.TrimSpace(out); got != `[SKIP]    Show A (TMDB has no original language; set "language" for "Show A" in manual_data.json)` {
+		t.Errorf("output %q", got)
+	}
+}
+
+// With alt accounts, a failed alt is a suffix on the show's line, not an
+// error: UPDATED when the primary was pushed, SKIP when only the alt was due.
+func TestRunLanguageOnly_AltFailure_ResultLines(t *testing.T) {
+	rc := emptyRatingCache(t)
+	cache := cacheWith(t, map[string]string{"Show A": "1"})
+	run := func() (string, LanguageOnlyStats) {
+		plexClient := newMultiPlexClient(&fakePlexClient{showRatingKey: "k1"}, namedPlexClient{name: altAccount, client: &fakePlexClient{setLangErr: errors.New("alt failed")}})
+		p := NewProcessor(Config{}, cache, nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
+		var stats LanguageOnlyStats
+		out := captureStdout(t, func() { stats = p.RunLanguageOnly() })
+		return strings.TrimSpace(out), stats
+	}
+
+	out, stats := run()
+	if out != "[UPDATED] Show A (lang: ja-JP|alt=ja-JP; alt: alt failed)" || stats != (LanguageOnlyStats{Updated: 1}) {
+		t.Errorf("first run: %q, %+v; want UPDATED with the alt failure", out, stats)
+	}
+	out, stats = run()
+	if out != "[SKIP]    Show A (lang: unchanged; alt: alt failed)" || stats != (LanguageOnlyStats{Skipped: 1}) {
+		t.Errorf("retry: %q, %+v; want SKIP with the alt failure", out, stats)
+	}
+}
+
+// A save that keeps failing is printed once, and the run ends by saying what
+// was lost. A last save that fails is retried once after the run.
+func TestRunLanguageOnly_FailedSave_RetriedAtEnd(t *testing.T) {
+	setBeforeFinalSave(t, func() {})
+	for _, tc := range []struct {
+		name     string
+		recovers bool
+		want     string
+	}{
+		{"recovers", true, "[i] Rating cache saved."},
+		{"fails again", false, "[!] The rating cache was never saved; this run's Plex keys and audio languages are lost"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "missing")
+			rc, err := LoadRatingCache(filepath.Join(dir, "rating_cache.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.recovers {
+				setBeforeFinalSave(t, func() {
+					if err := os.Mkdir(dir, 0o755); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+			plex := &langPlex{fakePlexClient: &fakePlexClient{}, byTMDB: map[string]string{"1": "k1", "2": "k2"}}
+			tmdb := &langTMDB{fakeTMDB: &fakeTMDB{}, langs: map[string]string{"1": "ja", "2": "ko"}}
+			p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "1", "Show B": "2"}), nil, tmdb, nil, nil, nil, nil, rc, nil, plex, nil)
+
+			out := captureStdout(t, func() { p.RunLanguageOnly() })
+
+			if n := strings.Count(out, "Failed to save rating cache"); n != 1 {
+				t.Errorf("save failure printed %d times; want once:\n%s", n, out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("no %q:\n%s", tc.want, out)
+			}
+			if !tc.recovers {
+				return
+			}
+			saved, err := LoadRatingCache(filepath.Join(dir, "rating_cache.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := saved.GetLanguageApplied("2"); got != "ko-KR" {
+				t.Errorf("Show B's language on disk = %q; want ko-KR", got)
+			}
+		})
+	}
+}
+
+// When saves start failing partway, the warning names the last show saved.
+func TestRunLanguageOnly_FailedSave_NamesLastSaved(t *testing.T) {
+	setBeforeFinalSave(t, func() {})
+	path := filepath.Join(t.TempDir(), "rating_cache.json")
+	rc := ratingCacheWithShows(t, path)
+	tmdb := &langTMDB{
+		fakeTMDB: &fakeTMDB{},
+		langs:    map[string]string{"1": "ja", "2": "ko"},
+		onGet: func(id string) {
+			if id == "2" { // Show A is saved; a directory in the cache's place fails every later save
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+	}
+	plex := &langPlex{fakePlexClient: &fakePlexClient{}, byTMDB: map[string]string{"1": "k1", "2": "k2"}}
+	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "1", "Show B": "2"}), nil, tmdb, nil, nil, nil, nil, rc, nil, plex, nil)
+
+	out := captureStdout(t, func() { p.RunLanguageOnly() })
+
+	if !strings.Contains(out, "[!] The rating cache was last saved after Show A; later Plex keys and audio languages are lost") {
+		t.Errorf("no warning naming Show A:\n%s", out)
+	}
+}
+
+// setBeforeFinalSave replaces cacheSaver.finish's pre-retry pause for one test.
+func setBeforeFinalSave(t *testing.T, f func()) {
+	old := beforeFinalSave
+	beforeFinalSave = f
+	t.Cleanup(func() { beforeFinalSave = old })
 }

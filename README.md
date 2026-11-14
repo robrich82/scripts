@@ -564,7 +564,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--ratings-only` | false | Only update NZ content ratings; skip all other metadata |
 | `--overwrite-ratings` | false | Re-fetch all ratings (prompting once per show), ignoring cached values; a cached rating is kept when no source has one |
 | `--overwrite-language` | false | Re-apply Plex audio language preference even if already set for a show |
-| `--language-only` | false | Apply Plex audio language preference for every show in the rating cache, in folder-name order, without scanning files. Plex is searched only for a show whose language isn't set yet; `--overwrite-language` sets every show again. Needs `PLEX_URL`/`PLEX_TOKEN`. Prints a line per show and `Done. Updated: N  Skipped: N  Errors: N`; the rating cache is saved after each show |
+| `--language-only` | false | Apply Plex audio language preference for every cached show folder without scanning files, printing a line per show and a `Done.` summary. Needs `PLEX_URL`/`PLEX_TOKEN`. Skips shows already set (unless `--overwrite-language`), shows with no known language and shows not in Plex. A show cached under several folders takes each language key from the first folder, by name, whose manual_data.json entry sets it |
 | `--missing` | false | Check for missing episodes (see below) |
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
 | `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit. Entries on an offline drive are kept |
@@ -629,7 +629,7 @@ runs. You can ignore a single episode, a whole season, or the entire show.
 - TMDB API (requires `TMDB_API_KEY` environment variable)
 - `mkvpropedit` — applies metadata edits
 - `mkvextract` — reads the existing tags so writing new ones keeps the rest; an episode whose tags it can't read isn't updated (part of MKVToolNix)
-- `PLEX_URL` / `PLEX_TOKEN` — optional; used to push NZ ratings and set per-show audio language in Plex
+- `PLEX_URL` / `PLEX_TOKEN` — optional (required for `--language-only`); used to push NZ ratings and set per-show audio language in Plex
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; the audio language is set for these accounts too
 
 When Plex is configured, after processing each show the tool:
@@ -638,7 +638,7 @@ When Plex is configured, after processing each show the tool:
 
 The audio language preference is per-Plex-account, so if `PLEX_ALT_TOKEN` and/or `PLEX_ALT2_TOKEN` are set the same language is applied for those accounts — or a different one per account via `alt-language` / `alt2-language` in `manual_data.json`. Ratings, lookups, and library refreshes still use `PLEX_TOKEN` only. An alt account that fails (for example, a show it cannot see) is reported alongside the result as `alt: ...` / `alt2: ...` and does not fail the run. It isn't recorded as applied, so the next run that reaches the show retries that account alone, and reports it again if it still fails.
 
-The cached "already applied" value records the language each account received (`ja-JP|alt=ja-JP|alt2=en-US`). An account missing from it, or whose language has since changed, is applied on the next run that reaches the show; the others are left alone. Adding a token applies only the new account. The log line reports the language every account should have.
+The cached "already applied" value records the language each account received (`ja-JP|alt=ja-JP|alt2=en-US`). An account missing from it, or whose language has since changed, is applied on the next run that reaches the show; the others are left alone. Adding a token applies only the new account. The log line (`--language-only`: the `[UPDATED]` line) reports the language every account should have.
 
 ### Configuration
 

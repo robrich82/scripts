@@ -1182,7 +1182,7 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 
 // originalLang returns the TMDB original_language code (ISO 639-1) for the
 // given show, using the session cache to avoid redundant API calls. It is ""
-// when TMDB has none, or there is no TMDB client.
+// when TMDB has none, or there is no TMDB client; err is a failed TMDB lookup.
 func (p *Processor) originalLang(tmdbID string) (string, error) {
 	if lang, ok := p.sessionOriginalLang[tmdbID]; ok {
 		return lang, nil
@@ -1295,8 +1295,9 @@ func (p *Processor) languageDue(tmdbID string, langs AudioLangs) (applied string
 // alt accounts, only those applied doesn't cover yet are set, so a retry
 // leaves the others (and any choice made in Plex) alone; a failed alt is
 // reported in altSuffix and left out of the record, so the next run retries it
-// alone. set is the signature pushed, or "" when nothing was (only removed alt
-// accounts differed). A show key Plex no longer has is cleared, and err is
+// alone. set is the signature recorded for langs, or "" when no account was
+// pushed to: only removed alt accounts differed, or every alt that needed it
+// failed (see altSuffix). A show key Plex no longer has is cleared, and err is
 // ErrPlexNotFound.
 func (p *Processor) setAudioLanguage(showKey, tmdbID string, langs AudioLangs, applied string) (set, altSuffix string, err error) {
 	sig := appliedLangSignature(p.plex, langs)
