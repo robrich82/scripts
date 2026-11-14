@@ -103,6 +103,12 @@ func main() {
 			aStats.Updated, aStats.NoDate, aStats.Failed, aStats.SkippedOld)
 	}
 
+	printRunSummary(stats, skippedVideos, unmatchedVideos, processor.Tags())
+}
+
+// printRunSummary prints the end-of-run report: unmatched and skipped videos,
+// old files skipped, and the tagging outcome.
+func printRunSummary(stats Stats, skippedVideos, unmatchedVideos []string, tags TagOutcome) {
 	fmt.Println("\n--- Scan Complete ---")
 	if len(unmatchedVideos) > 0 {
 		fmt.Printf("\n--- UNMATCHED MUSIC VIDEOS (%d) ---\n", len(unmatchedVideos))
@@ -122,5 +128,5 @@ func main() {
 	if stats.SkippedOld > 0 {
 		fmt.Printf("\nSkipped (old): %d\n", stats.SkippedOld)
 	}
-	printTagSummary(processor.Tags())
+	printTagSummary(tags)
 }

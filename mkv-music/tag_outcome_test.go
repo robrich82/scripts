@@ -113,6 +113,47 @@ func TestRun_TagOutcome_UpToDate_NotCounted(t *testing.T) {
 	}
 }
 
+func TestRun_TagOutcome_NonMKV_NotTagged(t *testing.T) {
+	for _, video := range []string{"Artist - Song - Song-video.mp4", "Artist - Song - Song-video.AVI"} {
+		t.Run(video, func(t *testing.T) {
+			dir := musicDir(t, "Artist - Song.flac", video)
+			tagger := &fakeTagger{date: headerDate}
+			timer := &fakeFileTimer{}
+			p := NewProcessor(dir, "", &fakePrompter{})
+			p.tagger = tagger
+			p.timer = timer
+			captureStdout(t, func() { p.Run() })
+
+			if len(tagger.calls) != 0 {
+				t.Errorf("CopyTagsToMKV called %v for a non-MKV video", tagger.calls)
+			}
+			if tags := p.Tags(); tags.Copied != 0 || len(tags.Failed) != 0 {
+				t.Errorf("Copied = %d, Failed = %v; want 0 and none", tags.Copied, tags.Failed)
+			}
+			if len(timer.setTimes) != 0 {
+				t.Errorf("SetTimes called %v for a non-MKV video", timer.setTimes)
+			}
+		})
+	}
+}
+
+func TestPrintRunSummary_IncludesTagOutcome(t *testing.T) {
+	out := captureStdout(t, func() {
+		printRunSummary(Stats{SkippedOld: 2}, []string{`C:\m\skipped.mkv`}, nil,
+			TagOutcome{Copied: 1, Failed: []string{`C:\m\b.mkv (failed: tags)`}})
+	})
+	want := []string{"--- Scan Complete ---", "--- SKIPPED MUSIC VIDEOS (1) ---", `C:\m\skipped.mkv`,
+		"Skipped (old): 2", "--- TAGGING FAILURES (1) ---", `C:\m\b.mkv (failed: tags)`, "Tags: 1 copied, 1 failed"}
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("output missing %q:\n%s", w, out)
+		}
+	}
+	if strings.Index(out, "Skipped (old)") > strings.Index(out, "Tags:") {
+		t.Errorf("tag summary printed before the skip counts:\n%s", out)
+	}
+}
+
 func TestPrintTagSummary(t *testing.T) {
 	tests := []struct {
 		name string

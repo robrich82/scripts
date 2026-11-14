@@ -491,8 +491,10 @@ same track that was skipped, a video keeps its extra text:
 and `01 - Old - Old-video (Second Version).mkv` → `01 - New - New-video (Second Version).mkv`.
 A renamed MKV's title tag is built from its new name, so text the rename drops
 (`(Second Version)` on a lone video, an ignored `[HD]`) is left out of the tag.
-The summary counts the MKVs whose tags were copied, and lists each one whose tag
-copy or timestamp sync failed, naming the step (`tags`, `ctime`, `mtime`).
+Only `.mkv` videos are tagged; other formats are renamed only. The summary
+counts the MKVs whose tags were copied and timestamps synced (one already up to
+date isn't counted), and lists each one whose tag copy or timestamp sync failed,
+naming the step (`tags`, `ctime`, `mtime`).
 
 ### Flags
 

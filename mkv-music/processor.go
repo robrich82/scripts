@@ -575,8 +575,9 @@ func dropContained(ts []string) []string {
 // a tagger is configured. cleanVideo is the video base before ignore-pattern
 // stripping; postSuffix is extra title text (" (Second Version)" after the
 // suffix, or kept "(Special Music Video)"). Both build the MKV title suffix.
+// Other video formats are skipped: mkvpropedit only edits MKVs.
 func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuffix, videoDir, videoPath string, audioPaths map[string]string) {
-	if p.tagger == nil || audioPaths == nil {
+	if p.tagger == nil || audioPaths == nil || !strings.EqualFold(filepath.Ext(mkvPath), ".mkv") {
 		return
 	}
 	audioFilename, ok := audioPaths[matchKey]
