@@ -290,13 +290,14 @@ func (p *Processor) Run() Stats {
 						rating := p.resolveEpisodeRating(showID, showName, filePath, posterSeason, 0)
 						deband := entry.resolveDeband(fmt.Sprintf("S%02d", posterSeason), "")
 						if wrote, failed := p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating, deband); wrote {
-							p.trackRetry(filePath, stampDate, failed)
+							p.trackRetry(filePath, file, stampDate, failed)
 							showTouched = true
 							extrasProcessed = true
 							stats.countTagged("Processed (extra)", file, failed)
 						} else {
 							fmt.Printf("  [X] Failed (extra): %s\n", file)
 							stats.Failed++
+							p.trackRetry(filePath, file, stampDate, []string{"tags"})
 						}
 						time.Sleep(50 * time.Millisecond)
 						continue
@@ -392,12 +393,13 @@ func (p *Processor) Run() Stats {
 				)
 			}
 			if wrote, failed := p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating, deband); wrote {
-				p.trackRetry(filePath, stampDate, failed)
+				p.trackRetry(filePath, file, stampDate, failed)
 				showTouched = true
 				stats.countTagged("Processed", file, failed)
 			} else {
 				fmt.Printf("  [X] Failed: %s\n", file)
 				stats.Failed++
+				p.trackRetry(filePath, file, stampDate, []string{"tags"})
 			}
 
 			time.Sleep(50 * time.Millisecond)
@@ -1209,14 +1211,21 @@ func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, sea
 	return sr, nil
 }
 
-// trackRetry keeps a tagged file on the retry list until it has a real air
-// date and no step after tagging failed, so a later run finishes it even
-// once it falls before the cutoff.
-func (p *Processor) trackRetry(filePath, stampDate string, failed []string) {
-	if stampDate != "" && len(failed) == 0 {
+// trackRetry keeps a file on the retry list until it has a real air date and
+// no step failed, so a later run finishes it even once it falls before the
+// cutoff. A file that fails a step on maxRetryAttempts runs in a row is
+// dropped, so a step that always fails doesn't rewrite it on every run.
+func (p *Processor) trackRetry(filePath, file, stampDate string, failed []string) {
+	switch {
+	case len(failed) > 0:
+		if p.retryList.Fail(filePath) {
+			fmt.Printf("  [!] Not retrying %s after %d runs in a row failed (failed: %s); run with --all to try again.\n",
+				file, maxRetryAttempts, strings.Join(failed, ", "))
+		}
+	case stampDate == "":
+		p.retryList.Keep(filePath)
+	default:
 		p.retryList.Remove(filePath)
-	} else {
-		p.retryList.Add(filePath)
 	}
 }
 

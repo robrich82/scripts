@@ -62,7 +62,7 @@ func TestRun_FailedStepsAfterTaggingCountAsFailures(t *testing.T) {
 	if len(runner.calls) != 1 {
 		t.Errorf("Apply called %d times; want 1", len(runner.calls))
 	}
-	if !retry.Has(file) {
+	if !onDiskRetry(t, retry).Has(file) {
 		t.Error("partly failed file dropped from the retry list")
 	}
 }
@@ -208,13 +208,19 @@ func TestApplyPlexRatings_CountsFailures(t *testing.T) {
 		{"episodes", &fakePlexClient{showRatingKey: "k", seasons: []PlexSeason{{RatingKey: "s1", SeasonNumber: 1}}, episodesErr: plexErr},
 			&fakeTMDB{}, 1},
 		{"metadata refresh", &fakePlexClient{showRatingKey: "k", refreshMetaErr: plexErr}, &fakeTMDB{}, 1},
+		{"episode metadata", &fakePlexClient{showRatingKey: "k", seasons: []PlexSeason{{RatingKey: "s1", SeasonNumber: 1}},
+			episodesByKey: map[string][]PlexEpisodeItem{"s1": {{RatingKey: "e1", SeasonNumber: 1, EpisodeNumber: 1}}},
+			setEpMetaErr:  plexErr},
+			&fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "en"}}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rc := emptyRatingCache(t)
 			rc.SetShowRating("111", RatingM)
-			p := NewProcessor(Config{}, nil, nil, tc.tmdb, nil, nil, nil, nil, rc, nil, tc.plex, nil)
+			// A manual date makes the episode metadata push run.
+			manual := ManualEntry{Dates: map[string]string{"S01E01": "2022-03-01"}}
+			p := NewProcessor(Config{}, nil, map[string]ManualEntry{"Show A": manual}, tc.tmdb, nil, nil, nil, nil, rc, nil, tc.plex, nil)
 			var errs int
-			captureStdout(t, func() { errs = p.applyPlexRatings("111", nil, "Show A", "Show A", true, ManualEntry{}) })
+			captureStdout(t, func() { errs = p.applyPlexRatings("111", nil, "Show A", "Show A", true, manual) })
 			if errs != tc.want {
 				t.Errorf("errs = %d; want %d", errs, tc.want)
 			}
@@ -263,7 +269,7 @@ func TestRun_RetryListFollowsFailedSteps(t *testing.T) {
 
 			captureStdout(t, func() { p.Run() })
 
-			if got := retry.Has(file); got != tc.wantRetry {
+			if got := onDiskRetry(t, retry).Has(file); got != tc.wantRetry {
 				t.Errorf("on retry list = %v; want %v", got, tc.wantRetry)
 			}
 		})
@@ -293,29 +299,197 @@ func TestRun_ExtraFailedStepsCountAsFailures(t *testing.T) {
 	if want := "[X] Processed (extra): My Show - S02 - Drama CD.mkv (failed: ctime)\n"; !strings.Contains(out, want) {
 		t.Errorf("output lacks %q:\n%s", want, out)
 	}
-	if !retry.Has(file) {
+	if !onDiskRetry(t, retry).Has(file) {
 		t.Error("partly failed extra dropped from the retry list")
 	}
 }
 
-// The library re-scan after tagging extras counts as a Plex error when it fails.
-func TestRun_PostRunLibraryRefreshFailureCounted(t *testing.T) {
-	dir := showLibrary(t, "My Show", "My Show - S02 - Drama CD.mkv")
-	manual := map[string]ManualEntry{"My Show": {Extras: map[string]ExtraEntry{
-		"My Show - S02 - Drama CD": {Date: "2022-04-01", Season: 2},
-	}}}
-	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
-	plex := &fakePlexClient{showRatingKey: "k", refreshLibsErr: errors.New("HTTP 500")}
-	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cacheWith(t, map[string]string{"My Show": "999"}),
-		manual, &fakeTMDB{}, runner, &scriptedPrompter{}, &captureFileTimer{}, emptyRetryList(t), emptyRatingCache(t), nil, plex, nil)
+// The library re-scan after tagging extras counts as a Plex error only when it fails.
+func TestRun_PostRunLibraryRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		wantErr int
+		wantOut string
+	}{
+		{"fails", errors.New("HTTP 500"), 1, "Plex library refresh failed: HTTP 500"},
+		{"succeeds", nil, 0, "Plex: library re-scanned for extras."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := showLibrary(t, "My Show", "My Show - S02 - Drama CD.mkv")
+			manual := map[string]ManualEntry{"My Show": {Extras: map[string]ExtraEntry{
+				"My Show - S02 - Drama CD": {Date: "2022-04-01", Season: 2},
+			}}}
+			runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
+			plex := &fakePlexClient{showRatingKey: "k", refreshLibsErr: tc.err}
+			p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cacheWith(t, map[string]string{"My Show": "999"}),
+				manual, &fakeTMDB{}, runner, &scriptedPrompter{}, &captureFileTimer{}, emptyRetryList(t), emptyRatingCache(t), nil, plex, nil)
 
+			var stats Stats
+			out := captureStdout(t, func() { stats = p.Run() })
+
+			if stats.Success != 1 || stats.PlexErrors != tc.wantErr {
+				t.Errorf("stats = %+v; want the extra a success and %d Plex errors", stats, tc.wantErr)
+			}
+			if !strings.Contains(out, tc.wantOut) {
+				t.Errorf("output lacks %q:\n%s", tc.wantOut, out)
+			}
+		})
+	}
+}
+
+// onDiskRetry reloads r from the file Run saved it to.
+func onDiskRetry(t *testing.T, r *RetryList) *RetryList {
+	t.Helper()
+	got, err := LoadRetryList(r.path)
+	if err != nil {
+		t.Fatalf("reload %s: %v", r.path, err)
+	}
+	return got
+}
+
+// stepShowRun runs one pass over "Step Show - S01E01.mkv" in dir (dated
+// 2020, before cutoff), with the retry list loaded from retryPath.
+func stepShowRun(t *testing.T, dir, retryPath string, cutoff time.Time, airDate string, runner *fakeMKVRunner) (Stats, string) {
+	t.Helper()
+	retry, err := LoadRetryList(retryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmdb := &fakeTMDB{seasonResult: SeasonResult{PosterPath: "/p.jpg", Episodes: []Episode{{EpisodeNumber: 1, AirDate: airDate}}}}
+	p := NewProcessor(Config{MediaDir: dir, CutoffDate: cutoff, ProcessAll: true}, cacheWith(t, map[string]string{"Step Show": "999"}),
+		map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retry, emptyRatingCache(t), nil, nil, nil)
 	var stats Stats
 	out := captureStdout(t, func() { stats = p.Run() })
+	return stats, out
+}
 
-	if stats.Success != 1 || stats.PlexErrors != 1 {
-		t.Errorf("stats = %+v; want the extra a success and 1 Plex error", stats)
+// oldStepShow makes the Step Show library with its episode dated before any cutoff.
+func oldStepShow(t *testing.T) (dir, file, retryPath string) {
+	t.Helper()
+	dir = showLibrary(t, "Step Show", "Step Show - S01E01.mkv")
+	file = filepath.Join(dir, "Step Show", "Step Show - S01E01.mkv")
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(file, old, old); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, "Plex library refresh failed: HTTP 500") {
-		t.Errorf("output lacks the refresh failure:\n%s", out)
+	return dir, file, filepath.Join(t.TempDir(), "pending_dates.json")
+}
+
+// A file whose poster failed is picked up by the next run although it is
+// older than the cutoff, and leaves the list once it succeeds.
+func TestRun_RetryListSecondRunFinishesFile(t *testing.T) {
+	dir, file, retryPath := oldStepShow(t)
+
+	// Run 1, as with --all: the poster fails.
+	stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01",
+		&fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 503")})
+	if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != 1 {
+		t.Fatalf("after run 1: on list = %v, attempts = %d; want true, 1", r.Has(file), r.Attempts(file))
+	}
+
+	// Run 2, with today's cutoff: the poster works.
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterPath: "p.jpg"}
+	stats, _ := stepShowRun(t, dir, retryPath, time.Now(), "2020-01-01", runner)
+	if len(runner.calls) != 1 || stats.Success != 1 {
+		t.Errorf("run 2: Apply calls = %d, stats = %+v; want the old file processed", len(runner.calls), stats)
+	}
+	if r, _ := LoadRetryList(retryPath); r.Has(file) {
+		t.Error("finished file still on the retry list")
+	}
+}
+
+// A file that fails a step on maxRetryAttempts runs in a row is dropped, and
+// a run with the cutoff then skips it.
+func TestRun_RetryListGivesUp(t *testing.T) {
+	dir, file, retryPath := oldStepShow(t)
+	failing := func() *fakeMKVRunner {
+		return &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 404")}
+	}
+
+	stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01", failing()) // as with --all
+	for run := 2; run <= maxRetryAttempts; run++ {
+		_, out := stepShowRun(t, dir, retryPath, time.Now(), "2020-01-01", failing())
+		r, _ := LoadRetryList(retryPath)
+		if run < maxRetryAttempts {
+			if r.Attempts(file) != run {
+				t.Fatalf("after run %d: attempts = %d (on list %v)", run, r.Attempts(file), r.Has(file))
+			}
+			continue
+		}
+		if r.Has(file) {
+			t.Fatalf("still on the retry list after %d failed runs", run)
+		}
+		want := "Not retrying Step Show - S01E01.mkv after 5 runs in a row failed (failed: poster); run with --all to try again."
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+
+	runner := failing()
+	stats, _ := stepShowRun(t, dir, retryPath, time.Now(), "2020-01-01", runner)
+	if len(runner.calls) != 0 || stats.SkippedOld != 1 {
+		t.Errorf("after giving up: Apply calls = %d, stats = %+v; want the file skipped as old", len(runner.calls), stats)
+	}
+}
+
+// Waiting for TMDB to list an air date isn't a failure, so it never uses up
+// the retry attempts.
+func TestRun_RetryListPlaceholderDateNotCapped(t *testing.T) {
+	dir, file, retryPath := oldStepShow(t)
+	ok := func() *fakeMKVRunner {
+		return &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterPath: "p.jpg"}
+	}
+	stepShowRun(t, dir, retryPath, time.Time{}, "", ok())
+	for run := 2; run <= maxRetryAttempts+1; run++ {
+		stepShowRun(t, dir, retryPath, time.Now(), "", ok())
+	}
+	if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != 0 {
+		t.Errorf("on list = %v, attempts = %d; want true, 0", r.Has(file), r.Attempts(file))
+	}
+}
+
+// A file whose tags couldn't be written at all goes on the retry list.
+func TestRun_TagWriteFailureRetried(t *testing.T) {
+	dir, file, retryPath := oldStepShow(t)
+	stats, _ := stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01",
+		&fakeMKVRunner{avail: true, applyRC: 2, tagsPath: "t.xml"})
+
+	if stats.Failed != 1 {
+		t.Errorf("stats = %+v; want 1 failed", stats)
+	}
+	if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != 1 {
+		t.Errorf("on list = %v, attempts = %d; want true, 1", r.Has(file), r.Attempts(file))
+	}
+}
+
+// The retry list reads the older array form and keeps each entry's count.
+func TestRetryList_Formats(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pending_dates.json")
+	if err := os.WriteFile(path, []byte(`["C:\\tv\\a.mkv", "C:\\tv\\b.mkv"]`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRetryList(path)
+	if err != nil {
+		t.Fatalf("old format: %v", err)
+	}
+	a, b := `C:\tv\a.mkv`, `C:\tv\b.mkv`
+	if !r.Has(a) || !r.Has(b) || r.Attempts(a) != 0 {
+		t.Fatalf("old format loaded %v", r.data)
+	}
+
+	r.Fail(a)
+	r.Add(a) // a TMDB lookup failure keeps the count
+	r.Fail(b)
+	r.Keep(b) // a run with no failed step clears it
+	if err := r.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadRetryList(path)
+	if err != nil {
+		t.Fatalf("new format: %v", err)
+	}
+	if got.Attempts(a) != 1 || !got.Has(b) || got.Attempts(b) != 0 {
+		t.Errorf("reloaded %v; want a:1 b:0", got.data)
 	}
 }

@@ -95,7 +95,7 @@ func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tm
 
 func emptyRetryList(t *testing.T) *RetryList {
 	t.Helper()
-	return &RetryList{path: filepath.Join(t.TempDir(), "pending_dates.json"), data: make(map[string]bool)}
+	return &RetryList{path: filepath.Join(t.TempDir(), "pending_dates.json"), data: make(map[string]int)}
 }
 
 func emptyRatingCache(t *testing.T) *RatingCache {
@@ -1133,7 +1133,7 @@ func TestProcessorRun_FallbackDate_AddsToRetryList(t *testing.T) {
 
 	p.Run()
 
-	if !retryList.Has(mkvPath) {
+	if !onDiskRetry(t, retryList).Has(mkvPath) {
 		t.Errorf("expected %q to be in retry list after fallback date", mkvPath)
 	}
 }
@@ -1162,7 +1162,7 @@ func TestProcessorRun_RealDate_RemovesFromRetryList(t *testing.T) {
 
 	p.Run()
 
-	if retryList.Has(mkvPath) {
+	if onDiskRetry(t, retryList).Has(mkvPath) {
 		t.Errorf("expected %q to be removed from retry list after real date found", mkvPath)
 	}
 }
