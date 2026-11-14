@@ -643,7 +643,7 @@ func TestHTTPPlexClient_RefreshLibraries_RefreshesShowSections(t *testing.T) {
 			// One show section and one movie section — only the show section should be refreshed.
 			fmt.Fprint(w, `{"MediaContainer":{"Directory":[{"key":"1","type":"show"},{"key":"2","type":"movie"}]}}`)
 		} else {
-			refreshPaths = append(refreshPaths, r.URL.Path)
+			refreshPaths = append(refreshPaths, r.Method+" "+r.URL.Path)
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -653,8 +653,27 @@ func TestHTTPPlexClient_RefreshLibraries_RefreshesShowSections(t *testing.T) {
 	if err := c.RefreshLibraries(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(refreshPaths) != 1 || refreshPaths[0] != "/library/sections/1/refresh" {
-		t.Errorf("refreshPaths = %v; want [/library/sections/1/refresh]", refreshPaths)
+	if len(refreshPaths) != 1 || refreshPaths[0] != "POST /library/sections/1/refresh" {
+		t.Errorf("refresh requests = %v; want [POST /library/sections/1/refresh]", refreshPaths)
+	}
+}
+
+// A failed section refresh is returned, naming the section, so the caller can
+// warn that Plex didn't rescan.
+func TestHTTPPlexClient_RefreshLibraries_RefreshError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/library/sections" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"MediaContainer":{"Directory":[{"key":"1","type":"show"}]}}`)
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	err := newHTTPPlexClient(srv.URL, "token").RefreshLibraries()
+	if err == nil || !strings.Contains(err.Error(), "refresh section 1") {
+		t.Errorf("err %v; want it to name section 1", err)
 	}
 }
 

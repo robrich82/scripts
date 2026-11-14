@@ -113,9 +113,17 @@ func newHTTPPlexMovieClient(baseURL, token string) *httpPlexMovieClient {
 	}
 }
 
+// plexGet is plexRequest with GET.
 func (c *httpPlexMovieClient) plexGet(path string) (*http.Response, error) {
+	return c.plexRequest(http.MethodGet, path)
+}
+
+// plexRequest sends method to path (relative to baseURL) with an
+// Accept: application/json header. The Plex token goes in a header, not the
+// URL, so transport errors (which print the URL) can't leak it.
+func (c *httpPlexMovieClient) plexRequest(method, path string) (*http.Response, error) {
 	u := c.baseURL + path
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	req, err := http.NewRequest(method, u, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +137,7 @@ func (c *httpPlexMovieClient) plexGet(path string) (*http.Response, error) {
 	// decoded into a zero-value struct that looks like an empty success.
 	if resp.StatusCode/100 != 2 {
 		resp.Body.Close()
-		return nil, fmt.Errorf("plex: GET %s: unexpected status %s", path, resp.Status)
+		return nil, fmt.Errorf("plex: %s %s: unexpected status %s", method, path, resp.Status)
 	}
 	return resp, nil
 }
@@ -328,14 +336,15 @@ func (c *httpPlexMovieClient) GetContentRating(ratingKey string) (NZRating, erro
 
 // RefreshLibraries implements PlexMovieClient. It scans all "movie" library
 // sections, triggering a metadata refresh so Plex picks up any new or changed
-// files without requiring a manual library scan.
+// files without requiring a manual library scan. It sends POST, the method
+// the API defines; GET works today but is undocumented.
 func (c *httpPlexMovieClient) RefreshLibraries() error {
 	sections, err := c.movieSectionKeys()
 	if err != nil {
 		return err
 	}
 	for _, section := range sections {
-		refreshResp, err := c.plexGet("/library/sections/" + section + "/refresh")
+		refreshResp, err := c.plexRequest(http.MethodPost, "/library/sections/"+section+"/refresh")
 		if err != nil {
 			return fmt.Errorf("plex: refresh section %s: %w", section, err)
 		}
