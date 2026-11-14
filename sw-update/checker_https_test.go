@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -190,5 +191,81 @@ func TestHTMLCheckerSendsUserAgent(t *testing.T) {
 	}
 	if res.Version != "1.2" {
 		t.Errorf("Version = %q, want 1.2", res.Version)
+	}
+}
+
+func TestCheckerReplacesAssetsWithTemplatedAsset(t *testing.T) {
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `version 6.0 <a href="https://mirror.example.com/app-6.0-setup.exe">x</a>`)
+	})
+	app := htmlApp(srv.URL + "/downloads") // asset_patterns "*.exe" matches the page link too
+	app.Checker.AssetURL = "https://dl.example.com/app-{major}-{minor}/app-{version}-setup.exe"
+
+	res, err := NewChecker(srv.Client()).Check(app)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	want := []Asset{{Name: "app-6.0-setup.exe", URL: "https://dl.example.com/app-6-0/app-6.0-setup.exe"}}
+	if !reflect.DeepEqual(res.Assets, want) {
+		t.Errorf("Assets = %+v, want only the templated %+v", res.Assets, want)
+	}
+}
+
+func TestHeaderCheckerTemplatedAsset(t *testing.T) {
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Last-Modified", "Sat, 14 Nov 2026 10:00:00 GMT")
+	})
+	app := App{Name: "testapp", Checker: CheckerConfig{
+		Type: "http-header", URL: srv.URL + "/latest", AssetURL: "https://dl.example.com/app-{version}.zip",
+	}}
+
+	res, err := NewChecker(srv.Client()).Check(app)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	want := []Asset{{Name: "app-2026-11-14.zip", URL: "https://dl.example.com/app-2026-11-14.zip"}}
+	if !reflect.DeepEqual(res.Assets, want) {
+		t.Errorf("Assets = %+v, want %+v", res.Assets, want)
+	}
+}
+
+func TestCheckerRejectsHTTPTemplatedAsset(t *testing.T) {
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `version 6.0`)
+	})
+	app := htmlApp(srv.URL + "/downloads")
+	app.Checker.AssetURL = "http://dl.example.com/app-{version}.exe"
+
+	_, err := NewChecker(srv.Client()).Check(app)
+	var insecure *insecureURLError
+	if !errors.As(err, &insecure) {
+		t.Errorf("err = %v, want an insecureURLError", err)
+	}
+}
+
+func TestCheckerFailsOnBadAssetURL(t *testing.T) {
+	tests := []struct {
+		name, page, versionRegex, assetURL, wantErr string
+	}{
+		{"missing segment", "version 6.0", `version (\d+\.\d+)`, "https://dl.example.com/app-{patch}.zip", "{patch}"},
+		{"empty version", "version  ", `version ([0-9.]*)`, "https://dl.example.com/app-{version}.zip", "no version"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, tt.page)
+			})
+			app := htmlApp(srv.URL + "/downloads")
+			app.Checker.VersionRegex = tt.versionRegex
+			app.Checker.AssetURL = tt.assetURL
+
+			res, err := NewChecker(srv.Client()).Check(app)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want one containing %q", err, tt.wantErr)
+			}
+			if res != nil {
+				t.Errorf("result = %+v, want nil", res)
+			}
+		})
 	}
 }

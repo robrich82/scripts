@@ -867,6 +867,22 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 | `sourceforge` | Scans a SourceForge project's RSS feed for new file releases |
 | `http-header` | Reads an HTTP response header from a URL (e.g. `Last-Modified`) as the version |
 
+**All checker types** also accept `asset_url`, a download URL template for
+files the page doesn't link, e.g. behind a EULA page. It replaces the assets
+the check found. `{version}` is the checked version; `{major}`, `{minor}` and
+`{patch}` are its dot-separated segments without a leading `v` (a suffix such
+as `-rc1` stays in its segment). A template that can't be expanded fails the
+check.
+
+```json
+"checker": {
+    "type": "html",
+    "url": "https://www.amd.com/en/developer/aocl.html",
+    "version_regex": "AOCL_Windows-setup-([0-9]+\\.[0-9]+\\.[0-9]+)-AMD\\.exe",
+    "asset_url": "https://download.amd.com/developer/eula/aocl/aocl-{major}-{minor}/AOCL_Windows-setup-{version}-AMD.exe"
+}
+```
+
 **`github` checker fields:**
 
 | Field | Description |
