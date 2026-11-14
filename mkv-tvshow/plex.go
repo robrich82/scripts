@@ -97,6 +97,16 @@ type httpPlexClient struct {
 	// showKeyCache caches tmdbID → Plex ratingKey within a single run to avoid
 	// repeatedly scanning the full library.
 	showKeyCache map[string]string
+	sectionItems map[string][]plexShowItem // section key → its last listing
+}
+
+// plexShowItem is a show in a Plex section listing. Guid may be a JSON array
+// (modern Plex TV agent) or a plain string (legacy agents).
+type plexShowItem struct {
+	RatingKey string          `json:"ratingKey"`
+	Title     string          `json:"title"`
+	Guid      json.RawMessage `json:"Guid"`
+	GuidLower string          `json:"guid"` // legacy lowercase plain-string guid
 }
 
 // newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
@@ -122,6 +132,7 @@ func newHTTPPlexClient(baseURL, token string) *httpPlexClient {
 		token:        token,
 		httpClient:   newPlexHTTPClient(),
 		showKeyCache: make(map[string]string),
+		sectionItems: make(map[string][]plexShowItem),
 	}
 }
 
@@ -159,11 +170,50 @@ func (c *httpPlexClient) FindShowByTMDBID(tmdbID string) (string, error) {
 	if key, ok := c.showKeyCache[tmdbID]; ok {
 		return key, nil
 	}
+	wantGUID := "tmdb://" + tmdbID
+	key, err := c.findShow(func(item plexShowItem) bool {
+		return plexItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID)
+	})
+	if err == nil {
+		c.showKeyCache[tmdbID] = key
+	}
+	return key, err
+}
 
-	// 1. Discover all library sections.
+// findShow returns the rating key of the first show that match accepts, or
+// ErrPlexNotFound. It searches the section listings fetched earlier in this
+// run, then fresh listings, as Plex may have added the show since.
+func (c *httpPlexClient) findShow(match func(plexShowItem) bool) (string, error) {
+	sections, err := c.showSectionKeys()
+	if err != nil {
+		return "", err
+	}
+	fetched := make(map[string]bool) // sections listed by this call
+	for _, fresh := range []bool{false, true} {
+		for _, section := range sections {
+			if fresh && fetched[section] {
+				continue
+			}
+			items, wasFetched, err := c.sectionListing(section, fresh)
+			if err != nil {
+				return "", err
+			}
+			fetched[section] = fetched[section] || wasFetched
+			for _, item := range items {
+				if match(item) {
+					return item.RatingKey, nil
+				}
+			}
+		}
+	}
+	return "", ErrPlexNotFound
+}
+
+// showSectionKeys returns the keys of Plex's show library sections.
+func (c *httpPlexClient) showSectionKeys() ([]string, error) {
 	resp, err := c.plexGet("/library/sections")
 	if err != nil {
-		return "", fmt.Errorf("plex: list sections: %w", err)
+		return nil, fmt.Errorf("plex: list sections: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -176,61 +226,41 @@ func (c *httpPlexClient) FindShowByTMDBID(tmdbID string) (string, error) {
 		} `json:"MediaContainer"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
-		return "", fmt.Errorf("plex: decode sections: %w", err)
+		return nil, fmt.Errorf("plex: decode sections: %w", err)
 	}
-
-	// 2. For each "show" section, scan all shows for the TMDB GUID.
-	wantGUID := "tmdb://" + tmdbID
+	var keys []string
 	for _, section := range sectionsResp.MediaContainer.Directory {
-		if section.Type != "show" {
-			continue
-		}
-		key, err := c.findInSection(section.Key, wantGUID)
-		if err != nil {
-			return "", err
-		}
-		if key != "" {
-			c.showKeyCache[tmdbID] = key
-			return key, nil
+		if section.Type == "show" {
+			keys = append(keys, section.Key)
 		}
 	}
-	return "", ErrPlexNotFound
+	return keys, nil
 }
 
-// findInSection scans a single library section for a show with the given GUID.
-// Without includeGuids=1, Plex lists a modern-agent show with only its plex://
-// guid, so the TMDB ID would never match.
-func (c *httpPlexClient) findInSection(sectionKey, wantGUID string) (string, error) {
+// sectionListing returns the shows in a Plex section: the listing fetched
+// earlier in this run, unless fresh or there is none. fetched reports a
+// request. Without includeGuids=1, Plex lists a modern-agent show with only
+// its plex:// guid, so a TMDB ID would never match.
+func (c *httpPlexClient) sectionListing(sectionKey string, fresh bool) (items []plexShowItem, fetched bool, err error) {
+	if items, ok := c.sectionItems[sectionKey]; ok && !fresh {
+		return items, false, nil
+	}
 	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=2&includeGuids=1")
 	if err != nil {
-		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
+		return nil, false, fmt.Errorf("plex: list section %s: %w", sectionKey, err)
 	}
 	defer resp.Body.Close()
 
-	// Guid may be a JSON array (modern Plex TV agent) or a plain string
-	// (legacy metadata agents). Use RawMessage so we can try both.
 	var allResp struct {
 		MediaContainer struct {
-			Metadata []struct {
-				RatingKey string          `json:"ratingKey"`
-				Guid      json.RawMessage `json:"Guid"`
-				GuidLower string          `json:"guid"` // legacy lowercase plain-string guid
-			} `json:"Metadata"`
+			Metadata []plexShowItem `json:"Metadata"`
 		} `json:"MediaContainer"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
-		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
+		return nil, false, fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
 	}
-
-	// tmdbID is the bare numeric ID extracted from wantGUID ("tmdb://12345" → "12345").
-	tmdbID := strings.TrimPrefix(wantGUID, "tmdb://")
-
-	for _, item := range allResp.MediaContainer.Metadata {
-		if plexItemHasTMDBID(item.Guid, item.GuidLower, wantGUID, tmdbID) {
-			return item.RatingKey, nil
-		}
-	}
-	return "", nil
+	c.sectionItems[sectionKey] = allResp.MediaContainer.Metadata
+	return allResp.MediaContainer.Metadata, true, nil
 }
 
 // plexItemHasTMDBID reports whether a Plex metadata item matches the given
@@ -345,70 +375,15 @@ func (c *httpPlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem,
 	return episodes, nil
 }
 
-// FindShowByTitle implements PlexClient. It scans all "show" library sections
-// for an item whose normalised title matches title, regardless of which
-// metadata agent is in use. This is a fallback for when FindShowByTMDBID fails
-// because the show uses a non-TMDB agent (e.g. HAMA for anime).
+// FindShowByTitle implements PlexClient. It finds the show whose normalised
+// title matches title, regardless of which metadata agent is in use. This is a
+// fallback for when FindShowByTMDBID fails because the show uses a non-TMDB
+// agent (e.g. HAMA for anime).
 func (c *httpPlexClient) FindShowByTitle(title string) (string, error) {
-	resp, err := c.plexGet("/library/sections")
-	if err != nil {
-		return "", fmt.Errorf("plex: list sections: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var sectionsResp struct {
-		MediaContainer struct {
-			Directory []struct {
-				Key  string `json:"key"`
-				Type string `json:"type"`
-			} `json:"Directory"`
-		} `json:"MediaContainer"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
-		return "", fmt.Errorf("plex: decode sections: %w", err)
-	}
-
 	normTitle := normalizeShowTitle(title)
-	for _, section := range sectionsResp.MediaContainer.Directory {
-		if section.Type != "show" {
-			continue
-		}
-		key, err := c.findShowInSectionByTitle(section.Key, normTitle)
-		if err != nil {
-			return "", err
-		}
-		if key != "" {
-			return key, nil
-		}
-	}
-	return "", ErrPlexNotFound
-}
-
-func (c *httpPlexClient) findShowInSectionByTitle(sectionKey, normTitle string) (string, error) {
-	resp, err := c.plexGet("/library/sections/" + sectionKey + "/all?type=2")
-	if err != nil {
-		return "", fmt.Errorf("plex: list section %s: %w", sectionKey, err)
-	}
-	defer resp.Body.Close()
-
-	var allResp struct {
-		MediaContainer struct {
-			Metadata []struct {
-				RatingKey string `json:"ratingKey"`
-				Title     string `json:"title"`
-			} `json:"Metadata"`
-		} `json:"MediaContainer"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&allResp); err != nil {
-		return "", fmt.Errorf("plex: decode section %s: %w", sectionKey, err)
-	}
-
-	for _, item := range allResp.MediaContainer.Metadata {
-		if normalizeShowTitle(item.Title) == normTitle {
-			return item.RatingKey, nil
-		}
-	}
-	return "", nil
+	return c.findShow(func(item plexShowItem) bool {
+		return normalizeShowTitle(item.Title) == normTitle
+	})
 }
 
 // FindShowByFilePath implements PlexClient. It queries each show library
@@ -417,29 +392,12 @@ func (c *httpPlexClient) findShowInSectionByTitle(sectionKey, normTitle string) 
 // ratingKey. This is the most reliable fallback for shows whose Plex title
 // differs from the filesystem folder name (e.g. anime using HAMA agent).
 func (c *httpPlexClient) FindShowByFilePath(filePath string) (string, error) {
-	resp, err := c.plexGet("/library/sections")
+	sections, err := c.showSectionKeys()
 	if err != nil {
-		return "", fmt.Errorf("plex: list sections: %w", err)
+		return "", err
 	}
-	defer resp.Body.Close()
-
-	var sectionsResp struct {
-		MediaContainer struct {
-			Directory []struct {
-				Key  string `json:"key"`
-				Type string `json:"type"`
-			} `json:"Directory"`
-		} `json:"MediaContainer"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&sectionsResp); err != nil {
-		return "", fmt.Errorf("plex: decode sections: %w", err)
-	}
-
-	for _, section := range sectionsResp.MediaContainer.Directory {
-		if section.Type != "show" {
-			continue
-		}
-		key, err := c.findShowInSectionByFilePath(section.Key, filePath)
+	for _, section := range sections {
+		key, err := c.findShowInSectionByFilePath(section, filePath)
 		if err != nil {
 			return "", err
 		}
