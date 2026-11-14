@@ -501,15 +501,12 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 	var langAltSuffix string
 	ratingPushed := false
 	if plexRatingNeedsUpdate(rating) || plexStreamsNeedSet() {
-		rk, plexErr := rr.plex.FindMovieByTMDBID(tmdbID)
-		if errors.Is(plexErr, ErrPlexMovieNotFound) {
-			rk, plexErr = rr.plex.FindMovieByTitle(details.Title, releaseYear(details.ReleaseDate))
-		}
-		if errors.Is(plexErr, ErrPlexMovieNotFound) {
-			// Nothing is recorded as pushed. The file is still backdated once
-			// tagged, so only a later --all (or older --cutoff-date) run pushes.
-			fmt.Printf("  [!] Not in Plex library – rating and streams not pushed; rerun with --all once Plex has it\n")
-		} else if plexErr == nil {
+		// Not found records nothing as pushed. The file is still backdated once
+		// tagged, so only a later --all (or older --cutoff-date) run pushes.
+		rk, lookupFailed := lookupPlexMovie(rr.plex, tmdbID, details.Title, releaseYear(details.ReleaseDate), "rating and streams not pushed", "--all")
+		if lookupFailed != "" {
+			failed = append(failed, lookupFailed)
+		} else if rk != "" {
 			if plexRatingNeedsUpdate(rating) {
 				if err := rr.plex.SetContentRating(rk, rating); err != nil {
 					fmt.Printf("  [!] Plex rating update failed: %v\n", err)
@@ -525,9 +522,6 @@ func processFile(filePath string, tmdb TMDBMovieClient, applier MKVApplier, time
 					failed = append(failed, "Plex streams")
 				}
 			}
-		} else {
-			fmt.Printf("  [!] Plex lookup failed – rating and streams not pushed: %v\n", plexErr)
-			failed = append(failed, "Plex lookup")
 		}
 	}
 

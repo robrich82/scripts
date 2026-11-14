@@ -157,7 +157,7 @@ func TestProcessFile_NotInPlex_RecordsNothing(t *testing.T) {
 	timer := &fakeFileTimer{}
 	result, out, cache := outcomeRun(t, &fakeApplier{}, timer, plex, detailsWithLanguage())
 
-	if result != ResultUpdated || !strings.Contains(out, "Not in Plex library") || !strings.Contains(out, "--all") {
+	if result != ResultUpdated || !strings.Contains(out, `"Avengers Endgame" not found (tried TMDB GUID, then title and year) – rating and streams not pushed; rerun with --all`) {
 		t.Errorf("got %v; want ResultUpdated with the not-in-Plex notice naming --all:\n%s", result, out)
 	}
 	if len(timer.setTimesCalls) != 1 || len(timer.setCreationTimeCalls) != 1 {
@@ -168,6 +168,34 @@ func TestProcessFile_NotInPlex_RecordsNothing(t *testing.T) {
 	}
 	if _, ok := cache.GetStreamsApplied("12345"); ok {
 		t.Error("streams recorded for a movie not in Plex")
+	}
+}
+
+// #176: a lookup that returns an empty rating key without an error is not
+// found; nothing is pushed to rating key "".
+func TestProcessFile_EmptyPlexRatingKey_IsNotFound(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		plex *fakePlexMovieClient
+	}{
+		{"by TMDB GUID", &fakePlexMovieClient{tmdbEmptyKey: true}},
+		{"by title", &fakePlexMovieClient{}}, // GUID not found; title returns ("", nil)
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, out, cache := outcomeRun(t, &fakeApplier{}, &fakeFileTimer{}, tc.plex, detailsWithLanguage())
+			if tc.plex.ratingSets != 0 || tc.plex.streamSets != 0 {
+				t.Errorf("pushed rating %d, streams %d times; want none", tc.plex.ratingSets, tc.plex.streamSets)
+			}
+			if result != ResultUpdated || !strings.Contains(out, "not found (tried TMDB GUID, then title and year)") {
+				t.Errorf("got %v; want ResultUpdated with the not-found notice:\n%s", result, out)
+			}
+			if _, ok := cache.GetPlexRating("12345"); ok {
+				t.Error("Plex rating recorded for an empty rating key")
+			}
+			if _, ok := cache.GetStreamsApplied("12345"); ok {
+				t.Error("streams recorded for an empty rating key")
+			}
+		})
 	}
 }
 

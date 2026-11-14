@@ -275,7 +275,7 @@ func TestProcessFile_PlexTMDBIDLookupError_NoTitleFallback(t *testing.T) {
 	if !strings.Contains(out, "Plex lookup failed") || !strings.Contains(out, "HTTP 500") {
 		t.Errorf("output doesn't report the TMDB-ID lookup error:\n%s", out)
 	}
-	if strings.Contains(out, "Not in Plex library") {
+	if strings.Contains(out, "not found") {
 		t.Errorf("transient error reported as not in library:\n%s", out)
 	}
 	if _, ok := cache.GetPlexRating("12345"); ok {
