@@ -45,7 +45,7 @@ type PlexClient interface {
 	// or ErrPlexNotFound if no match exists.
 	FindShowByTMDBID(tmdbID string) (string, error)
 	// FindShowByTitle searches all "show" library sections for an item whose
-	// title (normalised) matches title. Used as a fallback when the show uses a
+	// title matches title (see titleMatcher). Used as a fallback when the show uses a
 	// non-TMDB agent (e.g. HAMA for anime). Returns ErrPlexNotFound if absent.
 	FindShowByTitle(title string) (string, error)
 	// FindShowByFilePath searches all "show" library sections for the show that
@@ -390,7 +390,9 @@ func (c *httpPlexClient) FindShowByTitle(title string) (string, error) {
 
 // titleMatcher reports whether a Plex title matches title: by normalised
 // title, or exactly but for case when title has no ASCII letters or digits.
-// It is nil for a blank title, which matches nothing.
+// The Plex title is then cleaned as the caller's folder-name query was, so
+// "【推しの子】" matches "推しの子". It is nil for a blank title, which matches
+// nothing.
 func titleMatcher(title string) func(string) bool {
 	if norm := normalizeShowTitle(title); norm != "" {
 		return func(t string) bool { return normalizeShowTitle(t) == norm }
@@ -398,7 +400,7 @@ func titleMatcher(title string) func(string) bool {
 	if strings.TrimSpace(title) == "" {
 		return nil
 	}
-	return func(t string) bool { return strings.EqualFold(t, title) }
+	return func(t string) bool { return strings.EqualFold(cleanSearchQuery(t), title) }
 }
 
 // FindShowByFilePath implements PlexClient. It queries each show library

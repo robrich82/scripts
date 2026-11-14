@@ -46,7 +46,8 @@ type PlexMovieClient interface {
 	// ErrPlexMovieNotFound if no match exists.
 	FindMovieByTMDBID(tmdbID string) (string, error)
 	// FindMovieByTitle searches all "movie" library sections for an item whose
-	// title (normalized) matches title and whose year matches year.
+	// title matches title (see titleMatcher) and whose year is within one of
+	// year, when year is set.
 	// Returns ErrPlexMovieNotFound if no match exists.
 	FindMovieByTitle(title, year string) (string, error)
 	// GetContentRating returns the current NZ content rating stored in Plex for

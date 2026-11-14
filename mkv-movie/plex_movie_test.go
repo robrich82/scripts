@@ -706,4 +706,10 @@ func TestHTTPPlexMovieClient_FindMovieByTitle_NonASCIITitle(t *testing.T) {
 	if key, err := c.FindMovieByTitle("もののけ姫", "2001"); err != nil || key != "77" {
 		t.Errorf("exact title: got key %q, err %v; want 77", key, err)
 	}
+	if key, err := c.FindMovieByTitle("もののけ姫", "1997"); err != ErrPlexMovieNotFound {
+		t.Errorf("exact title, other year: got key %q, err %v; want ErrPlexMovieNotFound", key, err)
+	}
+	if key, err := c.FindMovieByTitle(" ", ""); err != ErrPlexMovieNotFound {
+		t.Errorf("blank title: got key %q, err %v; want ErrPlexMovieNotFound", key, err)
+	}
 }
