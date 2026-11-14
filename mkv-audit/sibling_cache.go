@@ -14,11 +14,86 @@ func saveTVShowCacheEntry(absPath, tmdbID string) error {
 	if path == "" {
 		return fmt.Errorf("APPDATA not set")
 	}
-	m := loadTVShowCache()
-	if m == nil {
-		m = map[string]string{}
+	m, err := readSiblingJSON(path)
+	if err != nil {
+		return err
 	}
-	m[absPath] = tmdbID
+	if m[absPath], err = json.Marshal(tmdbID); err != nil {
+		return err
+	}
+	return writeSiblingJSON(path, m)
+}
+
+// saveMovieTMDBIDEntry adds or updates the tmdb_ids entry in mkv-movie's
+// movie_rating_cache.json, keyed "title:YEAR" (mkv-movie's format), and maps
+// each of the movie's files to it. Without a files entry, mkv-movie --clean
+// prunes the ID.
+func saveMovieTMDBIDEntry(title, year, tmdbID string, files []string) error {
+	path := movieRatingCachePath()
+	if path == "" {
+		return fmt.Errorf("APPDATA not set")
+	}
+	raw, err := readSiblingJSON(path)
+	if err != nil {
+		return err
+	}
+	ids, err := sectionOf(raw, "tmdb_ids", path)
+	if err != nil {
+		return err
+	}
+	byFile, err := sectionOf(raw, "files", path)
+	if err != nil {
+		return err
+	}
+	ids[title+":"+year] = tmdbID
+	for _, f := range files {
+		if abs, err := filepath.Abs(f); err == nil {
+			byFile[abs] = tmdbID
+		}
+	}
+	for key, section := range map[string]map[string]string{"tmdb_ids": ids, "files": byFile} {
+		if raw[key], err = json.Marshal(section); err != nil {
+			return err
+		}
+	}
+	return writeSiblingJSON(path, raw)
+}
+
+// readSiblingJSON reads a sibling tool's JSON object, keeping every key as it
+// is. A missing file is empty; one that can't be read or parsed is an error,
+// so it is never overwritten (the owning tool refuses to load it, and the
+// user can still restore it).
+func readSiblingJSON(path string) (map[string]json.RawMessage, error) {
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]json.RawMessage{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("%s is corrupt, so it was left alone: %w", path, err)
+	}
+	if raw == nil { // the file holds null
+		raw = map[string]json.RawMessage{}
+	}
+	return raw, nil
+}
+
+// sectionOf decodes raw[key] as a string map, empty when absent.
+func sectionOf(raw map[string]json.RawMessage, key, path string) (map[string]string, error) {
+	m := map[string]string{}
+	if b, ok := raw[key]; ok && string(b) != "null" {
+		if err := json.Unmarshal(b, &m); err != nil {
+			return nil, fmt.Errorf("%s: %s is corrupt, so the file was left alone: %w", path, key, err)
+		}
+	}
+	return m, nil
+}
+
+// writeSiblingJSON writes m to path atomically, creating its directory.
+func writeSiblingJSON(path string, m map[string]json.RawMessage) error {
 	b, err := json.MarshalIndent(m, "", "    ")
 	if err != nil {
 		return err
@@ -26,45 +101,7 @@ func saveTVShowCacheEntry(absPath, tmdbID string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0644)
-}
-
-// saveMovieTMDBIDEntry adds or updates the tmdb_ids entry in mkv-movie's
-// movie_rating_cache.json. The key is "title:YEAR" (mkv-movie's format).
-func saveMovieTMDBIDEntry(title, year, tmdbID string) error {
-	path := movieRatingCachePath()
-	if path == "" {
-		return fmt.Errorf("APPDATA not set")
-	}
-	// Read existing file, preserving unknown keys.
-	var raw map[string]json.RawMessage
-	if b, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(b, &raw) //nolint:errcheck
-	}
-	if raw == nil {
-		raw = map[string]json.RawMessage{}
-	}
-	var ids map[string]string
-	if existing, ok := raw["tmdb_ids"]; ok {
-		json.Unmarshal(existing, &ids) //nolint:errcheck
-	}
-	if ids == nil {
-		ids = map[string]string{}
-	}
-	ids[title+":"+year] = tmdbID
-	encoded, err := json.Marshal(ids)
-	if err != nil {
-		return err
-	}
-	raw["tmdb_ids"] = json.RawMessage(encoded)
-	out, err := json.MarshalIndent(raw, "", "    ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, out, 0644)
+	return atomicWriteFile(path, b)
 }
 
 // tvShowCachePath returns the path to mkv-tvshow's show_cache.json.
