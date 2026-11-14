@@ -174,18 +174,19 @@ func writeStateJSON(stateDir, name string, v any) error {
 // (first path component relative to libraryRoot). TMDB calls are sequential to
 // respect rate limits. Entries that produce no match are absent from the map.
 //
-// When no sibling-cache entry exists for a directory, fetchOrigins searches
-// TMDB interactively: the top result is shown and the user is prompted to
-// accept it, enter a manual TMDB ID, or skip. Confirmed IDs are saved back to
-// the sibling cache so future runs (and mkv-tvshow / mkv-movie) can skip the
-// search step.
+// When the sibling cache (mkv-tvshow's or mkv-movie's) has no ID for a
+// directory, fetchOrigins searches TMDB interactively: the top result is shown
+// and the user is prompted to accept it, enter a manual TMDB ID, or skip. An
+// ID whose origin TMDB returns is saved back to the sibling cache so future
+// runs (and mkv-tvshow / mkv-movie) can skip the search step.
 func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOriginClient, prompter Prompter) map[string]OriginInfo {
 	origins := make(map[string]OriginInfo)
 	if tmdb == nil || libraryRoot == "" || (libType != "tv" && libType != "movie") {
 		return origins
 	}
 
-	sibling := loadSiblingCaches()
+	sibling := loadSiblingCaches(libType)
+	defer sibling.finish()
 	var autoAll, skipAll bool
 
 	var dirs []string
@@ -205,39 +206,42 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		if title == "" {
 			continue
 		}
+		root := filepath.Join(libraryRoot, dir)
+
+		var id string
+		getOrigin := tmdb.GetMovieOriginByID
+		if libType == "tv" {
+			id = sibling.lookupTV(dir, libraryRoot)
+			getOrigin = tmdb.GetTVOriginByID
+		} else {
+			id = sibling.lookupMovie(title, year, root)
+		}
+		cached := id != ""
+		if !cached && !skipAll {
+			id = resolveTMDBID(dir, title, year, libType, tmdb, prompter, &autoAll, &skipAll)
+		}
 
 		var info OriginInfo
 		var found bool
 		var err error
-
-		switch libType {
-		case "tv":
-			if id := sibling.lookupTV(dir, libraryRoot); id != "" {
-				info, found, err = tmdb.GetTVOriginByID(id)
-			} else if !skipAll {
-				if id := resolveTMDBID(dir, title, year, libType, tmdb, prompter, &autoAll, &skipAll); id != "" {
-					sibling.saveTV(dir, filepath.Join(libraryRoot, dir), id)
-					info, found, err = tmdb.GetTVOriginByID(id)
-				}
-			}
-		case "movie":
-			if id := sibling.lookupMovie(title, year, dirFiles[dir]); id != "" {
-				info, found, err = tmdb.GetMovieOriginByID(id)
-			} else if !skipAll {
-				if id := resolveTMDBID(dir, title, year, libType, tmdb, prompter, &autoAll, &skipAll); id != "" {
-					sibling.saveMovie(dir, title, year, id, dirFiles[dir])
-					info, found, err = tmdb.GetMovieOriginByID(id)
-				}
-			}
+		if id != "" {
+			info, found, err = getOrigin(id)
 		}
 		if err != nil {
 			fmt.Printf("[TMDB]   %s: %v\n", dir, err)
 			continue
 		}
-		if found {
-			origins[dir] = info
-		} else {
+		if !found {
 			fmt.Printf("[TMDB]   %s: no match found\n", dir)
+			continue
+		}
+		origins[dir] = info
+		if !cached {
+			if libType == "tv" {
+				sibling.rememberTV(dir, root, id)
+			} else {
+				sibling.rememberMovie(dir, title, year, id, dirFiles[dir])
+			}
 		}
 	}
 	return origins
@@ -245,7 +249,8 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 
 // resolveTMDBID searches TMDB for dir and prompts the user to confirm the top
 // result or enter a manual ID, and returns the confirmed ID.
-// Returns "" when the user skips or no prompter is available.
+// Returns "" when the user skips or no prompter is available. When the
+// prompter fails (stdin closed), it sets skipAll, so no more are asked.
 func resolveTMDBID(dir, title, year, libType string, tmdb TMDBOriginClient, prompter Prompter, autoAll, skipAll *bool) string {
 	if prompter == nil || *skipAll {
 		return ""
@@ -278,37 +283,49 @@ func resolveTMDBID(dir, title, year, libType string, tmdb TMDBOriginClient, prom
 		}
 	}
 
-	var confirmedID string
-	if topID == "" {
-		// No search results — ask user to provide an ID manually.
-		ans, _ := prompter.Ask(fmt.Sprintf("[TMDB]   %s: no results found. Enter TMDB id or blank to skip: ", dir))
-		ans = strings.TrimSpace(ans)
-		if ans != "" {
-			confirmedID = ans
-		}
-	} else if *autoAll {
-		confirmedID = topID
-	} else {
-		prompt := fmt.Sprintf("[TMDB]   %s: found %q (%s) [id=%s]. Accept? (y/n/a=all/s=skip all/<id>): ", dir, topName, topYear, topID)
-		ans, _ := prompter.Ask(prompt)
-		ans = strings.TrimSpace(ans)
-		switch strings.ToLower(ans) {
-		case "y", "":
-			confirmedID = topID
-		case "a":
-			*autoAll = true
-			confirmedID = topID
-		case "n":
-			// skip this entry
-		case "s":
-			*skipAll = true
-		default:
-			// Treat any other input as a manual TMDB ID.
-			confirmedID = ans
-		}
+	if topID != "" && *autoAll {
+		return topID
 	}
+	prompt := fmt.Sprintf("[TMDB]   %s: found %q (%s) [id=%s]. Accept? (y/n/a=all/s=skip all/<id>): ", dir, topName, topYear, topID)
+	if topID == "" {
+		prompt = fmt.Sprintf("[TMDB]   %s: no results found. Enter TMDB id or blank to skip: ", dir)
+	}
+	for {
+		ans, err := prompter.Ask(prompt)
+		if err != nil {
+			*skipAll = true
+			fmt.Printf("\n[TMDB]   no input (%v), so TMDB lookups are skipped for the rest of the run\n", err)
+			return ""
+		}
+		ans = strings.TrimSpace(ans)
+		if topID == "" {
+			if ans == "" {
+				return ""
+			}
+		} else {
+			switch strings.ToLower(ans) {
+			case "y", "":
+				return topID
+			case "a":
+				*autoAll = true
+				return topID
+			case "n":
+				return ""
+			case "s":
+				*skipAll = true
+				return ""
+			}
+		}
+		if isTMDBID(ans) {
+			return ans
+		}
+		fmt.Printf("[TMDB]   %q is not a TMDB id, which is digits only\n", ans)
+	}
+}
 
-	return confirmedID
+// isTMDBID reports whether s is a TMDB ID: one or more ASCII digits.
+func isTMDBID(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
 }
 
 // langFix describes a single track that needs its ISO language corrected.

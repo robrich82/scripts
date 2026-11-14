@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,10 +30,13 @@ func (searchTMDB) SearchMovie(string, string) ([]MovieSearchCandidate, error) {
 	return []MovieSearchCandidate{{ID: "42", Title: "Amelie", Year: "2001"}}, nil
 }
 
-// titleTMDB finds each movie by its title, and knows each ID's language.
+// titleTMDB finds each title by name, and knows each ID's language. An ID
+// with an empty language fails to load. A title it doesn't know has no
+// search results.
 type titleTMDB struct {
-	ids   map[string]string // title → ID
-	langs map[string]string // ID → original language
+	ids      map[string]string // title → ID
+	langs    map[string]string // ID → original language
+	onSearch func()            // runs on each search, when set
 }
 
 func (f titleTMDB) GetTVOriginByID(id string) (OriginInfo, bool, error) {
@@ -41,15 +45,46 @@ func (f titleTMDB) GetTVOriginByID(id string) (OriginInfo, bool, error) {
 
 func (f titleTMDB) GetMovieOriginByID(id string) (OriginInfo, bool, error) {
 	lang, ok := f.langs[id]
+	if ok && lang == "" {
+		return OriginInfo{}, false, errors.New("TMDB is down")
+	}
 	return OriginInfo{OrigLang: lang}, ok, nil
 }
 
 func (f titleTMDB) SearchTV(title, year string) ([]TVSearchCandidate, error) {
+	if f.onSearch != nil {
+		f.onSearch()
+	}
+	if f.ids[title] == "" {
+		return nil, nil
+	}
 	return []TVSearchCandidate{{ID: f.ids[title], Name: title, Year: year}}, nil
 }
 
 func (f titleTMDB) SearchMovie(title, year string) ([]MovieSearchCandidate, error) {
+	if f.onSearch != nil {
+		f.onSearch()
+	}
+	if f.ids[title] == "" {
+		return nil, nil
+	}
 	return []MovieSearchCandidate{{ID: f.ids[title], Title: title, Year: year}}, nil
+}
+
+// scriptPrompter gives its answers in turn, then fails as stdin at EOF does.
+type scriptPrompter struct {
+	answers []string
+	asked   []string
+}
+
+func (p *scriptPrompter) Ask(q string) (string, error) {
+	p.asked = append(p.asked, q)
+	if len(p.answers) == 0 {
+		return "", errors.New("EOF")
+	}
+	a := p.answers[0]
+	p.answers = p.answers[1:]
+	return a, nil
 }
 
 // noPrompter fails the test if anything is asked.
@@ -234,12 +269,12 @@ func TestFetchOrigins_NullMovieCacheIsEmpty(t *testing.T) {
 
 // A file mkv-movie already maps keeps its ID: mkv-movie --clean would
 // otherwise drop the old ID's rating and Plex state.
-func TestSaveMovieTMDBIDEntry_KeepsExistingFileEntry(t *testing.T) {
+func TestSaveMovieTMDBIDEntries_KeepsExistingFileEntry(t *testing.T) {
 	_, paths := siblingLibrary(t, "Amelie (2001)", "Amelie (2001).mkv", "Amelie (2001) - extras.mkv")
 	b, _ := json.Marshal(map[string]map[string]string{"files": {paths[0]: "194"}})
 	writeSibling(t, movieRatingCachePath(), string(b))
 
-	if err := saveMovieTMDBIDEntry("Amelie", "2001", "42", paths); err != nil {
+	if err := saveMovieTMDBIDEntries([]movieEntry{{title: "Amelie", year: "2001", id: "42", files: paths}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -302,6 +337,14 @@ func TestFetchOrigins_CorruptSiblingCacheLeftAlone(t *testing.T) {
 		{"movie files", "movie", `{"files":7}`, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
 		{"movie trailing data", "movie", `{"files":{}} {}`, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
 		{"movie empty file", "movie", ``, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
+		// Every section mkv-movie decodes as a string map, so mkv-audit calls
+		// the cache bad exactly when mkv-movie refuses to load it.
+		{"movie movies", "movie", `{"movies":{"9":1}}`, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
+		{"movie applied", "movie", `{"applied":[]}`, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
+		{"movie plex_ratings", "movie", `{"plex_ratings":"x"}`, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
+		{"movie streams_applied", "movie", `{"streams_applied":{"1":true}}`, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
+		{"movie meta_applied", "movie", `{"meta_applied":7}`, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
+		{"movie not an object", "movie", `[]`, [2]string{"Amelie (2001)", "Coco (2017)"}, movieRatingCachePath},
 		{"show zero-filled", "tv", "\x00\x00\x00", [2]string{"Show (2020)", "Other (2021)"}, tvShowCachePath},
 		{"show empty file", "tv", ``, [2]string{"Show (2020)", "Other (2021)"}, tvShowCachePath},
 	} {
@@ -368,38 +411,80 @@ func TestFetchOrigins_ShowIDSaved(t *testing.T) {
 	}
 }
 
-// A save that fails is reported once, and the run stops saving to that cache
-// but still uses the IDs. Windows can't replace a file another handle has
-// open, which is how the save is made to fail.
-func TestFetchOrigins_SaveFailureWarnsOnce(t *testing.T) {
+// A failed save is reported once and the run still uses the IDs. The save is
+// retried with each later confirmation and once more at the end, and what is
+// finally lost is named. Windows can't replace a file another handle has open,
+// which is how the save is made to fail.
+func TestFetchOrigins_SaveFailureRetried(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("needs Windows file locking to fail the rename")
 	}
-	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
-	paths = append(paths, addEntry(t, root, "Coco (2017)", "b.mkv")...)
-	const content = `{"movies":{"9":"M"}}`
-	writeSibling(t, movieRatingCachePath(), content)
-	f, err := os.Open(movieRatingCachePath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
+	for _, tc := range []struct {
+		name          string
+		releaseSearch int  // close the handle on this search (1-based); 0 = never mid-run
+		releaseFinal  bool // close the handle before the final retry
+		wantSaved     bool
+	}{
+		{"held throughout", 0, false, false},
+		{"released before the final retry", 0, true, true},
+		{"released mid-run", 2, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+			paths = append(paths, addEntry(t, root, "Coco (2017)", "b.mkv")...)
+			const content = `{"movies":{"9":"M"}}`
+			writeSibling(t, movieRatingCachePath(), content)
+			f, err := os.Open(movieRatingCachePath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			searches := 0
+			tmdb := titleTMDB{
+				ids:   map[string]string{"Amelie": "42", "Coco": "9"},
+				langs: map[string]string{"42": "fr", "9": "es"},
+				onSearch: func() {
+					if searches++; searches == tc.releaseSearch {
+						f.Close()
+					}
+				},
+			}
+			old := beforeFinalSiblingSave
+			beforeFinalSiblingSave = func() {
+				if tc.releaseFinal {
+					f.Close()
+				}
+			}
+			t.Cleanup(func() { beforeFinalSiblingSave = old })
 
-	out := captureStdout(t, func() {
-		origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"})
-		if len(origins) != 2 {
-			t.Errorf("origins = %v; want both movies despite the failed save", origins)
-		}
-	})
+			out := captureStdout(t, func() {
+				if origins := fetchOrigins(paths, root, "movie", tmdb, &fakePrompter{answer: "y"}); len(origins) != 2 {
+					t.Errorf("origins = %v; want both movies despite the failed save", origins)
+				}
+			})
 
-	if n := strings.Count(out, "could not save"); n != 1 || !strings.Contains(out, "[WARN]") || !strings.Contains(out, "next run asks again") {
-		t.Errorf("want one [WARN] save failure, got %d:\n%s", n, out)
+			if n := strings.Count(out, "could not save"); n != 1 || !strings.Contains(out, "Close any program") {
+				t.Errorf("want one save failure with the close-the-program hint, got %d:\n%s", n, out)
+			}
+			f.Close()
+			if !tc.wantSaved {
+				if !strings.Contains(out, "Amelie (2001) (id 42), Coco (2017) (id 9)") || !strings.Contains(out, "next run asks for them again") {
+					t.Errorf("want both IDs named as lost:\n%s", out)
+				}
+				if b, _ := os.ReadFile(movieRatingCachePath()); string(b) != content {
+					t.Errorf("cache = %q; want it left as %q", b, content)
+				}
+			} else {
+				if strings.Contains(out, "lost") || !strings.Contains(out, "mkv-movie's cache saved") {
+					t.Errorf("want the save to recover:\n%s", out)
+				}
+				if ids, _ := readMovieSections(t); ids["Amelie:2001"] != "42" || ids["Coco:2017"] != "9" {
+					t.Errorf("tmdb_ids = %v; want both movies saved", ids)
+				}
+			}
+			assertNoTempFiles(t, filepath.Dir(movieRatingCachePath()))
+		})
 	}
-	f.Close()
-	if b, _ := os.ReadFile(movieRatingCachePath()); string(b) != content {
-		t.Errorf("cache = %q; want it left as %q", b, content)
-	}
-	assertNoTempFiles(t, filepath.Dir(movieRatingCachePath()))
 }
 
 // A rename that fails leaves the target as it was and no temp file behind.
@@ -419,4 +504,373 @@ func TestAtomicWriteFile_FailedRenameCleansUp(t *testing.T) {
 		t.Errorf("target changed: %v", err)
 	}
 	assertNoTempFiles(t, dir)
+}
+
+// mustJSON marshals v for a test cache.
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// A show mkv-tvshow already knows is used without searching or asking,
+// whether keyed by its absolute path, by its bare folder name (legacy), or
+// with a numeric ID (the Python version's format).
+func TestFetchOrigins_ShowCacheHit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cache func(root string) string
+	}{
+		{"absolute key", func(root string) string {
+			return mustJSON(t, map[string]string{filepath.Join(root, "Show (2020)"): "77"})
+		}},
+		{"bare folder name", func(string) string { return `{"Show (2020)":"77"}` }},
+		{"numeric id", func(string) string { return `{"Show (2020)":77}` }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, paths := siblingLibrary(t, "Show (2020)", "a.mkv")
+			writeSibling(t, tvShowCachePath(), tc.cache(root))
+			tmdb := titleTMDB{langs: map[string]string{"77": "ja"}}
+
+			captureStdout(t, func() {
+				origins := fetchOrigins(paths, root, "tv", tmdb, noPrompter{t})
+				if origins["Show (2020)"].OrigLang != "ja" {
+					t.Errorf("origins = %v; want ja from cached ID 77", origins)
+				}
+			})
+		})
+	}
+}
+
+// An ID whose origin TMDB can't find, or fails to fetch, is not saved.
+func TestFetchOrigins_UnloadableIDNotSaved(t *testing.T) {
+	for _, tc := range []struct {
+		name, libType, entry string
+		langs                map[string]string
+		cachePath            func() string
+	}{
+		{"movie not found", "movie", "Amelie (2001)", map[string]string{}, movieRatingCachePath},
+		{"movie fetch error", "movie", "Amelie (2001)", map[string]string{"42": ""}, movieRatingCachePath},
+		{"show not found", "tv", "Amelie (2001)", map[string]string{}, tvShowCachePath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, paths := siblingLibrary(t, tc.entry, "a.mkv")
+			tmdb := titleTMDB{ids: map[string]string{"Amelie": "42"}, langs: tc.langs}
+
+			captureStdout(t, func() {
+				fetchOrigins(paths, root, tc.libType, tmdb, &fakePrompter{answer: "y"})
+			})
+
+			if b, err := os.ReadFile(tc.cachePath()); !os.IsNotExist(err) {
+				t.Errorf("cache saved (%v): %s", err, b)
+			}
+		})
+	}
+}
+
+// A typed answer that isn't all digits is asked again, never saved as an ID.
+func TestFetchOrigins_ManualIDMustBeDigits(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ids     map[string]string
+		answers []string
+		wantID  string
+	}{
+		{"accept prompt", map[string]string{"Amelie": "42"}, []string{"tt0133093", "yes", "603"}, "603"},
+		{"no results prompt", nil, []string{"skip", "603"}, "603"},
+		{"no results then blank", nil, []string{"skip", ""}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+			tmdb := titleTMDB{ids: tc.ids, langs: map[string]string{"42": "fr", "603": "en"}}
+			p := &scriptPrompter{answers: tc.answers}
+
+			captureStdout(t, func() {
+				fetchOrigins(paths, root, "movie", tmdb, p)
+			})
+
+			if len(p.asked) != len(tc.answers) {
+				t.Errorf("asked %d times; want %d:\n%s", len(p.asked), len(tc.answers), strings.Join(p.asked, "\n"))
+			}
+			if tc.wantID == "" {
+				if _, err := os.Stat(movieRatingCachePath()); !os.IsNotExist(err) {
+					t.Errorf("cache saved; want nothing saved (%v)", err)
+				}
+				return
+			}
+			ids, files := readMovieSections(t)
+			if len(ids) != 1 || ids["Amelie:2001"] != tc.wantID || len(files) != 1 || files[paths[0]] != tc.wantID {
+				t.Errorf("tmdb_ids = %v, files = %v; want only %s", ids, files, tc.wantID)
+			}
+		})
+	}
+}
+
+// When stdin ends, the rest of the run skips TMDB lookups instead of taking
+// the empty answer as "accept".
+func TestFetchOrigins_NoInputSkipsLookups(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	paths = append(paths, addEntry(t, root, "Coco (2017)", "b.mkv")...)
+	p := &scriptPrompter{}
+
+	out := captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, p); len(origins) != 0 {
+			t.Errorf("origins = %v; want none", origins)
+		}
+	})
+
+	if len(p.asked) != 1 || strings.Count(out, "no input") != 1 {
+		t.Errorf("asked %d times; want 1, and one 'no input' line:\n%s", len(p.asked), out)
+	}
+	if _, err := os.Stat(movieRatingCachePath()); !os.IsNotExist(err) {
+		t.Errorf("cache saved; want nothing saved (%v)", err)
+	}
+}
+
+// A TV run doesn't load or warn about mkv-movie's cache, and vice versa.
+func TestFetchOrigins_OnlyOwnLibraryCacheLoaded(t *testing.T) {
+	for _, tc := range []struct {
+		libType, entry string
+		otherCache     func() string
+	}{
+		{"tv", "Show (2020)", movieRatingCachePath},
+		{"movie", "Amelie (2001)", tvShowCachePath},
+	} {
+		t.Run(tc.libType, func(t *testing.T) {
+			root, paths := siblingLibrary(t, tc.entry, "a.mkv")
+			writeSibling(t, tc.otherCache(), `{"tmdb_ids":`)
+
+			out := captureStdout(t, func() {
+				fetchOrigins(paths, root, tc.libType, searchTMDB{}, &fakePrompter{answer: "y"})
+			})
+
+			if strings.Contains(out, "[WARN]") {
+				t.Errorf("warned about the other library type's cache:\n%s", out)
+			}
+		})
+	}
+}
+
+// Without APPDATA the sibling caches can't be found: at most one line says
+// so, and no save is tried (or reported) per directory.
+func TestFetchOrigins_NoAppDataWarnsOnce(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	paths = append(paths, addEntry(t, root, "Coco (2017)", "b.mkv")...)
+	t.Setenv("APPDATA", "")
+
+	out := captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"}); len(origins) != 2 {
+			t.Errorf("origins = %v; want both movies", origins)
+		}
+	})
+
+	if strings.Count(out, "[WARN]") > 1 || strings.Contains(out, "could not save") || strings.Contains(strings.ToLower(out), "close any program") {
+		t.Errorf("want at most one warning, and no save failures:\n%s", out)
+	}
+}
+
+// A cache that turns corrupt after loading fails to save with a message that
+// says so, not one telling the user to close other programs, and is left as
+// it is.
+func TestFetchOrigins_CacheCorruptedMidRunSaveHint(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	const corrupt = `{"tmdb_ids":`
+	tmdb := titleTMDB{
+		ids:      map[string]string{"Amelie": "42"},
+		langs:    map[string]string{"42": "fr"},
+		onSearch: func() { writeSibling(t, movieRatingCachePath(), corrupt) },
+	}
+
+	out := captureStdout(t, func() {
+		fetchOrigins(paths, root, "movie", tmdb, &fakePrompter{answer: "y"})
+	})
+
+	if !strings.Contains(out, "could not save") || strings.Contains(strings.ToLower(out), "close any program") {
+		t.Errorf("want a save failure without the close-the-program hint:\n%s", out)
+	}
+	if b, _ := os.ReadFile(movieRatingCachePath()); string(b) != corrupt {
+		t.Errorf("cache = %q; want it left as %q", b, corrupt)
+	}
+}
+
+// The load warning says every title will be looked up and asked about, and
+// for a corrupt show cache, what deleting it costs.
+func TestFetchOrigins_LoadWarningSaysWhatHappens(t *testing.T) {
+	for _, tc := range []struct {
+		libType, entry string
+		cachePath      func() string
+		want           []string
+	}{
+		{"movie", "Amelie (2001)", movieRatingCachePath, []string{"every movie", "asked"}},
+		{"tv", "Show (2020)", tvShowCachePath, []string{"every show", "asked", "--clean", "rating_cache.json", "missing_ignore.json"}},
+	} {
+		t.Run(tc.libType, func(t *testing.T) {
+			root, paths := siblingLibrary(t, tc.entry, "a.mkv")
+			writeSibling(t, tc.cachePath(), `{`)
+
+			out := captureStdout(t, func() {
+				fetchOrigins(paths, root, tc.libType, searchTMDB{}, &fakePrompter{answer: "y"})
+			})
+
+			for _, w := range tc.want {
+				if !strings.Contains(strings.ToLower(out), strings.ToLower(w)) {
+					t.Errorf("warning lacks %q:\n%s", w, out)
+				}
+			}
+		})
+	}
+}
+
+// A cache that can't be read (here, a directory in its place) is not called
+// corrupt: the hint is to close whatever holds it, and it is left alone.
+func TestFetchOrigins_UnreadableCacheNotCalledCorrupt(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	keep := filepath.Join(movieRatingCachePath(), "keep")
+	if err := os.MkdirAll(keep, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"}); len(origins) != 1 {
+			t.Errorf("origins = %v; want the confirmed movie", origins)
+		}
+	})
+
+	if !strings.Contains(out, "can't be loaded") || strings.Contains(out, "corrupt") || !strings.Contains(out, "Close any program") {
+		t.Errorf("want a load warning with the close-the-program hint, not 'corrupt':\n%s", out)
+	}
+	if fi, err := os.Stat(keep); err != nil || !fi.IsDir() {
+		t.Errorf("cache path changed: %v", err)
+	}
+	assertNoTempFiles(t, filepath.Dir(movieRatingCachePath()))
+	assertNoTempFiles(t, movieRatingCachePath())
+}
+
+// Two content roots with the same title and year are asked about once.
+func TestFetchOrigins_SameMovieKeyAskedOnce(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	makeMKVFile(t, root, "Amelie (2001).mkv")
+	paths = append(paths, filepath.Join(root, "Amelie (2001).mkv"))
+	p := &scriptPrompter{answers: []string{"y", "y"}}
+
+	captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, p); len(origins) != 2 {
+			t.Errorf("origins = %v; want both roots", origins)
+		}
+	})
+
+	if len(p.asked) != 1 {
+		t.Errorf("asked %d times; want once:\n%s", len(p.asked), strings.Join(p.asked, "\n"))
+	}
+}
+
+// A root whose files mkv-movie maps to different movies (a collection) is
+// asked about. Saving keeps every existing mapping, whether in files under
+// another spelling or in legacy meta_applied, and adds no second key for it.
+func TestFetchOrigins_DisagreeingFileMappingsAsk(t *testing.T) {
+	root, paths := siblingLibrary(t, "Kill Bill Collection", "Vol 1.mkv", "Vol 2.mkv", "Extra.mkv")
+	vol1 := paths[0]
+	if runtime.GOOS == "windows" {
+		vol1 = strings.ToUpper(vol1)
+	}
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{
+		"files":        {vol1: "24"},
+		"meta_applied": {paths[1]: "393"},
+	}))
+	p := &scriptPrompter{answers: []string{"y"}}
+
+	captureStdout(t, func() {
+		fetchOrigins(paths, root, "movie", searchTMDB{}, p)
+	})
+
+	if len(p.asked) != 1 {
+		t.Errorf("asked %d times; want once", len(p.asked))
+	}
+	_, files := readMovieSections(t)
+	if len(files) != 2 || files[vol1] != "24" || files[paths[2]] != "42" {
+		t.Errorf("files = %v; want Vol 1 kept at 24 under its spelling, Vol 2 left to meta_applied, Extra → 42", files)
+	}
+	var meta map[string]string
+	if err := json.Unmarshal(readSibling(t, movieRatingCachePath())["meta_applied"], &meta); err != nil || meta[paths[1]] != "393" || len(meta) != 1 {
+		t.Errorf("meta_applied = %v (%v); want it kept as it was", meta, err)
+	}
+}
+
+// mkv-movie's per-file mapping is used without asking: under any spelling of
+// the path (Windows), from legacy meta_applied, ahead of a title:YEAR key
+// that disagrees, and for files under the root this run didn't scan. A
+// sibling folder sharing the root's name as a prefix doesn't count.
+func TestFetchOrigins_MovieFileMappingUsed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flat  bool
+		cache func(root, path string) map[string]map[string]string
+	}{
+		{"meta_applied", false, func(_, path string) map[string]map[string]string {
+			return map[string]map[string]string{"meta_applied": {path: "194"}}
+		}},
+		{"beats title key", false, func(_, path string) map[string]map[string]string {
+			return map[string]map[string]string{"tmdb_ids": {"Amelie:2001": "1"}, "files": {path: "194"}}
+		}},
+		{"unscanned file under root", false, func(root, _ string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {
+				filepath.Join(root, "Amelie (2001)", "old", "Amelie.mkv"): "194",
+				filepath.Join(root, "Amelie (2001) extras", "x.mkv"):      "5",
+			}}
+		}},
+		{"flat file", true, func(_, path string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {path: "194"}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("APPDATA", t.TempDir())
+			root := t.TempDir()
+			var path string
+			if tc.flat {
+				makeMKVFile(t, root, "Amelie (2001).mkv")
+				path = filepath.Join(root, "Amelie (2001).mkv")
+			} else {
+				path = addEntry(t, root, "Amelie (2001)", "a.mkv")[0]
+			}
+			writeSibling(t, movieRatingCachePath(), mustJSON(t, tc.cache(root, path)))
+			before, _ := os.ReadFile(movieRatingCachePath())
+			tmdb := titleTMDB{langs: map[string]string{"1": "en", "5": "de", "194": "fr"}}
+
+			captureStdout(t, func() {
+				origins := fetchOrigins([]string{path}, root, "movie", tmdb, noPrompter{t})
+				if len(origins) != 1 {
+					t.Fatalf("origins = %v; want one", origins)
+				}
+				for _, o := range origins {
+					if o.OrigLang != "fr" {
+						t.Errorf("origin = %v; want fr from the file's ID 194", o)
+					}
+				}
+			})
+
+			if after, _ := os.ReadFile(movieRatingCachePath()); string(after) != string(before) {
+				t.Errorf("cache rewritten:\n%s\nwant it left as\n%s", after, before)
+			}
+		})
+	}
+}
+
+// Windows paths are case-insensitive, so a mapping under another spelling
+// still counts.
+func TestFetchOrigins_MappedFileMatchesAnySpelling(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("paths are case-sensitive here")
+	}
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {strings.ToUpper(paths[0]): "194"}}))
+	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
+
+	captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("origins = %v; want fr from the mapped file", origins)
+		}
+	})
 }

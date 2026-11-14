@@ -289,10 +289,11 @@ environment, mkv-audit looks up each show/movie on TMDB to determine its
    gets `eng → en-CA`).
 2. `flag-original=1` is set on all tracks whose language matches the original language.
 
-It reuses the TMDB IDs that mkv-tvshow and mkv-movie have cached (a movie by title and
-year, or by any of its files), and otherwise searches TMDB and asks you to confirm the
-match. Confirmed IDs are saved back to those caches. A cache that can't be loaded is
-left untouched, with a warning, and the IDs confirmed that run are not saved to it.
+It reuses the TMDB IDs that mkv-tvshow or mkv-movie has cached for the library's type (a
+movie by the ID mkv-movie recorded for its files, when they agree, or by title and year),
+and otherwise searches TMDB and asks you to confirm the match; a typed ID must be digits.
+Confirmed IDs that TMDB finds are saved back to that cache. A cache that can't be loaded
+is left untouched, with a warning, and the IDs confirmed that run are not saved to it.
 
 **`und_lang`** (optional, on library or override) — last-resort fallback language for
 tracks tagged `und` (undefined). Accepts an ISO 639-2/B code (`"eng"`) or IETF tag

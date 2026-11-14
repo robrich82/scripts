@@ -6,80 +6,104 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // siblingCache describes one sibling tool's cache, for loading and messages.
 type siblingCache struct {
-	name string // "mkv-movie's cache"
+	name  string // "mkv-movie's cache"
+	items string // what it holds IDs for: "movie"
 	// trailingOK matches how the owner parses the file: mkv-tvshow decodes the
 	// first JSON value and ignores the rest, mkv-movie unmarshals the whole file.
 	trailingOK bool
-	// lost says what deleting the cache costs, for the corrupt-file hint.
-	lost string
-	path func() string
+	// ifDeleted says what deleting the cache costs, for the corrupt-file hint.
+	ifDeleted string
+	path      func() string
 }
 
 var (
 	tvShowSibling = siblingCache{
 		name:       "mkv-tvshow's cache",
+		items:      "show",
 		trailingOK: true,
-		lost:       "mkv-tvshow then searches TMDB for every show again",
-		path:       tvShowCachePath,
+		ifDeleted: "If you delete it instead, run mkv-tvshow over your whole library to rebuild it before any mkv-tvshow --clean,\n" +
+			"       which prunes rating_cache.json and missing_ignore.json to the shows it lists.",
+		path: tvShowCachePath,
 	}
 	movieSibling = siblingCache{
-		name: "mkv-movie's cache",
-		lost: "mkv-movie then asks for every rating again",
-		path: movieRatingCachePath,
+		name:      "mkv-movie's cache",
+		items:     "movie",
+		ifDeleted: "If you delete it instead, mkv-movie asks for every rating again.",
+		path:      movieRatingCachePath,
 	}
 )
 
-var errNoAppData = errors.New("APPDATA not set")
+// errAbs marks a file whose absolute path couldn't be worked out.
+var errAbs = errors.New("can't resolve path")
 
-// saveTVShowCacheEntry adds or updates an entry in mkv-tvshow's show_cache.json.
-// absPath should be the absolute path to the show folder (the key format mkv-tvshow uses).
-func saveTVShowCacheEntry(absPath, tmdbID string) error {
+// tvEntry is a confirmed show ID to save to mkv-tvshow's cache.
+type tvEntry struct{ dir, absPath, id string }
+
+// movieEntry is a confirmed movie ID to save to mkv-movie's cache.
+type movieEntry struct {
+	dir, title, year, id string
+	files                []string
+}
+
+// saveTVShowCacheEntries adds or updates entries in mkv-tvshow's
+// show_cache.json, keyed by the show folder's absolute path (mkv-tvshow's format).
+func saveTVShowCacheEntries(entries []tvEntry) error {
 	path := tvShowCachePath()
-	if path == "" {
-		return errNoAppData
-	}
-	m, err := readSiblingJSON(path, tvShowSibling.trailingOK)
+	m, _, err := readSiblingJSON(path, tvShowSibling.trailingOK)
 	if err != nil {
 		return err
 	}
-	if m[absPath], err = json.Marshal(tmdbID); err != nil {
-		return err
+	for _, e := range entries {
+		if m[e.absPath], err = json.Marshal(e.id); err != nil {
+			return err
+		}
 	}
 	return writeSiblingJSON(path, m)
 }
 
-// saveMovieTMDBIDEntry adds or updates the tmdb_ids entry in mkv-movie's
+// saveMovieTMDBIDEntries adds or updates the tmdb_ids entries in mkv-movie's
 // movie_rating_cache.json, keyed "title:YEAR" (mkv-movie's format), and maps
-// each of the movie's .mkv files to it. Without a files entry, mkv-movie
-// --clean prunes the ID. A file mkv-movie already maps keeps its ID, since
-// mkv-movie --clean would otherwise drop the old ID's rating and Plex state.
-func saveMovieTMDBIDEntry(title, year, tmdbID string, files []string) error {
+// each movie's .mkv files to its ID. Without a files entry, mkv-movie --clean
+// prunes the ID. A file mkv-movie already maps, under any spelling or in
+// legacy meta_applied, keeps its ID: mkv-movie --clean would otherwise drop
+// the old ID's rating and Plex state.
+func saveMovieTMDBIDEntries(entries []movieEntry) error {
 	path := movieRatingCachePath()
-	if path == "" {
-		return errNoAppData
-	}
-	raw, ids, byFile, err := readMovieCache(path)
+	raw, shape, err := readMovieCache(path)
 	if err != nil {
 		return err
 	}
-	ids[title+":"+year] = tmdbID
-	for _, f := range files {
-		if !isMKV(f) { // mkv-movie only walks .mkv files
-			continue
-		}
-		abs, err := filepath.Abs(f)
-		if err != nil {
-			return err
-		}
-		if _, ok := byFile[abs]; !ok {
-			byFile[abs] = tmdbID
+	ids, byFile := shape.TMDBIDs, shape.Files
+	if ids == nil {
+		ids = map[string]string{}
+	}
+	if byFile == nil {
+		byFile = map[string]string{}
+	}
+	mapped := shape.fileView()
+	for _, e := range entries {
+		ids[e.title+":"+e.year] = e.id
+		for _, f := range e.files {
+			if !isMKV(f) { // mkv-movie only walks .mkv files
+				continue
+			}
+			abs, err := filepath.Abs(f)
+			if err != nil {
+				return fmt.Errorf("%w %s: %v", errAbs, f, err)
+			}
+			if _, ok := mapped[pathKey(abs)]; !ok {
+				byFile[abs] = e.id
+				mapped[pathKey(abs)] = e.id
+			}
 		}
 	}
 	for key, section := range map[string]map[string]string{"tmdb_ids": ids, "files": byFile} {
@@ -94,31 +118,58 @@ func isMKV(path string) bool {
 	return strings.EqualFold(filepath.Ext(path), ".mkv")
 }
 
-// readMovieCache reads mkv-movie's cache and the two sections mkv-audit uses.
-func readMovieCache(path string) (raw map[string]json.RawMessage, ids, byFile map[string]string, err error) {
-	if raw, err = readSiblingJSON(path, movieSibling.trailingOK); err != nil {
-		return nil, nil, nil, err
+// movieCacheShape mirrors the types of mkv-movie's movieRatingCacheData, so
+// mkv-audit calls the cache bad exactly when mkv-movie would refuse to load it.
+type movieCacheShape struct {
+	Movies         map[string]string `json:"movies"`
+	Applied        map[string]string `json:"applied"`
+	TMDBIDs        map[string]string `json:"tmdb_ids"`
+	LegacyMeta     map[string]string `json:"meta_applied"`
+	PlexRatings    map[string]string `json:"plex_ratings"`
+	StreamsApplied map[string]string `json:"streams_applied"`
+	Files          map[string]string `json:"files"`
+}
+
+// fileView maps pathKey(file) → ID for every file mkv-movie has mapped, with
+// legacy meta_applied back-filled as mkv-movie's loader does. It is only
+// read: meta_applied is never written back.
+func (s movieCacheShape) fileView() map[string]string {
+	v := make(map[string]string, len(s.Files)+len(s.LegacyMeta))
+	for f, id := range s.Files {
+		v[pathKey(f)] = id
 	}
-	if ids, err = sectionOf(raw, "tmdb_ids", path); err != nil {
-		return nil, nil, nil, err
+	for f, id := range s.LegacyMeta {
+		if _, ok := v[pathKey(f)]; !ok && id != "" {
+			v[pathKey(f)] = id
+		}
 	}
-	if byFile, err = sectionOf(raw, "files", path); err != nil {
-		return nil, nil, nil, err
+	return v
+}
+
+// readMovieCache reads mkv-movie's cache, keeping every key as it is in raw.
+func readMovieCache(path string) (raw map[string]json.RawMessage, shape movieCacheShape, err error) {
+	raw, b, err := readSiblingJSON(path, movieSibling.trailingOK)
+	if err != nil || b == nil {
+		return raw, shape, err
 	}
-	return raw, ids, byFile, nil
+	if err := json.Unmarshal(b, &shape); err != nil {
+		return nil, shape, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return raw, shape, nil
 }
 
 // readSiblingJSON reads a sibling tool's JSON object, keeping every key as it
-// is. A missing file is empty; one that can't be read or parsed is an error,
-// so it is never overwritten (the owning tool refuses to load it, and the
-// user can still restore it).
-func readSiblingJSON(path string, trailingOK bool) (map[string]json.RawMessage, error) {
+// is, and returns the file's bytes (nil when it doesn't exist). A missing
+// file is empty; one that can't be read or parsed is an error, so it is never
+// overwritten (the owning tool refuses to load it, and the user can still
+// restore it).
+func readSiblingJSON(path string, trailingOK bool) (map[string]json.RawMessage, []byte, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return map[string]json.RawMessage{}, nil
+		return map[string]json.RawMessage{}, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var raw map[string]json.RawMessage
 	if trailingOK {
@@ -127,26 +178,12 @@ func readSiblingJSON(path string, trailingOK bool) (map[string]json.RawMessage, 
 		err = json.Unmarshal(b, &raw)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if raw == nil { // the file holds null
 		raw = map[string]json.RawMessage{}
 	}
-	return raw, nil
-}
-
-// sectionOf decodes raw[key] as a string map, empty when absent.
-func sectionOf(raw map[string]json.RawMessage, key, path string) (map[string]string, error) {
-	m := map[string]string{}
-	if b, ok := raw[key]; ok && string(b) != "null" {
-		if err := json.Unmarshal(b, &m); err != nil {
-			return nil, fmt.Errorf("parse %s: %s: %w", path, key, err)
-		}
-	}
-	if m == nil {
-		m = map[string]string{}
-	}
-	return m, nil
+	return raw, b, nil
 }
 
 // isCorrupt reports whether err means a sibling cache's contents can't be
@@ -190,14 +227,10 @@ func movieRatingCachePath() string {
 	return filepath.Join(appData, "mkv-movie", "movie_rating_cache.json")
 }
 
-// loadTVShowCache reads mkv-tvshow's show_cache.json. A missing file (or no
-// APPDATA) is an empty cache; one that can't be read or parsed is an error.
-func loadTVShowCache() (map[string]string, error) {
-	path := tvShowCachePath()
-	if path == "" {
-		return nil, nil
-	}
-	raw, err := readSiblingJSON(path, tvShowSibling.trailingOK)
+// loadTVShowCache reads mkv-tvshow's show_cache.json at path. A missing file
+// is an empty cache; one that can't be read or parsed is an error.
+func loadTVShowCache(path string) (map[string]string, error) {
+	raw, _, err := readSiblingJSON(path, tvShowSibling.trailingOK)
 	if err != nil {
 		return nil, err
 	}
@@ -219,77 +252,70 @@ func loadTVShowCache() (map[string]string, error) {
 	return m, nil
 }
 
-// loadMovieTMDBIDs reads the tmdb_ids ("title:YEAR" → ID) and files (absolute
-// path → ID) sections of mkv-movie's cache. A missing file (or no APPDATA) is
-// an empty cache; one that can't be read or parsed is an error.
-func loadMovieTMDBIDs() (ids, byFile map[string]string, err error) {
-	path := movieRatingCachePath()
-	if path == "" {
-		return nil, nil, nil
-	}
-	_, ids, byFile, err = readMovieCache(path)
-	return ids, byFile, err
-}
-
-// siblingTMDBCaches holds pre-loaded sibling cache data.
+// siblingTMDBCaches holds the cache of the sibling tool for this library type.
 type siblingTMDBCaches struct {
-	tvShowIDs  map[string]string // folderName → tmdbID
+	tvShowIDs  map[string]string // folder name or absolute path → tmdbID
 	movieIDs   map[string]string // "title:YEAR" → tmdbID
-	movieFiles map[string]string // absolute file path → tmdbID
-	// tvErr and movieErr are set once a cache is known to be unloadable or
-	// unwritable, so later confirmations skip saving to it.
-	tvErr, movieErr error
+	movieFiles map[string]string // pathKey(file) → tmdbID
+	tv         *siblingSaver[tvEntry]
+	movie      *siblingSaver[movieEntry]
 }
 
-// loadSiblingCaches reads both sibling caches once, warning about each one
-// that can't be loaded: the run goes on, but nothing is saved to that cache.
-func loadSiblingCaches() *siblingTMDBCaches {
+// loadSiblingCaches reads the cache of the tool that owns libType's library
+// ("tv" or "movie"). One that can't be found or loaded is reported once: the
+// run goes on, but nothing is saved to it.
+func loadSiblingCaches(libType string) *siblingTMDBCaches {
 	sc := &siblingTMDBCaches{}
-	sc.tvShowIDs, sc.tvErr = loadTVShowCache()
-	if sc.tvErr != nil {
-		warnSiblingLoad(tvShowSibling, sc.tvErr)
-	}
-	sc.movieIDs, sc.movieFiles, sc.movieErr = loadMovieTMDBIDs()
-	if sc.movieErr != nil {
-		warnSiblingLoad(movieSibling, sc.movieErr)
+	switch libType {
+	case "tv":
+		sc.tv = &siblingSaver[tvEntry]{cache: tvShowSibling, save: saveTVShowCacheEntries,
+			describe: func(e tvEntry) string { return fmt.Sprintf("%s (id %s)", e.dir, e.id) }}
+		sc.tv.open(func(path string) (err error) {
+			sc.tvShowIDs, err = loadTVShowCache(path)
+			return err
+		})
+	case "movie":
+		sc.movie = &siblingSaver[movieEntry]{cache: movieSibling, save: saveMovieTMDBIDEntries,
+			describe: func(e movieEntry) string { return fmt.Sprintf("%s (id %s)", e.dir, e.id) }}
+		sc.movie.open(func(path string) error {
+			_, shape, err := readMovieCache(path)
+			sc.movieIDs, sc.movieFiles = shape.TMDBIDs, shape.fileView()
+			return err
+		})
 	}
 	return sc
 }
 
-func warnSiblingLoad(c siblingCache, err error) {
-	hint := "Close any program that has it open, then run mkv-audit again."
-	if isCorrupt(err) {
-		hint = fmt.Sprintf("It is corrupt and was left as it is: restore it from a backup if you have one, or delete it to start over (%s).", c.lost)
+// rememberTV records a confirmed show ID, for this run and in mkv-tvshow's cache.
+func (sc *siblingTMDBCaches) rememberTV(dir, absPath, id string) {
+	if sc.tvShowIDs == nil {
+		sc.tvShowIDs = map[string]string{}
 	}
-	fmt.Printf("[WARN] %s can't be loaded, so TMDB IDs confirmed this run won't be saved to it: %v\n       %s\n", c.name, err, hint)
+	sc.tvShowIDs[absPath] = id
+	sc.tv.add(tvEntry{dir, absPath, id})
 }
 
-// saveTV saves a confirmed show ID to mkv-tvshow's cache, unless it is known
-// to be bad.
-func (sc *siblingTMDBCaches) saveTV(dir, absPath, id string) {
-	if sc.tvErr == nil {
-		if err := saveTVShowCacheEntry(absPath, id); err != nil {
-			sc.tvErr = err
-			warnSiblingSave(tvShowSibling, dir, id, err)
+// rememberMovie records a confirmed movie ID, for this run and in mkv-movie's cache.
+func (sc *siblingTMDBCaches) rememberMovie(dir, title, year, id string, files []string) {
+	if sc.movieIDs == nil {
+		sc.movieIDs = map[string]string{}
+	}
+	if sc.movieFiles == nil {
+		sc.movieFiles = map[string]string{}
+	}
+	sc.movieIDs[title+":"+year] = id
+	for _, f := range files {
+		if k := pathKey(f); isMKV(f) && sc.movieFiles[k] == "" {
+			sc.movieFiles[k] = id
 		}
 	}
+	sc.movie.add(movieEntry{dir, title, year, id, files})
 }
 
-// saveMovie saves a confirmed movie ID to mkv-movie's cache, unless it is
-// known to be bad.
-func (sc *siblingTMDBCaches) saveMovie(dir, title, year, id string, files []string) {
-	if sc.movieErr == nil {
-		if err := saveMovieTMDBIDEntry(title, year, id, files); err != nil {
-			sc.movieErr = err
-			warnSiblingSave(movieSibling, dir, id, err)
-		}
-	}
-}
-
-func warnSiblingSave(c siblingCache, dir, id string, err error) {
-	fmt.Printf("[WARN] %s: could not save TMDB id %s to %s: %v\n"+
-		"       This run still uses it, but saves nothing more to %s; the next run asks again.\n"+
-		"       Close any program that has it open.\n", dir, id, c.name, err, c.name)
+// finish retries any save that failed.
+func (sc *siblingTMDBCaches) finish() {
+	sc.tv.finish()
+	sc.movie.finish()
 }
 
 // lookupTV returns the TMDB show ID for the given folder name, or "".
@@ -307,18 +333,119 @@ func (sc *siblingTMDBCaches) lookupTV(folderName, libraryRoot string) string {
 	return ""
 }
 
-// lookupMovie returns the TMDB movie ID for the given title+year, or "".
-// The key format matches mkv-movie: "title:YEAR" (or "title:" when year is
-// empty). mkv-movie builds its titles differently, so failing that, the ID
-// mkv-movie recorded for any of the movie's files is used.
-func (sc *siblingTMDBCaches) lookupMovie(title, year string, files []string) string {
-	if id := sc.movieIDs[title+":"+year]; id != "" {
+// lookupMovie returns the TMDB movie ID for the content root at root (a
+// folder, or the file itself in a flat library), or "". The ID mkv-movie
+// recorded for the files under root comes first, used only when they all
+// agree (a collection's files are different movies). Failing that, the
+// "title:YEAR" key (or "title:" when year is empty) is tried, though mkv-movie
+// builds its titles differently.
+func (sc *siblingTMDBCaches) lookupMovie(title, year, root string) string {
+	rootKey := pathKey(root)
+	prefix := rootKey + string(filepath.Separator)
+	var id string
+	for k, v := range sc.movieFiles {
+		if v == "" || (k != rootKey && !strings.HasPrefix(k, prefix)) {
+			continue
+		}
+		if id != "" && v != id {
+			return ""
+		}
+		id = v
+	}
+	if id != "" {
 		return id
 	}
-	for _, f := range files {
-		if abs, err := filepath.Abs(f); err == nil && sc.movieFiles[abs] != "" {
-			return sc.movieFiles[abs]
+	return sc.movieIDs[title+":"+year]
+}
+
+// siblingSaver saves confirmed IDs to one sibling cache as they come. A
+// failed save is reported once and kept pending: each later confirmation
+// retries it, and finish tries once more.
+type siblingSaver[E any] struct {
+	cache    siblingCache
+	off      bool  // the cache couldn't be found or loaded
+	pending  []E   // confirmed but not yet saved
+	err      error // the last save's error
+	save     func([]E) error
+	describe func(E) string
+}
+
+// open finds the cache and loads it with load, turning saving off with one
+// warning when either fails.
+func (s *siblingSaver[E]) open(load func(path string) error) {
+	path := s.cache.path()
+	if path == "" {
+		fmt.Printf("[WARN] APPDATA is not set, so %s can't be found: every %s is searched on TMDB and asked about this run, and nothing is saved to it.\n",
+			s.cache.name, s.cache.items)
+		s.off = true
+		return
+	}
+	if err := load(path); err != nil {
+		hint := "Close any program that has it open, then run mkv-audit again."
+		if isCorrupt(err) {
+			hint = "It is corrupt and was left as it is: restore it from a backup if you have one.\n       " + s.cache.ifDeleted
 		}
+		fmt.Printf("[WARN] %s can't be loaded: %v\n"+
+			"       Every %s is searched on TMDB and asked about this run, and the IDs confirmed aren't saved to it.\n"+
+			"       %s\n", s.cache.name, err, s.cache.items, hint)
+		s.off = true
+	}
+}
+
+func (s *siblingSaver[E]) add(e E) {
+	if s == nil || s.off {
+		return
+	}
+	s.pending = append(s.pending, e)
+	err := s.save(s.pending)
+	switch {
+	case err != nil && s.err == nil:
+		fmt.Printf("[WARN] %s: could not save to %s: %v\n"+
+			"       This run still uses the ID, and the save is retried as the run goes on.%s\n",
+			s.describe(e), s.cache.name, err, saveHint(err))
+	case err == nil && s.err != nil:
+		fmt.Printf("[TMDB]   %s saved.\n", s.cache.name)
+	}
+	if err == nil {
+		s.pending = nil
+	}
+	s.err = err
+}
+
+// finish retries a failed save once, and says what was lost if it fails again.
+func (s *siblingSaver[E]) finish() {
+	if s == nil || s.off || len(s.pending) == 0 {
+		return
+	}
+	// One more try: on Windows the rename fails while another program
+	// (antivirus, an indexer) briefly holds the cache open.
+	beforeFinalSiblingSave()
+	err := s.save(s.pending)
+	if err == nil {
+		fmt.Printf("[TMDB]   %s saved.\n", s.cache.name)
+		s.pending = nil
+		return
+	}
+	lost := make([]string, len(s.pending))
+	for i, e := range s.pending {
+		lost[i] = s.describe(e)
+	}
+	fmt.Printf("[WARN] %s still can't be saved, so these TMDB IDs are lost and the next run asks for them again: %s\n       %v%s\n",
+		s.cache.name, strings.Join(lost, ", "), err, saveHint(err))
+}
+
+// beforeFinalSiblingSave runs before siblingSaver.finish's last save attempt; tests replace it.
+var beforeFinalSiblingSave = func() { time.Sleep(time.Second) }
+
+// saveHint suggests a fix for a failed sibling-cache save, on a new line.
+func saveHint(err error) string {
+	switch {
+	case isCorrupt(err):
+		return "\n       It changed since mkv-audit loaded it and can't be parsed now, so it was left as it is."
+	case errors.Is(err, errAbs):
+		return ""
+	case errors.Is(err, fs.ErrPermission):
+		return "\n       Close any program that has it open."
 	}
 	return ""
 }
