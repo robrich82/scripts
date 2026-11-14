@@ -80,7 +80,7 @@ jobs:
         env:
           MISE_DISABLE_TOOLS: go
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           install_args: >-
             golangci-lint
             go:golang.org/x/vuln/cmd/govulncheck
