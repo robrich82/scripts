@@ -377,12 +377,28 @@ func (c *httpPlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem,
 // FindShowByTitle implements PlexClient. It finds the show whose normalised
 // title matches title, regardless of which metadata agent is in use. This is a
 // fallback for when FindShowByTMDBID fails because the show uses a non-TMDB
-// agent (e.g. HAMA for anime).
+// agent (e.g. HAMA for anime). A title with no ASCII letters or digits (e.g.
+// 進撃の巨人) normalises to "", like every other such title, so it must match
+// exactly, ignoring case.
 func (c *httpPlexClient) FindShowByTitle(title string) (string, error) {
-	normTitle := normalizeShowTitle(title)
-	return c.findShow(func(item plexShowItem) bool {
-		return normalizeShowTitle(item.Title) == normTitle
-	})
+	matches := titleMatcher(title)
+	if matches == nil {
+		return "", ErrPlexNotFound
+	}
+	return c.findShow(func(item plexShowItem) bool { return matches(item.Title) })
+}
+
+// titleMatcher reports whether a Plex title matches title: by normalised
+// title, or exactly but for case when title has no ASCII letters or digits.
+// It is nil for a blank title, which matches nothing.
+func titleMatcher(title string) func(string) bool {
+	if norm := normalizeShowTitle(title); norm != "" {
+		return func(t string) bool { return normalizeShowTitle(t) == norm }
+	}
+	if strings.TrimSpace(title) == "" {
+		return nil
+	}
+	return func(t string) bool { return strings.EqualFold(t, title) }
 }
 
 // FindShowByFilePath implements PlexClient. It queries each show library

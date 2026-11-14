@@ -685,3 +685,25 @@ func TestHTTPPlexMovieClient_FindMovieByTitle_NotFound(t *testing.T) {
 		t.Errorf("expected ErrPlexMovieNotFound, got %v", err)
 	}
 }
+
+// A title with no ASCII letters or digits normalises to "", like every other
+// such title, so it matches only its exact title.
+func TestHTTPPlexMovieClient_FindMovieByTitle_NonASCIITitle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
+		} else {
+			fmt.Fprint(w, `{"MediaContainer":{"Metadata":[{"ratingKey":"77","title":"もののけ姫","year":2001}]}}`)
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	if key, err := c.FindMovieByTitle("千と千尋の神隠し", "2001"); err != ErrPlexMovieNotFound {
+		t.Errorf("other title: got key %q, err %v; want ErrPlexMovieNotFound", key, err)
+	}
+	if key, err := c.FindMovieByTitle("もののけ姫", "2001"); err != nil || key != "77" {
+		t.Errorf("exact title: got key %q, err %v; want 77", key, err)
+	}
+}
