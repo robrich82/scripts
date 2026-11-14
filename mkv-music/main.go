@@ -122,4 +122,5 @@ func main() {
 	if stats.SkippedOld > 0 {
 		fmt.Printf("\nSkipped (old): %d\n", stats.SkippedOld)
 	}
+	printTagSummary(processor.Tags())
 }

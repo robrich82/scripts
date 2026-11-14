@@ -31,7 +31,8 @@ func (f *fakePrompter) Ask(_ string) (string, error) {
 type fakeTagger struct {
 	calls     []taggerCall
 	err       error
-	tagsMatch bool // return value for TagsMatchMKV; default false → copy always runs
+	tagsMatch bool      // return value for TagsMatchMKV; default false → copy always runs
+	date      time.Time // MKVDate's result; zero → no date header
 }
 
 type taggerCall struct {
@@ -50,7 +51,7 @@ func (f *fakeTagger) CopyTagsToMKV(audioPath, mkvPath, titleSuffix string) error
 }
 
 func (f *fakeTagger) MKVDate(mkvPath string) (time.Time, bool) {
-	return time.Time{}, false
+	return f.date, !f.date.IsZero()
 }
 
 // --- buildAudioData tests ---

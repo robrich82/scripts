@@ -28,6 +28,12 @@ type Stats struct {
 	SkippedOld int
 }
 
+// TagOutcome is a run's tag-copying result.
+type TagOutcome struct {
+	Copied int      // MKVs whose tags were copied and timestamps synced
+	Failed []string // "<path> (failed: …)" for each MKV a tagging step failed on
+}
+
 // IgnoreData holds ignore patterns used when fuzzy-matching video filenames to
 // audio filenames. Global patterns are applied to every file; FilePatterns
 // entries are keyed by video filename and applied only to that file.
@@ -51,6 +57,7 @@ type Processor struct {
 	cutoffDate      time.Time
 	plex            PlexClient          // nil = Plex refresh disabled
 	touchedArtists  map[string]struct{} // artist dir names touched this run
+	tags            TagOutcome          // tag copying so far this run
 }
 
 // NewProcessor creates a Processor for the given root directory.
@@ -595,38 +602,55 @@ func (p *Processor) copyTagsIfConfigured(mkvPath, matchKey, cleanVideo, postSuff
 	titleSuffix := strings.Join(parts, " ")
 	if match, err := p.tagger.TagsMatchMKV(audioFullPath, mkvPath, titleSuffix); err == nil && match {
 		fmt.Printf("    [TAG] Already up to date: %s\n", filepath.Base(mkvPath))
-		p.syncTimestamps(mkvPath)
+		p.recordTagFailure(mkvPath, p.syncTimestamps(mkvPath))
 		return
 	}
 	if err := p.tagger.CopyTagsToMKV(audioFullPath, mkvPath, titleSuffix); err != nil {
-		fmt.Printf("    [WARN] tag copy failed for %s: %v\n", filepath.Base(mkvPath), err)
+		fmt.Printf("    [ERROR] tag copy failed for %s: %v\n", filepath.Base(mkvPath), err)
+		p.recordTagFailure(mkvPath, []string{"tags"})
+		return
+	}
+	fmt.Printf("    [TAG] Copied tags from %s\n", audioFilename)
+	p.markArtistTouched(videoDir)
+	if failed := p.syncTimestamps(mkvPath); len(failed) > 0 {
+		p.recordTagFailure(mkvPath, failed)
 	} else {
-		fmt.Printf("    [TAG] Copied tags from %s\n", audioFilename)
-		p.markArtistTouched(videoDir)
-		p.syncTimestamps(mkvPath)
+		p.tags.Copied++
+	}
+}
+
+// recordTagFailure adds mkvPath to the run's tagging failures, naming the
+// failed steps. No-op when failed is empty.
+func (p *Processor) recordTagFailure(mkvPath string, failed []string) {
+	if len(failed) > 0 {
+		p.tags.Failed = append(p.tags.Failed, fmt.Sprintf("%s (failed: %s)", mkvPath, strings.Join(failed, ", ")))
 	}
 }
 
 // syncTimestamps sets mkvPath's modified and created timestamps to match the
-// date stored in the MKV container header. No-op if timer or tagger is nil,
-// or if the MKV has no date header.
-func (p *Processor) syncTimestamps(mkvPath string) {
+// date stored in the MKV container header, and returns the ones that failed
+// ("ctime", "mtime"). No-op if timer or tagger is nil, or if the MKV has no
+// date header.
+func (p *Processor) syncTimestamps(mkvPath string) (failed []string) {
 	if p.timer == nil || p.tagger == nil {
-		return
+		return nil
 	}
 	dt, ok := p.tagger.MKVDate(mkvPath)
 	if !ok {
-		return
+		return nil
 	}
 	dt = dt.Local()
 	if p.timer.CreationTimeNeedsUpdate(mkvPath, dt.Unix()) {
 		if err := p.timer.SetCreationTime(mkvPath, dt); err != nil {
-			fmt.Printf("    [WARN] set ctime failed for %s: %v\n", filepath.Base(mkvPath), err)
+			fmt.Printf("    [ERROR] set ctime failed for %s: %v\n", filepath.Base(mkvPath), err)
+			failed = append(failed, "ctime")
 		}
 	}
 	if err := p.timer.SetTimes(mkvPath, dt); err != nil {
-		fmt.Printf("    [WARN] set mtime failed for %s: %v\n", filepath.Base(mkvPath), err)
+		fmt.Printf("    [ERROR] set mtime failed for %s: %v\n", filepath.Base(mkvPath), err)
+		failed = append(failed, "mtime")
 	}
+	return failed
 }
 
 // videoPlan is what processVideo decides for one video filename.
@@ -876,4 +900,23 @@ func (p *Processor) Run() (Stats, []string, []string) {
 	}
 	p.refreshPlexArtists()
 	return stats, skippedVideos, unmatchedVideos
+}
+
+// Tags returns the tag-copying outcome of the runs so far.
+func (p *Processor) Tags() TagOutcome {
+	return p.tags
+}
+
+// printTagSummary prints a run's tagging outcome and lists the MKVs a tagging
+// step failed on. Prints nothing when no MKV was copied or failed.
+func printTagSummary(tags TagOutcome) {
+	if len(tags.Failed) > 0 {
+		fmt.Printf("\n--- TAGGING FAILURES (%d) ---\n", len(tags.Failed))
+		for _, f := range tags.Failed {
+			fmt.Println(f)
+		}
+	}
+	if tags.Copied > 0 || len(tags.Failed) > 0 {
+		fmt.Printf("\nTags: %d copied, %d failed\n", tags.Copied, len(tags.Failed))
+	}
 }
