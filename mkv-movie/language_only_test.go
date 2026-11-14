@@ -371,9 +371,9 @@ func TestLanguageOnly_HTTPPlex(t *testing.T) {
 	}
 }
 
-// Movies go in order of their first file name, whatever the cache's map order.
+// Movies go in case-insensitive order of their first file name, whatever the cache's map order.
 func TestLanguageOnly_NameOrder(t *testing.T) {
-	names := []string{"Akira (1988)", "Brazil (1985)", "Coco (2017)", "Dune (2021)", "Elf (2003)", "Fargo (1996)"}
+	names := []string{"akira (1988)", "Brazil (1985)", "coco (2017)", "Dune (2021)", "elf (2003)", "Fargo (1996)"} // case-insensitive order
 	files := make(map[string]string)
 	details := make(map[string]MovieDetails)
 	for i, n := range names {
