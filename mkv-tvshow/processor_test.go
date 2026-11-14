@@ -1695,7 +1695,7 @@ func TestRunLanguageOnly_AltFailure_RetriesOnlyThatAlt(t *testing.T) {
 	run := func(cfg Config, primary, alt *fakePlexClient) string {
 		plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
 		p := NewProcessor(cfg, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
-		return captureStdout(t, p.RunLanguageOnly)
+		return captureStdout(t, func() { p.RunLanguageOnly() })
 	}
 
 	out := run(Config{}, &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{setLangErr: errors.New("alt failed")})
@@ -1736,7 +1736,7 @@ func TestRunLanguageOnly_AltNotFound_KeepsPlexKey(t *testing.T) {
 	alt := &fakePlexClient{setLangErr: ErrPlexNotFound}
 	plexClient := newMultiPlexClient(&fakePlexClient{showRatingKey: "plex-99"}, namedPlexClient{name: altAccount, client: alt})
 	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
-	out := captureStdout(t, p.RunLanguageOnly)
+	out := captureStdout(t, func() { p.RunLanguageOnly() })
 
 	if key, ok := rc.GetPlexKey("111"); !ok || key != "plex-99" {
 		t.Errorf("Plex key = %q, %v; want plex-99 kept", key, ok)
@@ -1769,15 +1769,15 @@ func TestRunLanguageOnly_AltTokensRemoved_PrimaryNotPushed(t *testing.T) {
 			rc.SetLanguageApplied("111", tc.cached)
 			primary := &fakePlexClient{showRatingKey: "plex-99"}
 			p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, tc.plex(primary), nil)
-			out := captureStdout(t, p.RunLanguageOnly)
+			out := captureStdout(t, func() { p.RunLanguageOnly() })
 			if len(primary.setLangCalls) != 0 {
 				t.Errorf("primary pushed %d times; want 0", len(primary.setLangCalls))
 			}
 			if got, _ := rc.GetLanguageApplied("111"); got != tc.wantRecord {
 				t.Errorf("recorded %q; want %q", got, tc.wantRecord)
 			}
-			if strings.Contains(out, "audio language for") {
-				t.Errorf("logged a push that didn't happen:\n%s", out)
+			if got := strings.TrimSpace(out); got != "[SKIP]    Show A (lang: unchanged)" {
+				t.Errorf("output %q; want a SKIP, as nothing was pushed", got)
 			}
 		})
 	}
@@ -1791,7 +1791,7 @@ func TestRunLanguageOnly_NewAltAccount_SetsOnlyIt(t *testing.T) {
 	primary, alt := &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{}
 	plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
 	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
-	captureStdout(t, p.RunLanguageOnly)
+	captureStdout(t, func() { p.RunLanguageOnly() })
 	if len(primary.setLangCalls) != 0 || len(alt.setLangCalls) != 1 {
 		t.Errorf("calls: primary %d, alt %d; want 0 and 1", len(primary.setLangCalls), len(alt.setLangCalls))
 	}
@@ -1866,6 +1866,87 @@ func TestRatingsOnly_DoesNotSetPlexAudioLanguage(t *testing.T) {
 
 	if len(plexClient.setLangCalls) != 0 {
 		t.Errorf("--ratings-only must not set Plex audio language, got %d calls", len(plexClient.setLangCalls))
+	}
+}
+
+// The full run sets a show's audio language once and records it; only
+// OverwriteLanguage sets it again. A TMDB error is a warning, and a show key
+// Plex no longer has is cleared without a message.
+func TestApplyPlexRatings_AudioLanguage(t *testing.T) {
+	rc := emptyRatingCache(t)
+	tmdb := &langTMDB{fakeTMDB: &fakeTMDB{}, langs: map[string]string{"111": "ja"}}
+	run := func(cfg Config, plexClient *fakePlexClient) string {
+		p := NewProcessor(cfg, cacheWith(t, map[string]string{"Show A": "111"}), nil, tmdb, nil, nil, nil, nil, rc, nil, plexClient, nil)
+		return captureStdout(t, func() { p.applyPlexRatings("111", nil, "Show A", "Show A", false, ManualEntry{}) })
+	}
+
+	plexClient := &fakePlexClient{showRatingKey: "plex-99"}
+	out := run(Config{}, plexClient)
+	if len(plexClient.setLangCalls) != 1 || plexClient.setLangCalls[0] != (setLangCall{"plex-99", "ja"}) {
+		t.Errorf("calls %+v; want ja on plex-99", plexClient.setLangCalls)
+	}
+	if got, _ := rc.GetLanguageApplied("111"); got != "ja-JP" {
+		t.Errorf("recorded %q; want ja-JP", got)
+	}
+	if !strings.Contains(out, `[i] Plex: audio language for "Show A" set to "ja-JP"`) {
+		t.Errorf("push not reported:\n%s", out)
+	}
+
+	plexClient = &fakePlexClient{showRatingKey: "plex-99"}
+	if out := run(Config{}, plexClient); len(plexClient.setLangCalls) != 0 || strings.Contains(out, "audio language") {
+		t.Errorf("second run pushed %d times:\n%s", len(plexClient.setLangCalls), out)
+	}
+
+	plexClient = &fakePlexClient{showRatingKey: "plex-99"}
+	if run(Config{OverwriteLanguage: true}, plexClient); len(plexClient.setLangCalls) != 1 {
+		t.Errorf("OverwriteLanguage pushed %d times; want 1", len(plexClient.setLangCalls))
+	}
+
+	tmdb.errs = map[string]error{"222": errors.New("tmdb down")}
+	plexClient = &fakePlexClient{showRatingKey: "plex-2"}
+	p := NewProcessor(Config{}, emptyCache(t), nil, tmdb, nil, nil, nil, nil, rc, nil, plexClient, nil)
+	out = captureStdout(t, func() { p.applyPlexRatings("222", nil, "Show B", "Show B", false, ManualEntry{}) })
+	if !strings.Contains(out, "[!] TMDB show lookup failed for ID 222 (original language unknown): tmdb down") || len(plexClient.setLangCalls) != 0 {
+		t.Errorf("TMDB error: %d calls; want none and a warning:\n%s", len(plexClient.setLangCalls), out)
+	}
+
+	plexClient = &fakePlexClient{showRatingKey: "plex-99", setLangErr: fmt.Errorf("plex: prefs: %w", ErrPlexNotFound)}
+	out = run(Config{OverwriteLanguage: true}, plexClient)
+	if key, _ := rc.GetPlexKey("111"); key != "" {
+		t.Errorf("stale key %q kept", key)
+	}
+	if strings.Contains(out, "audio language") {
+		t.Errorf("stale key reported:\n%s", out)
+	}
+}
+
+// With alt accounts, the full run reports a failed alt even when only that
+// alt was due, and a retry pushes the alt alone.
+func TestApplyPlexRatings_AudioLanguage_AltAccounts(t *testing.T) {
+	rc := emptyRatingCache(t)
+	run := func(altErr error) (out string, primary, alt *fakePlexClient) {
+		primary, alt = &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{setLangErr: altErr}
+		plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
+		p := NewProcessor(Config{}, emptyCache(t), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
+		out = captureStdout(t, func() { p.applyPlexRatings("111", nil, "Show A", "Show A", false, ManualEntry{}) })
+		return out, primary, alt
+	}
+	const failed = `[i] Plex: audio language for "Show A" set to "ja-JP|alt=ja-JP"; alt: alt failed`
+
+	out, primary, _ := run(errors.New("alt failed"))
+	if !strings.Contains(out, failed) || len(primary.setLangCalls) != 1 {
+		t.Errorf("first run: %d primary calls; want 1 and the alt failure:\n%s", len(primary.setLangCalls), out)
+	}
+	out, primary, _ = run(errors.New("alt failed"))
+	if !strings.Contains(out, failed) || len(primary.setLangCalls) != 0 {
+		t.Errorf("retry: %d primary calls; want 0 and the alt failure:\n%s", len(primary.setLangCalls), out)
+	}
+	out, primary, alt := run(nil)
+	if !strings.Contains(out, `set to "ja-JP|alt=ja-JP"`+"\n") || len(primary.setLangCalls) != 0 || len(alt.setLangCalls) != 1 {
+		t.Errorf("alt recovers: primary %d, alt %d calls; want 0 and 1:\n%s", len(primary.setLangCalls), len(alt.setLangCalls), out)
+	}
+	if got, _ := rc.GetLanguageApplied("111"); got != "ja-JP|alt=ja-JP" {
+		t.Errorf("recorded %q; want ja-JP|alt=ja-JP", got)
 	}
 }
 

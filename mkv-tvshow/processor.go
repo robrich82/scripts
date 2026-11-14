@@ -1180,22 +1180,24 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 	}
 }
 
-// resolveOriginalLang returns the TMDB original_language code (ISO 639-1) for
-// the given show, using the session cache to avoid redundant API calls.
-func (p *Processor) resolveOriginalLang(tmdbID string) string {
+// originalLang returns the TMDB original_language code (ISO 639-1) for the
+// given show, using the session cache to avoid redundant API calls. It is ""
+// when TMDB has none, or there is no TMDB client; err is a failed TMDB lookup.
+func (p *Processor) originalLang(tmdbID string) (string, error) {
 	if lang, ok := p.sessionOriginalLang[tmdbID]; ok {
-		return lang
+		return lang, nil
 	}
-	if p.tmdb != nil {
-		details, err := p.tmdb.GetShow(tmdbID)
-		if err != nil {
-			fmt.Printf("  [!] TMDB show lookup failed for ID %s (original language unknown): %v\n", tmdbID, err)
-		} else if details.OriginalLanguage != "" {
-			p.sessionOriginalLang[tmdbID] = details.OriginalLanguage
-			return details.OriginalLanguage
-		}
+	if p.tmdb == nil {
+		return "", nil
 	}
-	return ""
+	details, err := p.tmdb.GetShow(tmdbID)
+	if err != nil {
+		return "", err
+	}
+	if details.OriginalLanguage != "" {
+		p.sessionOriginalLang[tmdbID] = details.OriginalLanguage
+	}
+	return details.OriginalLanguage, nil
 }
 
 // seasonData returns a TMDB season, caching it in cache. A season TMDB doesn't
@@ -1230,58 +1232,6 @@ func (p *Processor) failTMDBLookup(stats *Stats, filePath, file string, err erro
 	stats.Failed++
 }
 
-// RunLanguageOnly iterates all shows in the rating cache and applies the Plex
-// audio language preference for each, without scanning any MKV files.
-func (p *Processor) RunLanguageOnly() {
-	if p.plex == nil {
-		fmt.Fprintln(os.Stderr, "Plex not configured (PLEX_URL / PLEX_TOKEN not set)")
-		return
-	}
-
-	// Build a reverse map: tmdbID → show folder name for title-fallback lookups.
-	// Cache keys are absolute paths; extract the base name for display/search.
-	tmdbToName := make(map[string]string)
-	for folder, id := range p.cache.AllEntries() {
-		tmdbToName[id] = filepath.Base(folder)
-	}
-
-	for _, tmdbID := range p.ratingCache.AllShowIDs() {
-		showName := tmdbToName[tmdbID]
-
-		showKey, _ := p.ratingCache.GetPlexKey(tmdbID)
-
-		if showKey == "" {
-			var err error
-			showKey, err = p.plex.FindShowByTMDBID(tmdbID)
-			if err == ErrPlexNotFound && showName != "" {
-				// Strip the year suffix and Unicode lookalikes from the folder name
-				// before title-matching — Plex display titles don't include years.
-				showKey, err = p.plex.FindShowByTitle(cleanSearchQuery(showName))
-			}
-			if err != nil && err != ErrPlexNotFound {
-				fmt.Printf("  [!] Plex: lookup TMDB %s: %v\n", tmdbID, err)
-				continue
-			}
-			if showKey != "" {
-				p.ratingCache.SetPlexKey(tmdbID, showKey)
-			}
-		}
-
-		if showKey == "" {
-			if showName != "" {
-				fmt.Printf("  [!] Plex: show %q not found\n", showName)
-			}
-			continue
-		}
-
-		p.applyPlexAudioLanguage(showKey, tmdbID, showName, p.manualData[showName])
-	}
-
-	if err := p.ratingCache.Save(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to save rating cache: %v\n", err)
-	}
-}
-
 // applyPlexAudioLanguage sets the show's preferred audio language in Plex, but
 // only once per show unless OverwriteLanguage is set. This lets the user
 // override the preference inside Plex on a show-by-show basis without it being
@@ -1293,28 +1243,66 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, ent
 	if p.ratingCache == nil {
 		return
 	}
-	// Only consult TMDB when the show has no configured language of its own.
-	tmdbLang := ""
-	if entry.Language == "" {
-		tmdbLang = p.resolveOriginalLang(tmdbID)
+	langs, err := p.showAudioLangs(tmdbID, entry)
+	if err != nil {
+		fmt.Printf("  [!] TMDB show lookup failed for ID %s (original language unknown): %v\n", tmdbID, err)
+		return
 	}
-	langs := entry.audioLangs(tmdbLang)
 	if langs.Default == "" {
 		return
 	}
-	sig := appliedLangSignature(p.plex, langs)
-	applied, ok := p.ratingCache.GetLanguageApplied(tmdbID)
-	if ok && applied == sig && !p.cfg.OverwriteLanguage {
+	applied, due := p.languageDue(tmdbID, langs)
+	if !due {
 		return
 	}
-	if p.cfg.OverwriteLanguage {
-		applied = ""
+	set, altSuffix, err := p.setAudioLanguage(showKey, tmdbID, langs, applied)
+	switch {
+	case errors.Is(err, ErrPlexNotFound):
+		// The show key is stale and was cleared; the next run looks it up again.
+	case err != nil:
+		fmt.Printf("  [!] Plex: set audio language for %q: %v\n", showName, err)
+	case set != "" || altSuffix != "":
+		fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, appliedLangSignature(p.plex, langs), altSuffix)
 	}
-	// With alt accounts, only those the cached signature doesn't cover yet are
-	// set, so a retry leaves the others (and any choice made in Plex) alone.
+}
+
+// showAudioLangs returns the show's audio languages from its manual_data.json
+// entry, with TMDB's original language as the default when the entry sets
+// none. An empty Default means no language is known; err is a failed TMDB lookup.
+func (p *Processor) showAudioLangs(tmdbID string, entry ManualEntry) (AudioLangs, error) {
+	tmdbLang := ""
+	if entry.Language == "" {
+		var err error
+		if tmdbLang, err = p.originalLang(tmdbID); err != nil {
+			return AudioLangs{}, err
+		}
+	}
+	return entry.audioLangs(tmdbLang), nil
+}
+
+// languageDue reports whether langs have yet to be set for the show, and the
+// signature recorded as applied ("" with OverwriteLanguage, so every account
+// is set again).
+func (p *Processor) languageDue(tmdbID string, langs AudioLangs) (applied string, due bool) {
+	if p.cfg.OverwriteLanguage {
+		return "", true
+	}
+	applied, ok := p.ratingCache.GetLanguageApplied(tmdbID)
+	return applied, !ok || applied != appliedLangSignature(p.plex, langs)
+}
+
+// setAudioLanguage sets langs on the Plex show showKey and records them. With
+// alt accounts, only those applied doesn't cover yet are set, so a retry
+// leaves the others (and any choice made in Plex) alone; a failed alt is
+// reported in altSuffix and left out of the record, so the next run retries it
+// alone. set is the signature langs give every account, failed alts included,
+// or "" when no account was pushed to: only removed alt accounts differed, or
+// every alt that needed it failed. A show key Plex no longer has is cleared,
+// and err is ErrPlexNotFound.
+func (p *Processor) setAudioLanguage(showKey, tmdbID string, langs AudioLangs, applied string) (set, altSuffix string, err error) {
+	sig := appliedLangSignature(p.plex, langs)
 	record := sig
 	pushed := false
-	var err error
 	multi, isMulti := p.plex.(multiAccountReporter)
 	switch {
 	case isMulti:
@@ -1329,19 +1317,15 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, ent
 	if err != nil {
 		if errors.Is(err, ErrPlexNotFound) {
 			p.ratingCache.ClearPlexKey(tmdbID)
-			return
 		}
-		fmt.Printf("  [!] Plex: set audio language for %q: %v\n", showName, err)
-		return
+		return "", "", err
 	}
-	altSuffix := ""
 	if isMulti {
 		altSuffix = multi.altErrSuffix()
 	}
-	// A failed alt account is left out of the record, so the next run retries
-	// it alone.
 	p.ratingCache.SetLanguageApplied(tmdbID, record)
-	if pushed || altSuffix != "" {
-		fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, sig, altSuffix)
+	if pushed {
+		set = sig
 	}
+	return set, altSuffix, nil
 }

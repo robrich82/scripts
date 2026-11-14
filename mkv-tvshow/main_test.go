@@ -32,6 +32,12 @@ func TestRunMainHelper(t *testing.T) {
 // and no TMDB_API_KEY, and returns its combined output and exit error.
 func runMain(t *testing.T, dir, cfgHome string, args ...string) (string, error) {
 	t.Helper()
+	return runMainEnv(t, dir, cfgHome, nil, args...)
+}
+
+// runMainEnv is runMain with extra environment entries, e.g. TMDB_API_KEY.
+func runMainEnv(t *testing.T, dir, cfgHome string, extraEnv []string, args ...string) (string, error) {
+	t.Helper()
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestRunMainHelper$", "--"}, args...)...)
 	cmd.Dir = dir
 	var env []string
@@ -46,7 +52,7 @@ func runMain(t *testing.T, dir, cfgHome string, args ...string) (string, error) 
 		}
 		env = append(env, kv)
 	}
-	cmd.Env = append(env, "MKV_TVSHOW_RUN_MAIN=1", "APPDATA="+cfgHome, "XDG_CONFIG_HOME="+cfgHome, "HOME="+cfgHome)
+	cmd.Env = append(append(env, "MKV_TVSHOW_RUN_MAIN=1", "APPDATA="+cfgHome, "XDG_CONFIG_HOME="+cfgHome, "HOME="+cfgHome), extraEnv...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

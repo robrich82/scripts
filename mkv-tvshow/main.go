@@ -101,6 +101,10 @@ func main() {
 
 	plexURL := os.Getenv("PLEX_URL")
 	plexToken := os.Getenv("PLEX_TOKEN")
+	if *languageOnly && (plexURL == "" || plexToken == "") {
+		fmt.Fprintln(os.Stderr, "Error: --language-only sets the audio language in Plex: set PLEX_URL and PLEX_TOKEN.")
+		os.Exit(1)
+	}
 
 	var cutoff time.Time
 	if !*allFlag {
@@ -167,13 +171,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
 			os.Exit(1)
 		}
-		var plexClient PlexClient
-		if plexURL != "" && plexToken != "" {
-			plexClient = newMultiPlexClient(newHTTPPlexClient(plexURL, plexToken), altPlexClients(plexURL)...)
-		}
+		plexClient := newMultiPlexClient(newHTTPPlexClient(plexURL, plexToken), altPlexClients(plexURL)...)
 		cfg := Config{OverwriteLanguage: *overwriteLanguage}
 		processor := NewProcessor(cfg, cache, langManualData, tmdb, nil, nil, nil, nil, ratingCache, nil, plexClient, nil)
-		processor.RunLanguageOnly()
+		fmt.Println("Setting the Plex audio language for every cached show...")
+		stats := processor.RunLanguageOnly()
+		fmt.Printf("\nDone. Updated: %d  Skipped: %d  Errors: %d\n", stats.Updated, stats.Skipped, stats.Errors)
 		return
 	}
 
