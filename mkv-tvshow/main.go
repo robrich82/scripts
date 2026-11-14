@@ -245,8 +245,8 @@ func main() {
 	processor := NewProcessor(cfg, cache, manualData, tmdb, mkv, prompter, timer, retryList, ratingCache, sources, plexClient, titleCache)
 	stats := processor.Run()
 
-	fmt.Printf("\nDone. Success: %d  Failed: %d  Skipped (old): %d\n",
-		stats.Success, stats.Failed, stats.SkippedOld)
+	fmt.Printf("\nDone. Success: %d  Failed: %d  Skipped (old): %d  Plex errors: %d\n",
+		stats.Success, stats.Failed, stats.SkippedOld, stats.PlexErrors)
 }
 
 // oneShotMode is a flag that picks what a run does instead of the main pass.

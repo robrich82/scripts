@@ -576,8 +576,13 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 #### Output
 
 ```
-Done. Success: 12  Failed: 0  Skipped (old): 5
+Done. Success: 12  Failed: 0  Skipped (old): 5  Plex errors: 0
 ```
+
+A file whose tags were written but whose poster download or timestamp change
+then failed counts as failed, named on its result line as `(failed: …)`. So
+does one in `--ratings-only` or `--deband-only` whose timestamps couldn't be
+restored. `Plex errors` counts failed show-level Plex lookups and pushes.
 
 ### Bulk rating override (`--set-rating`)
 

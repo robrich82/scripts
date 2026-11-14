@@ -388,7 +388,7 @@ func TestApplyMKV_MergesIntoExistingTags(t *testing.T) {
 func TestApplyMKV_ExtractFails_DoesNotApply(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsErr: os.ErrNotExist}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	if p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false) {
+	if wroteMKV(p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false)) {
 		t.Error("applyMKV succeeded, want failure")
 	}
 	if len(runner.calls) != 0 {
@@ -399,7 +399,7 @@ func TestApplyMKV_ExtractFails_DoesNotApply(t *testing.T) {
 func TestApplyMKV_MergeFails_DoesNotApply(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	if p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false) {
+	if wroteMKV(p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false)) {
 		t.Error("applyMKV succeeded, want failure")
 	}
 	if len(runner.calls) != 0 {
@@ -411,7 +411,7 @@ func TestApplyDebandOnlyMKV_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml",
 		extractTagsXML: `<Tags><Tag><Targets /><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	if !p.applyDebandOnlyMKV(debandTestFile(t), false) {
+	if !tagOnlyOK(p.applyDebandOnlyMKV(debandTestFile(t), false)) {
 		t.Fatal("applyDebandOnlyMKV failed")
 	}
 	if len(runner.writtenXML) != 1 || runner.writtenXML[0] != emptyTagsDoc {
@@ -422,7 +422,7 @@ func TestApplyDebandOnlyMKV_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
 func TestApplyDebandOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	if p.applyDebandOnlyMKV(debandTestFile(t), true) {
+	if tagOnlyOK(p.applyDebandOnlyMKV(debandTestFile(t), true)) {
 		t.Error("applyDebandOnlyMKV succeeded, want failure")
 	}
 	if len(runner.calls) != 0 {
@@ -433,7 +433,7 @@ func TestApplyDebandOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
 func TestApplyRatingOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: "<Tags/>"}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	if p.applyRatingOnlyMKV(debandTestFile(t), RatingM) {
+	if tagOnlyOK(p.applyRatingOnlyMKV(debandTestFile(t), RatingM)) {
 		t.Error("applyRatingOnlyMKV succeeded, want failure")
 	}
 	if len(runner.calls) != 0 {
@@ -444,7 +444,7 @@ func TestApplyRatingOnlyMKV_NotTagsDocument_DoesNotApply(t *testing.T) {
 func TestApplyMKV_WriteTempTagsFails_DoesNotApply(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsErr: os.ErrPermission}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	if p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false) {
+	if wroteMKV(p.applyMKV("show.mkv", "T", "fresh", "1", "", "", "", RatingNone, false)) {
 		t.Error("applyMKV succeeded, want failure")
 	}
 	if len(runner.calls) != 0 {
@@ -503,14 +503,14 @@ func TestRealMKVRunner_TagUpdates_KeepOtherTagsWithoutDuplicates(t *testing.T) {
 	ep, runner := muxTestMKV(t, t.TempDir(), "Show - S01E01.mkv")
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 	for range 2 {
-		if !p.applyMKV(ep, "Pilot", "a < b & c", "42", "2020-01-02T00:00:00Z", "", "", RatingM, true) {
+		if !wroteMKV(p.applyMKV(ep, "Pilot", "a < b & c", "42", "2020-01-02T00:00:00Z", "", "", RatingM, true)) {
 			t.Fatal("applyMKV failed")
 		}
 	}
-	if !p.applyRatingOnlyMKV(ep, RatingR16) {
+	if !tagOnlyOK(p.applyRatingOnlyMKV(ep, RatingR16)) {
 		t.Fatal("applyRatingOnlyMKV failed")
 	}
-	if !p.applyDebandOnlyMKV(ep, false) {
+	if !tagOnlyOK(p.applyDebandOnlyMKV(ep, false)) {
 		t.Fatal("applyDebandOnlyMKV failed")
 	}
 
@@ -542,7 +542,7 @@ func TestRealMKVRunner_LegacyDuplicateBlocks_ApplySucceeds(t *testing.T) {
 	}
 
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	if !p.applyMKV(ep, "Pilot", "new", "42", "", "", "", RatingNone, false) {
+	if !wroteMKV(p.applyMKV(ep, "Pilot", "new", "42", "", "", "", RatingNone, false)) {
 		t.Fatal("applyMKV failed")
 	}
 	tags := extractRealTags(t, runner, ep)
@@ -563,13 +563,13 @@ func TestRealMKVRunner_DebandOnOff_NoEmptyBlock(t *testing.T) {
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 
-	if !p.applyDebandOnlyMKV(statsOnly, true) || !p.applyDebandOnlyMKV(statsOnly, false) {
+	if !tagOnlyOK(p.applyDebandOnlyMKV(statsOnly, true)) || !tagOnlyOK(p.applyDebandOnlyMKV(statsOnly, false)) {
 		t.Fatal("applyDebandOnlyMKV on a stats-only file failed")
 	}
 	tags := extractRealTags(t, runner, statsOnly)
 	assertNameCounts(t, tags, map[string]int{"DEBAND": 0, "_STATISTICS_TAGS": 1})
 
-	if !p.applyDebandOnlyMKV(untagged, false) {
+	if !tagOnlyOK(p.applyDebandOnlyMKV(untagged, false)) {
 		t.Fatal("applyDebandOnlyMKV on an untagged file failed")
 	}
 }
