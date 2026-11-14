@@ -253,7 +253,8 @@ func plexItemHasTMDBID(guidRaw json.RawMessage, guidLower, wantGUID, tmdbID stri
 				}
 			}
 		}
-		return false
+		// A legacy-agent show may come with an empty array; its guid field still counts.
+		return guidStringMatchesTMDBID(guidLower, tmdbID)
 	}
 
 	// Legacy: Guid is a plain JSON string.

@@ -101,6 +101,25 @@ func TestHTTPPlexMovieClient_FindMovieByTMDBID_LegacyGuid(t *testing.T) {
 	}
 }
 
+// A legacy-agent movie listed with includeGuids=1 may have an empty Guid
+// array; its lowercase guid still identifies it.
+func TestHTTPPlexMovieClient_FindMovieByTMDBID_LegacyGuidWithEmptyArray(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
+		} else {
+			fmt.Fprint(w, `{"MediaContainer":{"Metadata":[{"ratingKey":"88","guid":"com.plexapp.agents.themoviedb://12345?lang=en","Guid":[]}]}}`)
+		}
+	}))
+	defer srv.Close()
+
+	key, err := newHTTPPlexMovieClient(srv.URL, "token").FindMovieByTMDBID("12345")
+	if err != nil || key != "88" {
+		t.Errorf("got %q, %v; want 88", key, err)
+	}
+}
+
 func TestHTTPPlexMovieClient_FindMovieByTMDBID_CachesResult(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

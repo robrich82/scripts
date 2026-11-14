@@ -225,7 +225,8 @@ func plexMovieItemHasTMDBID(guidRaw json.RawMessage, guidLower, wantGUID, tmdbID
 				}
 			}
 		}
-		return false
+		// A legacy-agent movie may come with an empty array; its guid field still counts.
+		return plexMovieGuidMatchesTMDBID(guidLower, tmdbID)
 	}
 	if len(guidRaw) > 0 {
 		var s string
