@@ -46,7 +46,8 @@ type PlexMovieClient interface {
 	// ErrPlexMovieNotFound if no match exists.
 	FindMovieByTMDBID(tmdbID string) (string, error)
 	// FindMovieByTitle searches all "movie" library sections for an item whose
-	// title (normalized) matches title and whose year matches year.
+	// title matches title (see titleMatcher) and whose year is within one of
+	// year, when year is set.
 	// Returns ErrPlexMovieNotFound if no match exists.
 	FindMovieByTitle(title, year string) (string, error)
 	// GetContentRating returns the current NZ content rating stored in Plex for
@@ -271,19 +272,34 @@ func plexMovieGuidMatchesTMDBID(s, tmdbID string) bool {
 	return ok && (rest == "" || rest[0] < '0' || rest[0] > '9')
 }
 
-// FindMovieByTitle implements PlexMovieClient.
+// FindMovieByTitle implements PlexMovieClient. A title with no ASCII letters
+// or digits (e.g. 千と千尋の神隠し) normalises to "", like every other such
+// title, so it must match exactly, ignoring case.
 func (c *httpPlexMovieClient) FindMovieByTitle(title, year string) (string, error) {
-	normTitle := normalizePlexTitle(title)
+	matches := titleMatcher(title)
+	if matches == nil {
+		return "", ErrPlexMovieNotFound
+	}
 	wantYear := 0
 	if year != "" {
 		wantYear, _ = strconv.Atoi(year)
 	}
 	return c.findMovie(func(item plexMovieItem) bool {
-		if normalizePlexTitle(item.Title) != normTitle {
-			return false
-		}
-		return wantYear == 0 || abs(item.Year-wantYear) <= 1
+		return matches(item.Title) && (wantYear == 0 || abs(item.Year-wantYear) <= 1)
 	})
+}
+
+// titleMatcher reports whether a Plex title matches title: by normalised
+// title, or exactly but for case when title has no ASCII letters or digits.
+// It is nil for a blank title, which matches nothing.
+func titleMatcher(title string) func(string) bool {
+	if norm := normalizePlexTitle(title); norm != "" {
+		return func(t string) bool { return normalizePlexTitle(t) == norm }
+	}
+	if strings.TrimSpace(title) == "" {
+		return nil
+	}
+	return func(t string) bool { return strings.EqualFold(t, title) }
 }
 
 func abs(x int) int {

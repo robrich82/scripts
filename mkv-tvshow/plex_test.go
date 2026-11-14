@@ -549,6 +549,35 @@ func TestHTTPPlexClient_FindShowByTitle_NotFound(t *testing.T) {
 	}
 }
 
+// A title with no ASCII letters or digits normalises to "", like every other
+// such title, so it matches only its exact title.
+func TestHTTPPlexClient_FindShowByTitle_NonASCIITitle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			fmt.Fprint(w, plexSectionsJSON("1", "show"))
+		} else {
+			fmt.Fprint(w, `{"MediaContainer":{"Metadata":[{"ratingKey":"99","title":"鬼滅の刃"},{"ratingKey":"98","title":"【推しの子】"}]}}`)
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexClient(srv.URL, "token")
+	if key, err := c.FindShowByTitle("進撃の巨人"); err != ErrPlexNotFound {
+		t.Errorf("other title: got key %q, err %v; want ErrPlexNotFound", key, err)
+	}
+	if key, err := c.FindShowByTitle("鬼滅の刃"); err != nil || key != "99" {
+		t.Errorf("exact title: got key %q, err %v; want 99", key, err)
+	}
+	// The caller's query is cleanSearchQuery(folder), which drops the brackets.
+	if key, err := c.FindShowByTitle(cleanSearchQuery("【推しの子】")); err != nil || key != "98" {
+		t.Errorf("cleaned title: got key %q, err %v; want 98", key, err)
+	}
+	if key, err := c.FindShowByTitle(" "); err != ErrPlexNotFound {
+		t.Errorf("blank title: got key %q, err %v; want ErrPlexNotFound", key, err)
+	}
+}
+
 func TestHTTPPlexClient_FindShowByTitle_SkipsMovieSections(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
