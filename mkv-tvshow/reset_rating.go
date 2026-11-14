@@ -15,8 +15,7 @@ func runResetRating(query, mediaDir string) {
 
 	showCache, err := LoadCache(filepath.Join(cfgDir, "show_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading show_cache.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError("show_cache.json", err)
 	}
 
 	matches := showCache.FindByQuery(query)
@@ -46,8 +45,7 @@ func runResetRating(query, mediaDir string) {
 
 	ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading rating_cache.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError("rating_cache.json", err)
 	}
 
 	epCleared := ratingCache.ResetForShowID(tmdbID)

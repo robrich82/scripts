@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 )
 
 // LanguageOnlyStats counts the shows of a --language-only run.
@@ -47,7 +46,7 @@ func (p *Processor) RunLanguageOnly() LanguageOnlyStats {
 	})
 
 	var stats LanguageOnlyStats
-	saver := cacheSaver{cache: p.ratingCache}
+	saver := newRatingSaver(p.ratingCache, "Plex keys and audio languages")
 	for _, id := range ids {
 		switch p.languageOnlyShow(id, shows[id]) {
 		case languageUpdated:
@@ -140,47 +139,3 @@ func (p *Processor) findPlexShow(tmdbID, showName string) (string, error) {
 	}
 	return key, err
 }
-
-// cacheSaver saves the rating cache after each show a run processes, so an
-// interrupted run keeps what it already set.
-type cacheSaver struct {
-	cache     *RatingCache
-	saveErr   error  // the last save's error; only the first in a run of failures is printed
-	lastSaved string // the show after which the cache was last saved
-}
-
-// save saves the cache; name is the show finish names if a later save fails.
-func (s *cacheSaver) save(name string) {
-	err := s.cache.Save()
-	switch {
-	case err != nil && s.saveErr == nil:
-		fmt.Printf("[!] Failed to save rating cache: %v\n    Retrying as the run goes on; until a save succeeds, changes are kept in memory only.\n", err)
-	case err == nil && s.saveErr != nil:
-		fmt.Println("[i] Rating cache saved.")
-	}
-	if err == nil {
-		s.lastSaved = name
-	}
-	s.saveErr = err
-}
-
-// finish retries a failed last save once, and says what was lost if it fails
-// again.
-func (s *cacheSaver) finish() {
-	if s.saveErr == nil {
-		return
-	}
-	// One more try: on Windows the rename fails while another program
-	// (antivirus, an indexer) briefly holds the cache open.
-	beforeFinalSave()
-	if err := s.cache.Save(); err == nil {
-		fmt.Println("[i] Rating cache saved.")
-	} else if s.lastSaved == "" {
-		fmt.Printf("[!] The rating cache was never saved; this run's Plex keys and audio languages are lost: %v\n", err)
-	} else {
-		fmt.Printf("[!] The rating cache was last saved after %s; later Plex keys and audio languages are lost: %v\n", s.lastSaved, err)
-	}
-}
-
-// beforeFinalSave runs before cacheSaver.finish's last save attempt; tests replace it.
-var beforeFinalSave = func() { time.Sleep(time.Second) }

@@ -567,7 +567,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--language-only` | false | Apply Plex audio language preference for every cached show folder without scanning files, printing a line per show and a `Done.` summary. Needs `PLEX_URL`/`PLEX_TOKEN`. Skips shows already set (unless `--overwrite-language`), shows with no known language and shows not in Plex. A show cached under several folders takes each language key from the first folder, by name, whose manual_data.json entry sets it |
 | `--missing` | false | Check for missing episodes (see below) |
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
-| `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit. Entries on an offline drive are kept |
+| `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit. Entries on an offline drive are kept. A cache it can't save is left unchanged and makes it exit 1; if that is `show_cache.json`, it stops before the others |
 | `--reset-rating <query>` | — | Clear the cached NZ rating for a show and reset the applied state on all its files so the next run re-fetches and re-applies it. `query` is a folder name substring or TMDB ID |
 | `--set-rating <RATING>` | — | Set `RATING` as the NZ rating for **every** show in the current directory, overriding any cached value, then exit (see below) |
 

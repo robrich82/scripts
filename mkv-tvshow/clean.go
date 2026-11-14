@@ -14,20 +14,32 @@ func runClean() {
 	}
 
 	total := 0
+	failed := false
+	// saved saves a cache whose stale entries were removed in memory, and
+	// reports whether the removal reached disk.
+	saved := func(file string, c interface{ Save() error }) bool {
+		if err := c.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving %s: %v\nNothing was removed from %s.\n", file, err, file)
+			failed = true
+			return false
+		}
+		return true
+	}
 
 	// show_cache.json: remove entries for show folders that no longer exist.
 	showCache, err := LoadCache(filepath.Join(cfgDir, "show_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading show_cache.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError("show_cache.json", err)
 	}
 	removedIDs := showCache.CleanStaleFolders()
 	if n := len(removedIDs); n > 0 {
+		// The other caches are pruned against the cleaned show list, so stop
+		// if it can't be saved.
+		if !saved("show_cache.json", showCache) {
+			os.Exit(1)
+		}
 		fmt.Printf("show_cache.json:      removed %d stale entr%s\n", n, es(n))
 		total += n
-	}
-	if err := showCache.Save(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving show_cache.json: %v\n", err)
 	}
 
 	// Build the set of TMDB IDs that remain after cleaning show_cache so that
@@ -40,66 +52,54 @@ func runClean() {
 	// title_cache.json: remove entries for files that no longer exist.
 	titleCache, err := LoadTitleCache(filepath.Join(cfgDir, "title_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading title_cache.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError("title_cache.json", err)
 	}
-	if n := titleCache.CleanStalePaths(); n > 0 {
+	if n := titleCache.CleanStalePaths(); n > 0 && saved("title_cache.json", titleCache) {
 		fmt.Printf("title_cache.json:     removed %d stale entr%s\n", n, es(n))
 		total += n
-		if err := titleCache.Save(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error saving title_cache.json: %v\n", err)
-		}
 	}
 
 	// rating_cache.json: remove stale file paths and orphaned show IDs.
 	ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading rating_cache.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError("rating_cache.json", err)
 	}
 	nPaths := ratingCache.CleanStalePaths()
 	nIDs := ratingCache.CleanStaleShowIDs(knownIDs)
-	if n := nPaths + nIDs; n > 0 {
+	if n := nPaths + nIDs; n > 0 && saved("rating_cache.json", ratingCache) {
 		fmt.Printf("rating_cache.json:    removed %d stale entr%s (%d file paths, %d show IDs)\n", n, es(n), nPaths, nIDs)
 		total += n
-		if err := ratingCache.Save(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error saving rating_cache.json: %v\n", err)
-		}
 	}
 
 	// pending_dates.json: remove entries for files that no longer exist.
 	retryList, err := LoadRetryList(filepath.Join(cfgDir, "pending_dates.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading pending_dates.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError("pending_dates.json", err)
 	}
-	if n := retryList.CleanStalePaths(); n > 0 {
+	if n := retryList.CleanStalePaths(); n > 0 && saved("pending_dates.json", retryList) {
 		fmt.Printf("pending_dates.json:   removed %d stale entr%s\n", n, es(n))
 		total += n
-		if err := retryList.Save(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error saving pending_dates.json: %v\n", err)
-		}
 	}
 
 	// missing_ignore.json: remove entries for shows no longer in show_cache.
 	ignoreList, err := LoadMissingIgnoreList(filepath.Join(cfgDir, "missing_ignore.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading missing_ignore.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError("missing_ignore.json", err)
 	}
-	if n := ignoreList.CleanStaleShowIDs(knownIDs); n > 0 {
+	if n := ignoreList.CleanStaleShowIDs(knownIDs); n > 0 && saved("missing_ignore.json", ignoreList) {
 		fmt.Printf("missing_ignore.json:  removed %d stale entr%s\n", n, es(n))
 		total += n
-		if err := ignoreList.Save(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error saving missing_ignore.json: %v\n", err)
-		}
 	}
 
-	if total == 0 {
+	switch {
+	case total > 0:
+		fmt.Printf("\nTotal: %d stale entr%s removed.\n", total, es(total))
+	case !failed:
 		fmt.Println("All caches are clean; nothing to remove.")
-		return
 	}
-	fmt.Printf("\nTotal: %d stale entr%s removed.\n", total, es(total))
+	if failed {
+		os.Exit(1)
+	}
 }
 
 func es(n int) string {

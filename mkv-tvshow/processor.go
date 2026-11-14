@@ -57,6 +57,10 @@ type Processor struct {
 	sessionPromptedRating map[string]NZRating // tmdbID → rating from user prompt this run
 	sessionPlexKey        map[string]string   // tmdbID → Plex show ratingKey (cached across methods)
 	sessionOriginalLang   map[string]string   // tmdbID → original_language from TMDB (ISO 639-1)
+
+	// Run saves the show and rating caches through these; NewProcessor sets them.
+	showSaver   *cacheSaver
+	ratingSaver *cacheSaver // nil when ratingCache is
 }
 
 // NewProcessor constructs a Processor with the given dependencies.
@@ -74,7 +78,7 @@ func NewProcessor(
 	plex PlexClient,
 	titleCache *TitleCache,
 ) *Processor {
-	return &Processor{
+	p := &Processor{
 		cfg:                   cfg,
 		cache:                 cache,
 		manualData:            manualData,
@@ -92,7 +96,12 @@ func NewProcessor(
 		sessionPromptedRating: make(map[string]NZRating),
 		sessionPlexKey:        make(map[string]string),
 		sessionOriginalLang:   make(map[string]string),
+		showSaver:             &cacheSaver{cache: cache, name: "show cache", holds: "show matches"},
 	}
+	if ratingCache != nil {
+		p.ratingSaver = newRatingSaver(ratingCache, "ratings and Plex state")
+	}
+	return p
 }
 
 var (
@@ -401,13 +410,15 @@ func (p *Processor) Run() Stats {
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		// After processing all episodes for this show, save rating cache and update Plex.
-		if p.ratingCache != nil {
-			if err := p.ratingCache.Save(); err != nil {
-				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
-			}
-		}
+		// Update Plex, then save the rating cache with the Plex state that recorded.
 		p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, p.manualData[showFolder])
+		if p.ratingSaver != nil {
+			p.ratingSaver.save(showFolder)
+		}
+	}
+	p.showSaver.finish()
+	if p.ratingSaver != nil {
+		p.ratingSaver.finish()
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -509,9 +520,7 @@ func (p *Processor) resolveShowID(showFolder string) string {
 	if resID != "" {
 		p.cache.Set(cacheKey, resID)
 		p.sessionConfirmed[showFolder] = resID
-		if err := p.cache.Save(); err != nil {
-			fmt.Printf("  [!] Cache save error: %v\n", err)
-		}
+		p.showSaver.save(showFolder)
 		return resID
 	}
 
