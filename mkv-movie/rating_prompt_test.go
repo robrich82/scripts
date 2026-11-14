@@ -63,7 +63,7 @@ func TestResolveMovieRating_SourceRatingIsConfirmed(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("answer %q: got %q, want %q", tc.answer, got, tc.want)
 		}
-		if len(p.prompts) != 1 || !strings.Contains(p.prompts[0], `NZ rating for "Coco": G — press enter to confirm`) {
+		if len(p.prompts) != 1 || !strings.Contains(p.prompts[0], "NZ rating for \"Coco\": G\n") {
 			t.Errorf("answer %q: prompts = %q; want one confirmation of G", tc.answer, p.prompts)
 		}
 		if cached, _ := cache.Get("12345"); cached != tc.want {
@@ -253,7 +253,7 @@ func TestResolveMovieRating_OverwriteConfirmsOnlyAChangedRating(t *testing.T) {
 		if len(p.prompts) != tc.prompts {
 			t.Errorf("source %s: %d prompts %q; want %d", tc.source, len(p.prompts), p.prompts, tc.prompts)
 		}
-		if tc.prompts == 1 && !strings.Contains(p.prompts[0], "R16 (cached: M) — press enter to confirm") {
+		if tc.prompts == 1 && !strings.Contains(p.prompts[0], "R16 (cached: M)\n") {
 			t.Errorf("prompt doesn't show the cached rating: %q", p.prompts[0])
 		}
 		if tc.prompts == 0 && out != "" {
@@ -351,4 +351,28 @@ func TestResolveMovieRating_PlexEmptyRatingKeyIsNotFound(t *testing.T) {
 			t.Errorf("missing not-found notice:\n%s", out)
 		}
 	})
+}
+
+// A typed code is cached and echoed, and the prompt shows Plex's rating as
+// the default.
+func TestResolveMovieRating_TypedCodeIsEchoed(t *testing.T) {
+	p := &recordingPrompter{answers: []string{"r16"}}
+	cache := makeCache(t)
+	rr := newMovieRatingResolver(nil, cache, false, false, &fakePlexMovieClient{tmdbRatingKey: "10", contentRating: RatingM}, p.ask)
+
+	var got NZRating
+	out := captureStdout(t, func() { got = rr.ResolveMovieRating("12345", "Coco", "2017") })
+
+	if got != RatingR16 {
+		t.Errorf("got %q; want R16", got)
+	}
+	if cached, _ := cache.Get("12345"); cached != RatingR16 {
+		t.Errorf("cached %q; want R16", cached)
+	}
+	if len(p.prompts) != 1 || !strings.Contains(p.prompts[0], ") [M], or blank to use Plex's M: ") {
+		t.Errorf("prompts %q; want Plex's M offered as the default", p.prompts)
+	}
+	if !strings.Contains(out, "  → R16\n") {
+		t.Errorf("choice not echoed:\n%s", out)
+	}
 }

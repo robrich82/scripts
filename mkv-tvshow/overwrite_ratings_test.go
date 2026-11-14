@@ -160,3 +160,32 @@ func TestResolveEpisodeRating_RepromptNamesWhatBlankDoes(t *testing.T) {
 		})
 	}
 }
+
+// A typed code is cached as the show's rating and echoed, and the prompt shows
+// Plex's rating as the default.
+func TestResolveEpisodeRating_TypedCodeIsEchoed(t *testing.T) {
+	pr := &recordingPrompter{answers: []string{"r16"}}
+	rc := emptyRatingCache(t)
+	p := &Processor{
+		ratingCache:           rc,
+		prompter:              pr,
+		plex:                  &fakePlexClient{showRatingKey: "42", contentRating: RatingM},
+		sessionPromptedRating: map[string]NZRating{},
+	}
+
+	var got NZRating
+	out := captureStdout(t, func() { got = p.resolveEpisodeRating("12345", "Test Show", "", 1, 1) })
+
+	if got != RatingR16 {
+		t.Errorf("got %q; want R16", got)
+	}
+	if cached, _ := rc.GetShowRating("12345"); cached != RatingR16 {
+		t.Errorf("cached %q; want R16", cached)
+	}
+	if len(pr.prompts) != 1 || !strings.Contains(pr.prompts[0], ") [M], or blank to use Plex's M: ") {
+		t.Errorf("prompts %q; want Plex's M offered as the default", pr.prompts)
+	}
+	if !strings.Contains(out, "  → R16\n") {
+		t.Errorf("choice not echoed:\n%s", out)
+	}
+}
