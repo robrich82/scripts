@@ -909,6 +909,21 @@ Config and state are stored in `%APPDATA%\sw-update\` (Windows) or
 > subject to bot-protection. It scans all entries for filenames matching
 > `version_regex` and returns the highest version found.
 
+**`asset_url`** (any checker type) is a download URL template, added to the
+assets after a check, for downloads the page doesn't link to directly (e.g.
+behind a EULA page). `{version}` is the checked version; `{major}`, `{minor}`
+and `{patch}` are its dot-separated segments. An unknown placeholder, or one
+the version has no segment for, fails the check.
+
+```json
+"checker": {
+    "type": "html",
+    "url": "https://www.amd.com/en/developer/aocl.html",
+    "version_regex": "AOCL_Windows-setup-([0-9]+\\.[0-9]+\\.[0-9]+)-AMD\\.exe",
+    "asset_url": "https://download.amd.com/developer/eula/aocl/aocl-{major}-{minor}/AOCL_Windows-setup-{version}-AMD.exe"
+}
+```
+
 #### Local detector types
 
 | Type | Description |

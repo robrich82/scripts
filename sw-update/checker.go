@@ -77,12 +77,59 @@ func (d *checkerDispatch) Check(app App) (*CheckResult, error) {
 	if err != nil || result == nil {
 		return result, err
 	}
+	if app.Checker.AssetURL != "" && result.Version != "" {
+		a, err := templateAsset(app.Checker.AssetURL, result.Version)
+		if err != nil {
+			return nil, err
+		}
+		result.Assets = append(result.Assets, a)
+	}
 	for _, a := range result.Assets {
 		if err := requireHTTPS(a.URL); err != nil {
 			return nil, fmt.Errorf("asset %s: %w", a.Name, err)
 		}
 	}
 	return result, nil
+}
+
+var reAssetPlaceholder = regexp.MustCompile(`\{[^{}]*\}`)
+
+// templateAsset expands an asset_url template for version, for downloads the
+// checked page doesn't link to directly (e.g. behind a EULA page).
+// {major}, {minor} and {patch} are the version's dot-separated segments.
+func templateAsset(tmpl, version string) (Asset, error) {
+	segs := strings.Split(strings.TrimPrefix(version, "v"), ".")
+	names := []string{"{major}", "{minor}", "{patch}"}
+	var expandErr error
+	expanded := reAssetPlaceholder.ReplaceAllStringFunc(tmpl, func(ph string) string {
+		if ph == "{version}" {
+			return version
+		}
+		for i, name := range names {
+			if ph != name {
+				continue
+			}
+			if i >= len(segs) {
+				expandErr = fmt.Errorf("asset_url: %s: version %q has no segment %d", ph, version, i+1)
+				return ""
+			}
+			return segs[i]
+		}
+		expandErr = fmt.Errorf("asset_url: unknown placeholder %s", ph)
+		return ""
+	})
+	if expandErr != nil {
+		return Asset{}, expandErr
+	}
+	u, err := url.Parse(expanded)
+	if err != nil {
+		return Asset{}, fmt.Errorf("asset_url: %w", err)
+	}
+	name := path.Base(u.Path)
+	if name == "/" || name == "." {
+		return Asset{}, fmt.Errorf("asset_url: %s has no file name", expanded)
+	}
+	return Asset{Name: name, URL: expanded}, nil
 }
 
 // requireHTTPS returns an insecureURLError for the first non-empty rawURL that

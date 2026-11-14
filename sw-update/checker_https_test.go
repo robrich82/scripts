@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -190,5 +191,49 @@ func TestHTMLCheckerSendsUserAgent(t *testing.T) {
 	}
 	if res.Version != "1.2" {
 		t.Errorf("Version = %q, want 1.2", res.Version)
+	}
+}
+
+func TestCheckerAddsTemplatedAsset(t *testing.T) {
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `version 6.0 <a href="/eula.html?filename=app-6.0.exe">app-6.0.exe</a>`)
+	})
+	app := htmlApp(srv.URL + "/downloads")
+	app.Checker.AssetPatterns = nil
+	app.Checker.AssetURL = "https://dl.example.com/app-{major}-{minor}/app-{version}-setup.exe"
+
+	res, err := NewChecker(srv.Client()).Check(app)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	want := []Asset{{Name: "app-6.0-setup.exe", URL: "https://dl.example.com/app-6-0/app-6.0-setup.exe"}}
+	if !reflect.DeepEqual(res.Assets, want) {
+		t.Errorf("Assets = %+v, want %+v", res.Assets, want)
+	}
+}
+
+func TestCheckerRejectsHTTPTemplatedAsset(t *testing.T) {
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `version 6.0`)
+	})
+	app := htmlApp(srv.URL + "/downloads")
+	app.Checker.AssetURL = "http://dl.example.com/app-{version}.exe"
+
+	_, err := NewChecker(srv.Client()).Check(app)
+	var insecure *insecureURLError
+	if !errors.As(err, &insecure) {
+		t.Errorf("err = %v, want an insecureURLError", err)
+	}
+}
+
+func TestCheckerFailsOnBadAssetURLPlaceholder(t *testing.T) {
+	srv := newPageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `version 6.0`)
+	})
+	app := htmlApp(srv.URL + "/downloads")
+	app.Checker.AssetURL = "https://dl.example.com/app-{patch}.exe"
+
+	if _, err := NewChecker(srv.Client()).Check(app); err == nil || !strings.Contains(err.Error(), "{patch}") {
+		t.Errorf("err = %v, want one naming {patch}", err)
 	}
 }
