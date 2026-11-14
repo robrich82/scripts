@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -182,6 +183,10 @@ func TestHTMLCheckerSendsUserAgent(t *testing.T) {
 	}
 	if gotUA != userAgent {
 		t.Errorf("User-Agent = %q, want %q", gotUA, userAgent)
+	}
+	// amd.com's Akamai front end resets requests whose UA has a "(...)" comment.
+	if strings.ContainsAny(gotUA, "()") {
+		t.Errorf("User-Agent = %q, want no (...) comment", gotUA)
 	}
 	if res.Version != "1.2" {
 		t.Errorf("Version = %q, want 1.2", res.Version)
