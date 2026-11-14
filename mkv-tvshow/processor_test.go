@@ -1695,7 +1695,7 @@ func TestRunLanguageOnly_AltFailure_RetriesOnlyThatAlt(t *testing.T) {
 	run := func(cfg Config, primary, alt *fakePlexClient) string {
 		plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
 		p := NewProcessor(cfg, cache, nil, tmdbClient, nil, nil, nil, nil, rc, nil, plexClient, nil)
-		return captureStdout(t, p.RunLanguageOnly)
+		return captureStdout(t, func() { p.RunLanguageOnly() })
 	}
 
 	out := run(Config{}, &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{setLangErr: errors.New("alt failed")})
@@ -1736,7 +1736,7 @@ func TestRunLanguageOnly_AltNotFound_KeepsPlexKey(t *testing.T) {
 	alt := &fakePlexClient{setLangErr: ErrPlexNotFound}
 	plexClient := newMultiPlexClient(&fakePlexClient{showRatingKey: "plex-99"}, namedPlexClient{name: altAccount, client: alt})
 	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
-	out := captureStdout(t, p.RunLanguageOnly)
+	out := captureStdout(t, func() { p.RunLanguageOnly() })
 
 	if key, ok := rc.GetPlexKey("111"); !ok || key != "plex-99" {
 		t.Errorf("Plex key = %q, %v; want plex-99 kept", key, ok)
@@ -1769,7 +1769,7 @@ func TestRunLanguageOnly_AltTokensRemoved_PrimaryNotPushed(t *testing.T) {
 			rc.SetLanguageApplied("111", tc.cached)
 			primary := &fakePlexClient{showRatingKey: "plex-99"}
 			p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, tc.plex(primary), nil)
-			out := captureStdout(t, p.RunLanguageOnly)
+			out := captureStdout(t, func() { p.RunLanguageOnly() })
 			if len(primary.setLangCalls) != 0 {
 				t.Errorf("primary pushed %d times; want 0", len(primary.setLangCalls))
 			}
@@ -1791,7 +1791,7 @@ func TestRunLanguageOnly_NewAltAccount_SetsOnlyIt(t *testing.T) {
 	primary, alt := &fakePlexClient{showRatingKey: "plex-99"}, &fakePlexClient{}
 	plexClient := newMultiPlexClient(primary, namedPlexClient{name: altAccount, client: alt})
 	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "111"}), nil, &fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "ja"}}, nil, nil, nil, nil, rc, nil, plexClient, nil)
-	captureStdout(t, p.RunLanguageOnly)
+	captureStdout(t, func() { p.RunLanguageOnly() })
 	if len(primary.setLangCalls) != 0 || len(alt.setLangCalls) != 1 {
 		t.Errorf("calls: primary %d, alt %d; want 0 and 1", len(primary.setLangCalls), len(alt.setLangCalls))
 	}

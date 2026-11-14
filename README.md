@@ -564,7 +564,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--ratings-only` | false | Only update NZ content ratings; skip all other metadata |
 | `--overwrite-ratings` | false | Re-fetch all ratings (prompting once per show), ignoring cached values; a cached rating is kept when no source has one |
 | `--overwrite-language` | false | Re-apply Plex audio language preference even if already set for a show |
-| `--language-only` | false | Apply Plex audio language preference for all cached shows without scanning files |
+| `--language-only` | false | Apply Plex audio language preference for every show in the rating cache, in folder-name order, without scanning files. Plex is searched only for a show whose language isn't set yet; `--overwrite-language` sets every show again. Needs `PLEX_URL`/`PLEX_TOKEN`. Prints a line per show and `Done. Updated: N  Skipped: N  Errors: N`; the rating cache is saved after each show |
 | `--missing` | false | Check for missing episodes (see below) |
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
 | `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit. Entries on an offline drive are kept |
@@ -574,7 +574,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 #### Output
 
 ```
-Success: 12  Failed: 0  SkippedOld: 5
+Done. Success: 12  Failed: 0  Skipped (old): 5
 ```
 
 ### Bulk rating override (`--set-rating`)
