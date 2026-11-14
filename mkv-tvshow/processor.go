@@ -33,7 +33,7 @@ type Stats struct {
 	Success    int
 	Failed     int
 	SkippedOld int
-	PlexErrors int // show-level Plex lookups and pushes that failed
+	PlexErrors int // show-level Plex lookups and pushes, and the post-run library scan, that failed
 }
 
 // countTagged reports a file whose tags were written: "[✓] label: file", or,
@@ -290,11 +290,7 @@ func (p *Processor) Run() Stats {
 						rating := p.resolveEpisodeRating(showID, showName, filePath, posterSeason, 0)
 						deband := entry.resolveDeband(fmt.Sprintf("S%02d", posterSeason), "")
 						if wrote, failed := p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating, deband); wrote {
-							if stampDate != "" {
-								p.retryList.Remove(filePath)
-							} else {
-								p.retryList.Add(filePath)
-							}
+							p.trackRetry(filePath, stampDate, failed)
 							showTouched = true
 							extrasProcessed = true
 							stats.countTagged("Processed (extra)", file, failed)
@@ -396,11 +392,7 @@ func (p *Processor) Run() Stats {
 				)
 			}
 			if wrote, failed := p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating, deband); wrote {
-				if stampDate != "" {
-					p.retryList.Remove(filePath)
-				} else {
-					p.retryList.Add(filePath)
-				}
+				p.trackRetry(filePath, stampDate, failed)
 				showTouched = true
 				stats.countTagged("Processed", file, failed)
 			} else {
@@ -430,6 +422,7 @@ func (p *Processor) Run() Stats {
 	if extrasProcessed && p.plex != nil {
 		if err := p.plex.RefreshLibraries(); err != nil {
 			fmt.Printf("[!] Plex library refresh failed: %v\n", err)
+			stats.PlexErrors++
 		} else {
 			fmt.Println("  [i] Plex: library re-scanned for extras.")
 		}
@@ -1214,6 +1207,17 @@ func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, sea
 	}
 	cache[key] = sr
 	return sr, nil
+}
+
+// trackRetry keeps a tagged file on the retry list until it has a real air
+// date and no step after tagging failed, so a later run finishes it even
+// once it falls before the cutoff.
+func (p *Processor) trackRetry(filePath, stampDate string, failed []string) {
+	if stampDate != "" && len(failed) == 0 {
+		p.retryList.Remove(filePath)
+	} else {
+		p.retryList.Add(filePath)
+	}
 }
 
 // failTMDBLookup reports a failed TMDB season lookup for file and leaves it

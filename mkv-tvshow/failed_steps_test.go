@@ -34,7 +34,8 @@ func showLibrary(t *testing.T, show string, files ...string) string {
 }
 
 // A file whose tags were written but whose poster or timestamps then failed
-// is a failure, named on its result line, and still leaves the retry list.
+// is a failure, named on its result line, and stays on the retry list so a
+// later run finishes it.
 func TestRun_FailedStepsAfterTaggingCountAsFailures(t *testing.T) {
 	dir := showLibrary(t, "Step Show", "Step Show - S01E01.mkv")
 	file := filepath.Join(dir, "Step Show", "Step Show - S01E01.mkv")
@@ -61,8 +62,8 @@ func TestRun_FailedStepsAfterTaggingCountAsFailures(t *testing.T) {
 	if len(runner.calls) != 1 {
 		t.Errorf("Apply called %d times; want 1", len(runner.calls))
 	}
-	if retry.Has(file) {
-		t.Error("file left on the retry list although its tags and date were written")
+	if !retry.Has(file) {
+		t.Error("partly failed file dropped from the retry list")
 	}
 }
 
@@ -202,13 +203,18 @@ func TestApplyPlexRatings_CountsFailures(t *testing.T) {
 			setRatingErr:  plexErr, setLangErr: plexErr},
 			&fakeTMDB{showDetails: ShowDetails{OriginalLanguage: "en"}}, 4},
 		{"TMDB language lookup", &fakePlexClient{showRatingKey: "k"}, &fakeTMDB{showErr: errors.New("TMDB down")}, 1},
+		{"not in Plex", &fakePlexClient{findErr: ErrPlexNotFound, findTitleErr: ErrPlexNotFound}, &fakeTMDB{}, 0},
+		{"title fallback", &fakePlexClient{findErr: ErrPlexNotFound, findTitleErr: plexErr}, &fakeTMDB{}, 1},
+		{"episodes", &fakePlexClient{showRatingKey: "k", seasons: []PlexSeason{{RatingKey: "s1", SeasonNumber: 1}}, episodesErr: plexErr},
+			&fakeTMDB{}, 1},
+		{"metadata refresh", &fakePlexClient{showRatingKey: "k", refreshMetaErr: plexErr}, &fakeTMDB{}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rc := emptyRatingCache(t)
 			rc.SetShowRating("111", RatingM)
 			p := NewProcessor(Config{}, nil, nil, tc.tmdb, nil, nil, nil, nil, rc, nil, tc.plex, nil)
 			var errs int
-			captureStdout(t, func() { errs = p.applyPlexRatings("111", nil, "Show A", "Show A", false, ManualEntry{}) })
+			captureStdout(t, func() { errs = p.applyPlexRatings("111", nil, "Show A", "Show A", true, ManualEntry{}) })
 			if errs != tc.want {
 				t.Errorf("errs = %d; want %d", errs, tc.want)
 			}
@@ -232,5 +238,84 @@ func TestRun_PlexFailuresReachStats(t *testing.T) {
 
 	if stats.Success != 1 || stats.PlexErrors != 1 {
 		t.Errorf("stats = %+v; want the file a success and 1 Plex error", stats)
+	}
+}
+
+// A fully tagged file leaves the retry list; one whose poster failed stays.
+func TestRun_RetryListFollowsFailedSteps(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		posterErr error
+		wantRetry bool
+	}{
+		{"all done", nil, false},
+		{"poster failed", errors.New("HTTP 503"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := showLibrary(t, "Step Show", "Step Show - S01E01.mkv")
+			file := filepath.Join(dir, "Step Show", "Step Show - S01E01.mkv")
+			tmdb := &fakeTMDB{seasonResult: SeasonResult{PosterPath: "/p.jpg", Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2022-03-01"}}}}
+			runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterPath: "p.jpg", posterErr: tc.posterErr}
+			retry := emptyRetryList(t)
+			retry.Add(file)
+			p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cacheWith(t, map[string]string{"Step Show": "999"}),
+				map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, retry, emptyRatingCache(t), nil, nil, nil)
+
+			captureStdout(t, func() { p.Run() })
+
+			if got := retry.Has(file); got != tc.wantRetry {
+				t.Errorf("on retry list = %v; want %v", got, tc.wantRetry)
+			}
+		})
+	}
+}
+
+// A manual extra whose timestamps failed after tagging is a failure, named on
+// its result line, and stays on the retry list.
+func TestRun_ExtraFailedStepsCountAsFailures(t *testing.T) {
+	dir := showLibrary(t, "My Show", "My Show - S02 - Drama CD.mkv")
+	file := filepath.Join(dir, "My Show", "My Show - S02 - Drama CD.mkv")
+	manual := map[string]ManualEntry{"My Show": {Extras: map[string]ExtraEntry{
+		"My Show - S02 - Drama CD": {Date: "2022-04-01", Season: 2},
+	}}}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
+	retry := emptyRetryList(t)
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cacheWith(t, map[string]string{"My Show": "999"}),
+		manual, &fakeTMDB{}, runner, &scriptedPrompter{},
+		failingTimer{ctimeErr: errors.New("denied")}, retry, emptyRatingCache(t), nil, nil, nil)
+
+	var stats Stats
+	out := captureStdout(t, func() { stats = p.Run() })
+
+	if stats.Success != 0 || stats.Failed != 1 {
+		t.Errorf("stats = %+v; want the extra counted as failed", stats)
+	}
+	if want := "[X] Processed (extra): My Show - S02 - Drama CD.mkv (failed: ctime)\n"; !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if !retry.Has(file) {
+		t.Error("partly failed extra dropped from the retry list")
+	}
+}
+
+// The library re-scan after tagging extras counts as a Plex error when it fails.
+func TestRun_PostRunLibraryRefreshFailureCounted(t *testing.T) {
+	dir := showLibrary(t, "My Show", "My Show - S02 - Drama CD.mkv")
+	manual := map[string]ManualEntry{"My Show": {Extras: map[string]ExtraEntry{
+		"My Show - S02 - Drama CD": {Date: "2022-04-01", Season: 2},
+	}}}
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
+	plex := &fakePlexClient{showRatingKey: "k", refreshLibsErr: errors.New("HTTP 500")}
+	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cacheWith(t, map[string]string{"My Show": "999"}),
+		manual, &fakeTMDB{}, runner, &scriptedPrompter{}, &captureFileTimer{}, emptyRetryList(t), emptyRatingCache(t), nil, plex, nil)
+
+	var stats Stats
+	out := captureStdout(t, func() { stats = p.Run() })
+
+	if stats.Success != 1 || stats.PlexErrors != 1 {
+		t.Errorf("stats = %+v; want the extra a success and 1 Plex error", stats)
+	}
+	if !strings.Contains(out, "Plex library refresh failed: HTTP 500") {
+		t.Errorf("output lacks the refresh failure:\n%s", out)
 	}
 }

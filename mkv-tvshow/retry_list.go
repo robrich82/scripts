@@ -5,9 +5,9 @@ import (
 	"os"
 )
 
-// RetryList is a persistent set of file paths that used a placeholder air date
-// and should be re-processed on every run regardless of mod-time cutoff until
-// a real date is found on TMDB.
+// RetryList is a persistent set of file paths to re-process on every run
+// regardless of mod-time cutoff: ones without a real air date yet, whose TMDB
+// lookup failed, or whose poster or timestamps failed after tagging.
 type RetryList struct {
 	path string
 	data map[string]bool

@@ -48,6 +48,8 @@ type fakePlexClient struct {
 	setLangErr        error
 	setEpMetaCalls    []setEpMetaCall
 	setEpMetaErr      error
+	refreshLibsErr    error
+	refreshMetaErr    error
 }
 
 func (f *fakePlexClient) FindShowByTMDBID(_ string) (string, error) {
@@ -98,8 +100,8 @@ func (f *fakePlexClient) SetEpisodeMetadata(ratingKey, title, originallyAvailabl
 	return f.setEpMetaErr
 }
 
-func (f *fakePlexClient) RefreshLibraries() error        { return nil }
-func (f *fakePlexClient) RefreshMetadata(_ string) error { return nil }
+func (f *fakePlexClient) RefreshLibraries() error        { return f.refreshLibsErr }
+func (f *fakePlexClient) RefreshMetadata(_ string) error { return f.refreshMetaErr }
 
 // --- httpPlexClient unit tests ---
 

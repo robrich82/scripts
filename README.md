@@ -580,9 +580,11 @@ Done. Success: 12  Failed: 0  Skipped (old): 5  Plex errors: 0
 ```
 
 A file whose tags were written but whose poster download or timestamp change
-then failed counts as failed, named on its result line as `(failed: …)`. So
-does one in `--ratings-only` or `--deband-only` whose timestamps couldn't be
-restored. `Plex errors` counts failed show-level Plex lookups and pushes.
+then failed counts as failed, named on its result line as `(failed: …)`, and
+later runs retry it until every step succeeds. A file in `--ratings-only` or
+`--deband-only` whose timestamps couldn't be restored also counts as failed.
+`Plex errors` counts failed show-level Plex lookups and pushes, and a failed
+library re-scan after extras were tagged.
 
 ### Bulk rating override (`--set-rating`)
 
