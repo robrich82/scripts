@@ -201,7 +201,6 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		dirFiles[dir] = append(dirFiles[dir], path)
 	}
 	for _, dir := range dirs {
-
 		title, year := dirTitleYear(dir)
 		if title == "" {
 			continue
@@ -216,17 +215,17 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 			if id := sibling.lookupTV(dir, libraryRoot); id != "" {
 				info, found, err = tmdb.GetTVOriginByID(id)
 			} else if !skipAll {
-				id := resolveTMDBID(dir, title, year, libType, libraryRoot, dirFiles[dir], tmdb, prompter, &autoAll, &skipAll)
-				if id != "" {
+				if id := resolveTMDBID(dir, title, year, libType, tmdb, prompter, &autoAll, &skipAll); id != "" {
+					sibling.saveTV(dir, filepath.Join(libraryRoot, dir), id)
 					info, found, err = tmdb.GetTVOriginByID(id)
 				}
 			}
 		case "movie":
-			if id := sibling.lookupMovie(title, year); id != "" {
+			if id := sibling.lookupMovie(title, year, dirFiles[dir]); id != "" {
 				info, found, err = tmdb.GetMovieOriginByID(id)
 			} else if !skipAll {
-				id := resolveTMDBID(dir, title, year, libType, libraryRoot, dirFiles[dir], tmdb, prompter, &autoAll, &skipAll)
-				if id != "" {
+				if id := resolveTMDBID(dir, title, year, libType, tmdb, prompter, &autoAll, &skipAll); id != "" {
+					sibling.saveMovie(dir, title, year, id, dirFiles[dir])
 					info, found, err = tmdb.GetMovieOriginByID(id)
 				}
 			}
@@ -245,10 +244,9 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 }
 
 // resolveTMDBID searches TMDB for dir and prompts the user to confirm the top
-// result or enter a manual ID. On confirmation the ID is saved to the sibling
-// cache, with files (mkv-movie maps each file to its ID), and returned.
+// result or enter a manual ID, and returns the confirmed ID.
 // Returns "" when the user skips or no prompter is available.
-func resolveTMDBID(dir, title, year, libType, libraryRoot string, files []string, tmdb TMDBOriginClient, prompter Prompter, autoAll, skipAll *bool) string {
+func resolveTMDBID(dir, title, year, libType string, tmdb TMDBOriginClient, prompter Prompter, autoAll, skipAll *bool) string {
 	if prompter == nil || *skipAll {
 		return ""
 	}
@@ -307,23 +305,6 @@ func resolveTMDBID(dir, title, year, libType, libraryRoot string, files []string
 		default:
 			// Treat any other input as a manual TMDB ID.
 			confirmedID = ans
-		}
-	}
-
-	if confirmedID == "" {
-		return ""
-	}
-
-	// Persist the confirmed ID to the sibling cache.
-	switch libType {
-	case "tv":
-		absPath := filepath.Join(libraryRoot, dir)
-		if err := saveTVShowCacheEntry(absPath, confirmedID); err != nil {
-			fmt.Printf("[TMDB]   %s: could not save to sibling cache: %v\n", dir, err)
-		}
-	case "movie":
-		if err := saveMovieTMDBIDEntry(title, year, confirmedID, files); err != nil {
-			fmt.Printf("[TMDB]   %s: could not save to sibling cache: %v\n", dir, err)
 		}
 	}
 
