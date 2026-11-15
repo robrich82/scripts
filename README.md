@@ -567,6 +567,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--all` | false | Process all files regardless of modification date |
 | `--prompt-each` | false | Prompt before processing each cached show (default: process all) |
 | `--ratings-only` | false | Only update NZ content ratings; skip all other metadata |
+| `--deband-only` | false | Update only the `DEBAND` tag for files configured in `manual_data.json`; preserves all other tags and timestamps |
 | `--overwrite-ratings` | false | Re-fetch all ratings (prompting once per show), ignoring cached values; a cached rating is kept when no source has one |
 | `--overwrite-language` | false | Re-apply Plex audio language preference even if already set for a show |
 | `--language-only` | false | Apply Plex audio language preference for every cached show folder without scanning files, printing a line per show and a `Done.` summary. Needs `PLEX_URL`/`PLEX_TOKEN`. Skips shows already set (unless `--overwrite-language`), shows with no known language and shows not in Plex. A show cached under several folders takes each language key from the first folder, by name, whose manual_data.json entry sets it |

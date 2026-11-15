@@ -45,7 +45,7 @@ type PlexClient interface {
 	// or ErrPlexNotFound if no match exists.
 	FindShowByTMDBID(tmdbID string) (string, error)
 	// FindShowByTitle searches all "show" library sections for an item whose
-	// title (normalised) matches title. Used as a fallback when the show uses a
+	// title matches title (see titleMatcher). Used as a fallback when the show uses a
 	// non-TMDB agent (e.g. HAMA for anime). Returns ErrPlexNotFound if absent.
 	FindShowByTitle(title string) (string, error)
 	// FindShowByFilePath searches all "show" library sections for the show that
@@ -377,12 +377,30 @@ func (c *httpPlexClient) GetEpisodes(seasonRatingKey string) ([]PlexEpisodeItem,
 // FindShowByTitle implements PlexClient. It finds the show whose normalised
 // title matches title, regardless of which metadata agent is in use. This is a
 // fallback for when FindShowByTMDBID fails because the show uses a non-TMDB
-// agent (e.g. HAMA for anime).
+// agent (e.g. HAMA for anime). A title with no ASCII letters or digits (e.g.
+// 進撃の巨人) normalises to "", like every other such title, so it must match
+// exactly, ignoring case.
 func (c *httpPlexClient) FindShowByTitle(title string) (string, error) {
-	normTitle := normalizeShowTitle(title)
-	return c.findShow(func(item plexShowItem) bool {
-		return normalizeShowTitle(item.Title) == normTitle
-	})
+	matches := titleMatcher(title)
+	if matches == nil {
+		return "", ErrPlexNotFound
+	}
+	return c.findShow(func(item plexShowItem) bool { return matches(item.Title) })
+}
+
+// titleMatcher reports whether a Plex title matches title: by normalised
+// title, or exactly but for case when title has no ASCII letters or digits.
+// The Plex title is then cleaned as the caller's folder-name query was, so
+// "【推しの子】" matches "推しの子". It is nil for a blank title, which matches
+// nothing.
+func titleMatcher(title string) func(string) bool {
+	if norm := normalizeShowTitle(title); norm != "" {
+		return func(t string) bool { return normalizeShowTitle(t) == norm }
+	}
+	if strings.TrimSpace(title) == "" {
+		return nil
+	}
+	return func(t string) bool { return strings.EqualFold(cleanSearchQuery(t), title) }
 }
 
 // FindShowByFilePath implements PlexClient. It queries each show library
@@ -473,14 +491,15 @@ func (c *httpPlexClient) GetContentRating(ratingKey string) (NZRating, error) {
 
 // RefreshLibraries implements PlexClient. It scans all "show" library
 // sections, triggering a metadata refresh so Plex picks up any new or changed
-// files without requiring a manual library scan.
+// files without requiring a manual library scan. It sends POST, the method
+// the API defines; GET works today but is undocumented.
 func (c *httpPlexClient) RefreshLibraries() error {
 	sections, err := c.showSectionKeys()
 	if err != nil {
 		return err
 	}
 	for _, section := range sections {
-		refreshResp, err := c.plexGet("/library/sections/" + section + "/refresh")
+		refreshResp, err := c.plexRequest(http.MethodPost, "/library/sections/"+section+"/refresh")
 		if err != nil {
 			return fmt.Errorf("plex: refresh section %s: %w", section, err)
 		}
