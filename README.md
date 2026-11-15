@@ -292,17 +292,19 @@ environment, mkv-audit looks up each show/movie on TMDB to determine its
 It reuses the TMDB IDs that mkv-tvshow or mkv-movie has cached for the library's type (a
 movie by the ID mkv-movie recorded for its files, or by title and year), and otherwise
 searches TMDB and asks you to confirm the match; a typed ID must be a whole number. A
-folder whose files mkv-movie maps to different movies (a collection) takes, without
-asking, the title-and-year ID if it is one of them, and otherwise the ID most of them map
-to (the lowest on a tie). Files directly in the folder count ahead of files in its
-subfolders, such as extras, and a mapping for a file that no longer exists is ignored. A
-folder whose files are all in subfolders and map to different movies (it may group
-movies, as `A-M/<movie>` does) is searched and asked about instead. When TMDB has no
-movie with an ID, the next one is tried. Confirmed IDs that TMDB finds are saved back to
-that cache, with a movie's `.mkv` files mapped to its ID; a movie found by title and year
-only has its file mapped too, when its folder holds a single `.mkv`. A cache that can't
-be loaded is left untouched, with a warning, and the IDs confirmed that run are not
-saved to it.
+movie folder uses the IDs mkv-movie maps the files directly in it to; files in its
+subfolders, such as extras, are used only when no file directly in the folder is
+mapped, and only when they all map to one movie. A mapping for a file that no longer
+exists is ignored. When the files map to different movies (a collection), it takes,
+without asking, the title-and-year ID if it is one of them, and otherwise the ID most of
+them map to (the lowest on a tie). When TMDB has no movie with an ID, the next one is
+tried. Confirmed IDs that TMDB finds are saved back to that cache, with a movie's `.mkv`
+files mapped to its ID; a movie found by title and year only has its file mapped too,
+when its folder holds a single `.mkv`. A folder that may hold several movies (its
+subfolder files map to different movies, or it holds more than one `.mkv`, all in
+subfolders, as `A-M/<movie>` does) is searched and asked about, and the answer is used
+for that run only, not saved. A cache that can't be loaded is left untouched, with a
+warning, and the IDs confirmed that run are not saved to it.
 
 **`und_lang`** (optional, on library or override) — last-resort fallback language for
 tracks tagged `und` (undefined). Accepts an ISO 639-2/B code (`"eng"`) or IETF tag

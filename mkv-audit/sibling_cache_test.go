@@ -38,7 +38,7 @@ type titleTMDB struct {
 	ids      map[string]string // title → ID
 	langs    map[string]string // ID → original language
 	onSearch func()            // runs on each search, when set
-	onOrigin func()            // runs on each ID lookup, when set
+	onOrigin func(id string)   // runs on each ID lookup, when set
 }
 
 func (f titleTMDB) GetTVOriginByID(id string) (OriginInfo, bool, error) {
@@ -47,7 +47,7 @@ func (f titleTMDB) GetTVOriginByID(id string) (OriginInfo, bool, error) {
 
 func (f titleTMDB) GetMovieOriginByID(id string) (OriginInfo, bool, error) {
 	if f.onOrigin != nil {
-		f.onOrigin()
+		f.onOrigin(id)
 	}
 	lang, ok := f.langs[id]
 	if ok && lang == "" {
@@ -1208,9 +1208,10 @@ func TestFetchOrigins_TitleKeyNotMappedToSeveralFiles(t *testing.T) {
 	}
 }
 
-// Files directly in the root count ahead of files in its subfolders: an extra
-// mkv-movie mapped to another movie doesn't win a tie with the main file. The
-// title key's ID wins among the root's IDs.
+// Subfolder files don't count when a file directly in the root is mapped: an
+// extra mkv-movie mapped to another movie doesn't win a tie with the main
+// file, even when the title key names the extra's ID. The title key's ID wins
+// among the root's own IDs.
 func TestFetchOrigins_RootFilesBeatExtras(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -1227,6 +1228,9 @@ func TestFetchOrigins_RootFilesBeatExtras(t *testing.T) {
 			return map[string]map[string]string{"tmdb_ids": {"Amelie:2001": "194"},
 				"files": {main: "5", filepath.Join(filepath.Dir(main), "b.mkv"): "194"}}
 		}, "194"},
+		{"title key only through an extra", func(main, extra string) map[string]map[string]string {
+			return map[string]map[string]string{"tmdb_ids": {"Amelie:2001": "194"}, "files": {main: "5", extra: "194"}}
+		}, "5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv", "b.mkv")
@@ -1308,7 +1312,7 @@ func TestFetchOrigins_MissingIDFallsBack(t *testing.T) {
 					t.Errorf("origins = %v; want fr from ID 194", origins)
 				}
 			})
-			if want := "TMDB has no movie with id 5, trying id 194"; !strings.Contains(out, want) {
+			if want := "no original language from TMDB for id 5, trying id 194"; !strings.Contains(out, want) {
 				t.Errorf("output lacks %q:\n%s", want, out)
 			}
 			assertCacheUnchanged(t, before)
@@ -1335,20 +1339,224 @@ func TestFetchOrigins_EmptyMappingNotRewritten(t *testing.T) {
 }
 
 // A title-key movie whose file mapping can't be saved isn't called lost: its
-// title key is still in the cache, so the next run asks nothing.
-func TestFetchOrigins_BackfillSaveFailureNotCalledLost(t *testing.T) {
+// title key is still in the cache, so the next run asks nothing. A cache
+// that turned corrupt can't be loaded next run either, so then it is lost.
+func TestFetchOrigins_BackfillSaveFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		breakIt  func(t *testing.T, path string)
+		wantLost bool
+	}{
+		{"cache unreadable", func(t *testing.T, path string) {
+			// A directory where the cache was: reading it fails, but not as corrupt.
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(path, 0755); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"cache corrupt", func(t *testing.T, path string) { writeSibling(t, path, `{"tmdb_ids":`) }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+			writeSibling(t, movieRatingCachePath(), `{"tmdb_ids":{"Amelie:2001":"194"}}`)
+			tmdb := titleTMDB{langs: map[string]string{"194": "fr"},
+				onOrigin: func(string) { tc.breakIt(t, movieRatingCachePath()) }}
+			old := beforeFinalSiblingSave
+			beforeFinalSiblingSave = func() {}
+			t.Cleanup(func() { beforeFinalSiblingSave = old })
+
+			out := captureStdout(t, func() { fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}) })
+
+			lost := strings.Contains(out, "lost, and the next run asks for them again: Amelie (2001) (id 194)")
+			unmapped := strings.Contains(out, "files aren't mapped to their IDs yet; the next run maps them, unless mkv-movie --clean drops the IDs first: Amelie (2001) (id 194)")
+			if lost != tc.wantLost || unmapped == tc.wantLost {
+				t.Errorf("lost = %v, unmapped = %v; want lost = %v:\n%s", lost, unmapped, tc.wantLost, out)
+			}
+		})
+	}
+}
+
+// A root holding several movies that is asked about uses the answer for this
+// run only: its title key isn't saved, nor are other movies' files mapped to
+// it. An unprocessed movie with its extras is saved as before.
+func TestFetchOrigins_AnswerForSeveralMoviesNotSaved(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		layout    func(t *testing.T, root string) []string
+		cache     func(paths []string) string
+		wantSaved bool
+	}{
+		{"mapped files disagree", func(t *testing.T, root string) []string {
+			p := addEntry(t, root, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")
+			p = append(p, addEntry(t, root, filepath.Join("A-M", "Brave (2012)"), "b.mkv")...)
+			return append(p, addEntry(t, root, filepath.Join("A-M", "Coco (2017)"), "c.mkv")...)
+		}, func(p []string) string {
+			return `{"files":{` + strings.Join([]string{jsonPair(p[0], "194"), jsonPair(p[2], "9")}, ",") + `}}`
+		}, false},
+		{"loose file beside mapped movie folders", func(t *testing.T, root string) []string {
+			p := addEntry(t, root, "A-M", "loose.mkv")
+			p = append(p, addEntry(t, root, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")...)
+			return append(p, addEntry(t, root, filepath.Join("A-M", "Coco (2017)"), "c.mkv")...)
+		}, func(p []string) string {
+			return `{"files":{` + strings.Join([]string{jsonPair(p[1], "194"), jsonPair(p[2], "9")}, ",") + `}}`
+		}, false},
+		{"unprocessed movie folders", func(t *testing.T, root string) []string {
+			p := addEntry(t, root, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")
+			return append(p, addEntry(t, root, filepath.Join("A-M", "Brave (2012)"), "b.mkv")...)
+		}, func([]string) string { return `{"movies":{"9":"M"}}` }, false},
+		{"movie with extras", func(t *testing.T, root string) []string {
+			p := addEntry(t, root, "A-M", "movie.mkv")
+			return append(p, addEntry(t, root, filepath.Join("A-M", "Extras"), "trailer.mkv")...)
+		}, func([]string) string { return `{"movies":{"9":"M"}}` }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setConfigDir(t, t.TempDir())
+			root := t.TempDir()
+			paths := tc.layout(t, root)
+			writeSibling(t, movieRatingCachePath(), tc.cache(paths))
+			before, _ := os.ReadFile(movieRatingCachePath())
+
+			out := captureStdout(t, func() {
+				if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &scriptPrompter{answers: []string{"y"}}); origins["A-M"].OrigLang != "fr" {
+					t.Errorf("origins = %v; want fr from the confirmed answer", origins)
+				}
+			})
+
+			if !tc.wantSaved {
+				assertCacheUnchanged(t, before)
+				if !strings.Contains(out, "used for this run only") {
+					t.Errorf("output doesn't say the answer isn't saved:\n%s", out)
+				}
+				return
+			}
+			ids, files := readMovieSections(t)
+			if ids["A-M:"] != "42" || files[paths[0]] != "42" || files[paths[1]] != "42" {
+				t.Errorf("tmdb_ids = %v, files = %v; want the answer saved for the movie and its extra", ids, files)
+			}
+		})
+	}
+}
+
+// jsonPair returns "key":"value" as JSON.
+func jsonPair(k, v string) string {
+	kb, _ := json.Marshal(k)
+	vb, _ := json.Marshal(v)
+	return string(kb) + ":" + string(vb)
+}
+
+// A title key stored typed ("0194") is left as it is, and the file is mapped
+// to that same value, so mkv-movie's rating under it stays reachable.
+func TestFetchOrigins_BackfillKeepsTypedID(t *testing.T) {
 	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
-	writeSibling(t, movieRatingCachePath(), `{"tmdb_ids":{"Amelie:2001":"194"}}`)
-	tmdb := titleTMDB{langs: map[string]string{"194": "fr"},
-		onOrigin: func() { writeSibling(t, movieRatingCachePath(), `{"tmdb_ids":`) }}
-	old := beforeFinalSiblingSave
-	beforeFinalSiblingSave = func() {}
-	t.Cleanup(func() { beforeFinalSiblingSave = old })
+	writeSibling(t, movieRatingCachePath(), `{"movies":{"0194":"M"},"tmdb_ids":{"Amelie:2001":"0194"}}`)
+	var looked []string
+	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}, onOrigin: func(id string) { looked = append(looked, id) }}
 
-	out := captureStdout(t, func() { fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}) })
+	captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("origins = %v; want fr", origins)
+		}
+	})
 
-	if strings.Contains(out, "asks for them again") || !strings.Contains(out, "files aren't mapped to their IDs yet") ||
-		!strings.Contains(out, "Amelie (2001) (id 194)") {
-		t.Errorf("want the movie named as unmapped, not lost:\n%s", out)
+	if !slices.Equal(looked, []string{"194"}) {
+		t.Errorf("looked up %q; want the normalized 194", looked)
+	}
+	ids, files := readMovieSections(t)
+	if ids["Amelie:2001"] != "0194" || len(files) != 1 || files[paths[0]] != "0194" {
+		t.Errorf("tmdb_ids = %v, files = %v; want the key kept as 0194 and the file → 0194", ids, files)
+	}
+}
+
+// A TMDB error other than not-found isn't a missing ID: nothing falls back,
+// the error is named, and the cache is left alone.
+func TestFetchOrigins_TMDBErrorDoesNotFallBack(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv", "b.mkv", "c.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {paths[0]: "5", paths[1]: "5", paths[2]: "194"}}))
+	before, _ := os.ReadFile(movieRatingCachePath())
+	var looked []string
+	tmdb := titleTMDB{langs: map[string]string{"5": "", "194": "fr"}, onOrigin: func(id string) { looked = append(looked, id) }}
+
+	out := captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); len(origins) != 0 {
+			t.Errorf("origins = %v; want none after the error", origins)
+		}
+	})
+
+	if !slices.Equal(looked, []string{"5"}) {
+		t.Errorf("looked up %q; want only 5", looked)
+	}
+	if !strings.Contains(out, "TMDB is down") {
+		t.Errorf("output doesn't name the error:\n%s", out)
+	}
+	assertCacheUnchanged(t, before)
+}
+
+// When TMDB has none of the IDs, the root has no match and nothing is saved.
+func TestFetchOrigins_AllIDsMissing(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv", "b.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{
+		"tmdb_ids": {"Amelie:2001": "7"}, "files": {paths[0]: "5", paths[1]: "6"},
+	}))
+	before, _ := os.ReadFile(movieRatingCachePath())
+
+	out := captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", titleTMDB{}, noPrompter{t}); len(origins) != 0 {
+			t.Errorf("origins = %v; want none", origins)
+		}
+	})
+
+	if !strings.Contains(out, "Amelie (2001): no match found") {
+		t.Errorf("output lacks no match found:\n%s", out)
+	}
+	assertCacheUnchanged(t, before)
+}
+
+// Files only in subfolders that agree on one ID give that ID without asking.
+func TestFetchOrigins_SingleNestedIDUsed(t *testing.T) {
+	root, _ := siblingLibrary(t, "Amelie (2001)")
+	paths := addEntry(t, root, filepath.Join("Amelie (2001)", "Disc 1"), "a.mkv", "b.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {paths[0]: "194", paths[1]: "194"}}))
+	before, _ := os.ReadFile(movieRatingCachePath())
+	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
+
+	captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("origins = %v; want fr from the subfolder files' ID", origins)
+		}
+	})
+	assertCacheUnchanged(t, before)
+}
+
+// A mapping on a drive that isn't reachable (offline) still counts.
+func TestFetchOrigins_OfflineDriveMappingCounts(t *testing.T) {
+	drive := unusedDrive(t)
+	setConfigDir(t, t.TempDir())
+	root := drive + `\Movies`
+	path := filepath.Join(root, "Amelie (2001)", "a.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {path: "194"}}))
+	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
+
+	captureStdout(t, func() {
+		if origins := fetchOrigins([]string{path}, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("origins = %v; want fr from the offline file's ID", origins)
+		}
+	})
+}
+
+func TestPathGone(t *testing.T) {
+	dir := t.TempDir()
+	makeMKVFile(t, dir, "here.mkv")
+	if pathGone(filepath.Join(dir, "here.mkv")) {
+		t.Error("an existing file is gone")
+	}
+	if !pathGone(filepath.Join(dir, "missing.mkv")) {
+		t.Error("a missing file on a reachable volume isn't gone")
+	}
+	if runtime.GOOS == "windows" {
+		if d := unusedDrive(t); pathGone(d + `\Movies\a.mkv`) {
+			t.Error("a file on an unreachable drive is gone")
+		}
 	}
 }

@@ -84,15 +84,35 @@ func (c *httpTMDBOriginClient) getTMDB(u string) (*http.Response, error) {
 	if resp.StatusCode/100 != 2 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
 		resp.Body.Close()
-		return nil, fmt.Errorf("TMDB request failed: status %s: %s", resp.Status, strings.TrimSpace(string(snippet)))
+		return nil, &tmdbStatusError{code: resp.StatusCode, status: resp.Status, body: strings.TrimSpace(string(snippet))}
 	}
 	return resp, nil
 }
 
+// tmdbStatusError is a non-2xx TMDB response.
+type tmdbStatusError struct {
+	code         int
+	status, body string
+}
+
+func (e *tmdbStatusError) Error() string {
+	return fmt.Sprintf("TMDB request failed: status %s: %s", e.status, e.body)
+}
+
+// isTMDBNotFound reports whether err is TMDB's 404 for an ID it doesn't have.
+func isTMDBNotFound(err error) bool {
+	var se *tmdbStatusError
+	return errors.As(err, &se) && se.code == http.StatusNotFound
+}
+
 // GetTVOriginByID fetches origin data from /tv/{id} using a known TMDB show ID.
+// An ID TMDB doesn't have (404) is not found rather than an error.
 func (c *httpTMDBOriginClient) GetTVOriginByID(id string) (OriginInfo, bool, error) {
 	detURL := fmt.Sprintf("%s/tv/%s?api_key=%s", tmdbOriginBase, id, url.QueryEscape(c.apiKey))
 	resp, err := c.getTMDB(detURL)
+	if isTMDBNotFound(err) {
+		return OriginInfo{}, false, nil
+	}
 	if err != nil {
 		return OriginInfo{}, false, err
 	}
@@ -115,10 +135,14 @@ func (c *httpTMDBOriginClient) GetTVOriginByID(id string) (OriginInfo, bool, err
 	return OriginInfo{OrigLang: det.OriginalLanguage, OriginCountry: country}, true, nil
 }
 
-// GetMovieOriginByID fetches origin data from /movie/{id} using a known TMDB movie ID.
+// GetMovieOriginByID fetches origin data from /movie/{id} using a known TMDB
+// movie ID. An ID TMDB doesn't have (404) is not found rather than an error.
 func (c *httpTMDBOriginClient) GetMovieOriginByID(id string) (OriginInfo, bool, error) {
 	detURL := fmt.Sprintf("%s/movie/%s?api_key=%s", tmdbOriginBase, id, url.QueryEscape(c.apiKey))
 	detResp, err := c.getTMDB(detURL)
+	if isTMDBNotFound(err) {
+		return OriginInfo{}, false, nil
+	}
 	if err != nil {
 		return OriginInfo{}, false, err
 	}

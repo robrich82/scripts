@@ -232,7 +232,7 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		var err error
 		for i, next := range ids {
 			if i > 0 {
-				fmt.Printf("[TMDB]   %s: TMDB has no %s with id %s, trying id %s\n", dir, libType, id, next)
+				fmt.Printf("[TMDB]   %s: no original language from TMDB for id %s, trying id %s\n", dir, id, next)
 			}
 			id = next
 			if info, found, err = getOrigin(id); err != nil || found {
@@ -251,13 +251,19 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		switch {
 		case !cached && libType == "tv":
 			sibling.rememberTV(dir, root, id)
+		// A root whose files mkv-movie maps to IDs that didn't settle it, or
+		// that holds movie folders, may be several movies: the answer is for
+		// this run only, not saved under its name or onto its files.
+		case !cached && (sibling.rootMapped(root) || groupsMovies(root)):
+			fmt.Printf("[TMDB]   %s: id %s used for this run only, not saved: the folder may hold several movies\n", dir, id)
 		case !cached:
 			sibling.rememberMovie(dir, title, year, id, dirFiles[dir], false)
 		// A title key alone (as older mkv-audit saved) is pruned by
-		// mkv-movie --clean, so map the root's file to it too. Only a sole
-		// .mkv: a collection's files are different movies.
+		// mkv-movie --clean, so map the root's file to it too, with the
+		// key's value as stored. Only a sole .mkv: a collection's files are
+		// different movies.
 		case titleOnly && slices.ContainsFunc(dirFiles[dir], isMKV) && soleMKV(root):
-			sibling.rememberMovie(dir, title, year, id, dirFiles[dir], true)
+			sibling.rememberMovie(dir, title, year, sibling.titleKeyID(title, year), dirFiles[dir], true)
 		}
 	}
 	return origins

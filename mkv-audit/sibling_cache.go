@@ -330,7 +330,9 @@ func (sc *siblingTMDBCaches) rememberTV(dir, absPath, id string) {
 // rememberMovie records a movie ID for a content root none of whose files
 // mkv-movie maps yet, for this run and in mkv-movie's cache: under its title
 // key, and for each of files, so mkv-movie --clean keeps the ID. backfill
-// marks an ID found by its title key, which only the files are new for.
+// marks an ID found by its title key, which only the files are new for; id is
+// then the key's value as stored, maybe typed ("0194"), so the key is left as
+// it is and mkv-movie's rating under it stays reachable from the files.
 func (sc *siblingTMDBCaches) rememberMovie(dir, title, year, id string, files []string, backfill bool) {
 	if sc.movieIDs == nil {
 		sc.movieIDs = map[string]string{}
@@ -369,16 +371,17 @@ func (sc *siblingTMDBCaches) lookupTV(folderName, libraryRoot string) string {
 
 // lookupMovie returns the TMDB movie IDs to try for the content root at root
 // (a folder, or the file itself in a flat library), best first, so one TMDB
-// no longer has falls back to the next. The IDs mkv-movie maps root's files
-// to come first; when they differ (a collection), the one most files directly
-// in root map to, since an extra in a subfolder may be mapped to another
-// movie. The "title:YEAR" key ("title:" when year is empty) goes ahead of
-// them when it is one of them, and otherwise after them. Files only in
-// subfolders that map to different movies are a grouping folder (A-M/<movie>)
-// as likely as a collection, so none of them is picked. titleOnly reports
-// that no file under root is mapped and the only ID is the title key's.
+// no longer has falls back to the next. The IDs mkv-movie maps the files
+// directly in root to come first, most files first: an extra in a subfolder
+// may be mapped to another movie, so subfolder files count only when no file
+// directly in root is mapped, and only when they agree on one ID. Files only
+// in subfolders that map to different movies are a grouping folder
+// (A-M/<movie>) as likely as a collection, so none of them is picked. The
+// "title:YEAR" key ("title:" when year is empty) goes first when it is one of
+// the IDs used, and otherwise last. titleOnly reports that no file under
+// root is mapped and the only ID is the title key's.
 func (sc *siblingTMDBCaches) lookupMovie(title, year, root string) (ids []string, titleOnly bool) {
-	titleID, _ := normalizeTMDBID(sc.movieIDs[title+":"+year])
+	titleID, _ := normalizeTMDBID(sc.titleKeyID(title, year))
 	direct, nested := sc.rootMovieIDs(root)
 	if len(direct) == 0 && len(nested) == 0 {
 		if titleID == "" {
@@ -386,19 +389,32 @@ func (sc *siblingTMDBCaches) lookupMovie(title, year, root string) (ids []string
 		}
 		return []string{titleID}, true
 	}
-	if titleID != "" && (direct[titleID] > 0 || nested[titleID] > 0) {
-		ids = append(ids, titleID)
-	}
+	var used map[string]int
 	switch {
 	case len(direct) > 0:
-		ids = append(ids, rankedIDs(direct)...)
+		used = direct
 	case len(nested) == 1:
-		ids = append(ids, rankedIDs(nested)...)
+		used = nested
 	}
+	if titleID != "" && used[titleID] > 0 {
+		ids = append(ids, titleID)
+	}
+	ids = append(ids, rankedIDs(used)...)
 	if titleID != "" {
 		ids = append(ids, titleID)
 	}
 	return uniqueIDs(ids), false
+}
+
+// titleKeyID returns the ID stored under the "title:YEAR" key, as stored.
+func (sc *siblingTMDBCaches) titleKeyID(title, year string) string {
+	return sc.movieIDs[title+":"+year]
+}
+
+// rootMapped reports whether mkv-movie maps any file under root to an ID.
+func (sc *siblingTMDBCaches) rootMapped(root string) bool {
+	direct, nested := sc.rootMovieIDs(root)
+	return len(direct) > 0 || len(nested) > 0
 }
 
 // rootMovieIDs counts the files under root that mkv-movie maps to each ID:
@@ -461,23 +477,38 @@ func uniqueIDs(ids []string) []string {
 	})
 }
 
-// soleMKV reports whether root (a folder, or the file itself in a flat
-// library) holds exactly one .mkv file, subfolders included. One that can't
-// be read in full doesn't.
-func soleMKV(root string) bool {
-	n := 0
+// countMKV counts the .mkv files under root (a folder, or the file itself in
+// a flat library): direct ones (root itself, or files directly in it) and all
+// of them, subfolders included. ok is false when root can't be read in full.
+func countMKV(root string) (direct, total int, ok bool) {
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if !d.IsDir() && isMKV(path) {
-			if n++; n > 1 {
-				return filepath.SkipAll
+			total++
+			if path == root || filepath.Dir(path) == root {
+				direct++
 			}
 		}
 		return nil
 	})
-	return err == nil && n == 1
+	return direct, total, err == nil
+}
+
+// soleMKV reports whether root holds exactly one .mkv file, subfolders
+// included. One that can't be read in full doesn't.
+func soleMKV(root string) bool {
+	_, total, ok := countMKV(root)
+	return ok && total == 1
+}
+
+// groupsMovies reports whether root looks like a folder of movie folders: its
+// .mkv files are all in subfolders, and there is more than one. One that
+// can't be read in full is taken to.
+func groupsMovies(root string) bool {
+	direct, total, ok := countMKV(root)
+	return !ok || direct == 0 && total > 1
 }
 
 // siblingSaver saves confirmed IDs to one sibling cache as they come. A
@@ -492,7 +523,8 @@ type siblingSaver[E any] struct {
 	save     func(path string, entries []E) error
 	describe func(E) string
 	// refound, when set, reports an entry whose ID is still in the cache
-	// unsaved, so the next run finds it again without asking.
+	// unsaved, so the next run finds it again without asking, as long as
+	// the cache can still be loaded.
 	refound func(E) bool
 }
 
@@ -555,7 +587,8 @@ func (s *siblingSaver[E]) finish() {
 	}
 	var lost, unmapped []string
 	for _, e := range s.pending {
-		if s.refound != nil && s.refound(e) {
+		// A corrupt cache can't be loaded next run either, so nothing is refound.
+		if s.refound != nil && s.refound(e) && !isCorrupt(err) {
 			unmapped = append(unmapped, s.describe(e))
 		} else {
 			lost = append(lost, s.describe(e))
