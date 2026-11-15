@@ -483,16 +483,29 @@ func TestRun_RetryListGivesUpUnderAllHasNoHint(t *testing.T) {
 	}
 }
 
-// Missing MKVToolNix fails every file alike, so it keeps the file on the list
-// without counting toward the cap.
+// Missing mkvpropedit fails every file alike, so it leaves the retry list as
+// it was: a file on it keeps its count, and one not on it isn't added.
 func TestRun_TagWriteFailureWithoutMKVToolNixNotCounted(t *testing.T) {
-	dir, file, retryPath := oldStepShow(t)
-	for range maxRetryAttempts + 1 {
+	t.Run("on the list", func(t *testing.T) {
+		dir, file, retryPath := oldStepShow(t)
+		r, _ := LoadRetryList(retryPath)
+		r.Fail(file)
+		r.Fail(file)
+		mustSave(t, r.Save())
+		for range maxRetryAttempts + 1 {
+			stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01", &fakeMKVRunner{avail: false, tagsPath: "t.xml"})
+		}
+		if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != 2 {
+			t.Errorf("on list = %v, attempts = %d; want true, 2", r.Has(file), r.Attempts(file))
+		}
+	})
+	t.Run("not on the list", func(t *testing.T) {
+		dir, file, retryPath := oldStepShow(t)
 		stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01", &fakeMKVRunner{avail: false, tagsPath: "t.xml"})
-	}
-	if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != 0 {
-		t.Errorf("on list = %v, attempts = %d; want true, 0", r.Has(file), r.Attempts(file))
-	}
+		if r, _ := LoadRetryList(retryPath); r.Has(file) {
+			t.Error("missing mkvpropedit added the file to the retry list")
+		}
+	})
 }
 
 // A file whose tags couldn't be written at all goes on the retry list.

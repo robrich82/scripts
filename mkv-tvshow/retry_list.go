@@ -13,8 +13,8 @@ const maxRetryAttempts = 5
 // RetryList is a persistent set of file paths to re-process on every run
 // regardless of mod-time cutoff: ones without a real air date yet, whose TMDB
 // lookup failed, or whose tag write, poster or timestamps failed. Each entry
-// counts the runs in a row that failed a step; waiting on an air date or a
-// TMDB lookup doesn't count.
+// counts the runs in a row that failed a step; waiting on an air date, a
+// failed TMDB lookup or missing mkvpropedit doesn't count.
 type RetryList struct {
 	path string
 	data map[string]int // path → failed runs in a row

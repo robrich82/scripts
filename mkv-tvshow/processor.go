@@ -1241,11 +1241,11 @@ func (p *Processor) trackRetry(filePath, file, stampDate string, failed []string
 }
 
 // trackTagFailure is trackRetry for a file whose tags couldn't be written.
-// Missing MKVToolNix fails every file alike, so like a failed TMDB lookup it
-// keeps the file on the list without counting the run.
+// Missing mkvpropedit fails every file alike, so the list is left as it was:
+// the run doesn't count, and a file not on it isn't added (under --all that
+// would put the whole library on it).
 func (p *Processor) trackTagFailure(filePath, file, stampDate string) {
 	if !p.mkv.Available() {
-		p.retryList.Add(filePath)
 		return
 	}
 	p.trackRetry(filePath, file, stampDate, []string{"tags"})
