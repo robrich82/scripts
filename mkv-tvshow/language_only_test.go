@@ -350,7 +350,7 @@ func TestRunLanguageOnly_FailedSave_RetriedAtEnd(t *testing.T) {
 		want     string
 	}{
 		{"recovers", true, "[i] Rating cache saved."},
-		{"fails again", false, "[!] The rating cache was never saved; this run's Plex keys and audio languages are lost"},
+		{"fails again", false, "rating_cache.json was never saved; this run's Plex keys and audio languages are lost"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "missing")
@@ -419,7 +419,7 @@ func TestRunLanguageOnly_FailedSave_NamesLastSaved(t *testing.T) {
 
 	out := captureOutput(t, func() { p.RunLanguageOnly() })
 
-	if !strings.Contains(out, "[!] The rating cache was last saved after Show A; later Plex keys and audio languages are lost") {
+	if !strings.Contains(out, "[!] The rating cache "+path+" was last saved after Show A; later Plex keys and audio languages are lost") {
 		t.Errorf("no warning naming Show A:\n%s", out)
 	}
 }

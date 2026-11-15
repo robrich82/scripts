@@ -21,7 +21,7 @@ func main() {
 	titleCheckMode := flag.Bool("title-check", false, "Check episode titles in filenames against TMDB and offer to rename.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	cleanFlag := flag.Bool("clean", false, "Remove stale cache entries for shows and files that no longer exist on disk, then exit.")
-	allIDsFlag := flag.Bool("all-ids", false, "With --clean, also remove ratings and ignores for every show ID not in show_cache.json, not only those of show folders this --clean removes.")
+	allIDsFlag := flag.Bool("all-ids", false, "With --clean, also remove ratings and ignores for every show ID not in show_cache.json, not only those of show folders this --clean removes. This includes the season override IDs of shows that still exist.")
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a show and reset its applied state (folder substring or TMDB ID), then exit.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every show in the current directory, overriding any cached value, then exit.")
 	flag.Parse()

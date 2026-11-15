@@ -103,7 +103,7 @@ func TestProcessorRun_RatingSaveFailureReportedOnce(t *testing.T) {
 	if n := strings.Count(out, "[!] Failed to save rating cache"); n != 1 {
 		t.Errorf("save failure printed %d times; want once:\n%s", n, out)
 	}
-	if !strings.Contains(out, "[!] The rating cache was never saved; this run's ratings and Plex state are lost") {
+	if !strings.Contains(out, "[!] The rating cache "+rc.path+" was never saved; this run's ratings and Plex state are lost") {
 		t.Errorf("no end-of-run warning:\n%s", out)
 	}
 	if stats.LostSaves != 1 {
@@ -131,7 +131,7 @@ func TestProcessorRun_ShowCacheSaveRetriedAtEnd(t *testing.T) {
 		want     string
 	}{
 		{"recovers", true, "[i] Show cache saved."},
-		{"fails again", false, "[!] The show cache was never saved; this run's show matches are lost"},
+		{"fails again", false, "show_cache.json was never saved; this run's show matches are lost"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := filepath.Join(t.TempDir(), "missing")
@@ -224,7 +224,7 @@ func TestTitleCheck_TitleCacheSaveFailure(t *testing.T) {
 
 	for _, want := range []string{
 		"[!] Failed to save title cache " + titles.path,
-		"[!] The title cache was never saved; this run's full titles are lost",
+		"[!] The title cache " + titles.path + " was never saved; this run's full titles are lost",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -278,7 +278,7 @@ func TestMissing_IgnoreListSaveFailure(t *testing.T) {
 
 	for _, want := range []string{
 		"[!] Failed to save ignore list " + ignores.path,
-		"[!] The ignore list was never saved; this run's ignore choices are lost",
+		"[!] The ignore list " + ignores.path + " was never saved; this run's ignore choices are lost",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -356,10 +356,20 @@ func cleanRemoved(out, file string) bool {
 }
 
 // A cache --clean can't save is reported with its path and a hint, left out of
-// the total, and makes --clean exit 1. show_cache.json is left unchanged, so
-// rerunning --clean once the cache can be saved finishes the job.
+// the total, and makes --clean exit 1. When it is one pruned by show ID,
+// show_cache.json is left unchanged, so rerunning --clean once the cache can
+// be saved finishes the job; the file-path caches don't need it held back.
 func TestMain_Clean_DependentCacheSaveFails(t *testing.T) {
-	for _, file := range []string{"title_cache.json", "rating_cache.json", "pending_dates.json", "missing_ignore.json"} {
+	for _, tc := range []struct {
+		file     string
+		holdBack bool // show_cache.json is left unchanged
+	}{
+		{"title_cache.json", false},
+		{"rating_cache.json", true},
+		{"pending_dates.json", false},
+		{"missing_ignore.json", true},
+	} {
+		file := tc.file
 		t.Run(file, func(t *testing.T) {
 			cfgHome := t.TempDir()
 			cfg := staleCaches(t, cfgHome)
@@ -370,19 +380,25 @@ func TestMain_Clean_DependentCacheSaveFails(t *testing.T) {
 			if err == nil {
 				t.Errorf("--clean succeeded:\n%s", out)
 			}
+			total := "Total: 4 stale entries removed." // the three other dependent caches and show_cache.json
+			if tc.holdBack {
+				total = "Total: 3 stale entries removed."
+			}
 			for _, want := range []string{
 				"Error saving " + filepath.Join(cfg, file) + ": ",
 				"Access was denied: the file is read-only",
 				"Nothing was removed from " + file + ".",
-				"show_cache.json was left unchanged",
-				"Total: 3 stale entries removed.", // the three other dependent caches
+				total,
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("output lacks %q:\n%s", want, out)
 				}
 			}
-			if cleanRemoved(out, file) || cleanRemoved(out, "show_cache.json") {
-				t.Errorf("an unsaved removal was reported:\n%s", out)
+			if got := strings.Contains(out, "show_cache.json was left unchanged"); got != tc.holdBack {
+				t.Errorf("show_cache.json left unchanged = %v; want %v:\n%s", got, tc.holdBack, out)
+			}
+			if cleanRemoved(out, file) || cleanRemoved(out, "show_cache.json") == tc.holdBack {
+				t.Errorf("removals reported wrongly:\n%s", out)
 			}
 			if strings.Count(out, filepath.Join(cfg, file)) != 1 {
 				t.Errorf("the cache path is repeated:\n%s", out)
@@ -393,8 +409,8 @@ func TestMain_Clean_DependentCacheSaveFails(t *testing.T) {
 				t.Fatal(err)
 			}
 			out, err = runMain(t, t.TempDir(), cfgHome, "--clean")
-			if err != nil || !cleanRemoved(out, file) || !cleanRemoved(out, "show_cache.json") {
-				t.Errorf("rerun = %v; want %s and show_cache.json cleaned:\n%s", err, file, out)
+			if err != nil || !cleanRemoved(out, file) || cleanRemoved(out, "show_cache.json") != tc.holdBack {
+				t.Errorf("rerun = %v; want %s cleaned, and show_cache.json if it was held back:\n%s", err, file, out)
 			}
 			ratings, _ := LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
 			ignores, _ := LoadMissingIgnoreList(filepath.Join(cfg, "missing_ignore.json"))
@@ -541,6 +557,27 @@ func TestMain_Clean_OnlyGoneShowsLoseRatings(t *testing.T) {
 				t.Errorf("show_cache.json has %d entries; want the 2 existing folders", n)
 			}
 		})
+	}
+}
+
+// With every show folder gone, --all-ids still removes those shows' ratings
+// and ignores: show_cache.json is judged empty before --clean empties it.
+func TestMain_Clean_AllFoldersGoneWithAllIDs(t *testing.T) {
+	cfgHome := t.TempDir()
+	cfg := staleCaches(t, cfgHome)
+
+	out, err := runMain(t, t.TempDir(), cfgHome, "--clean", "--all-ids")
+
+	if err != nil {
+		t.Fatalf("--clean --all-ids = %v:\n%s", err, out)
+	}
+	if strings.Contains(out, "--all-ids keeps the show IDs") {
+		t.Errorf("a cache emptied by --clean was treated as missing:\n%s", out)
+	}
+	ratings, _ := LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
+	ignores, _ := LoadMissingIgnoreList(filepath.Join(cfg, "missing_ignore.json"))
+	if _, ok := ratings.GetShowRating("200"); ok || ignores.IsShowIgnored("200") {
+		t.Errorf("gone show 200 kept: rating %v, ignored %v", ok, ignores.IsShowIgnored("200"))
 	}
 }
 

@@ -92,11 +92,11 @@ func (s *cacheSaver) finish() (lost bool) {
 	case err == nil:
 		fmt.Printf("[i] %s saved.\n", capitalize(s.name))
 	case s.lastSaved == "":
-		fmt.Fprintf(os.Stderr, "[!] The %s was never saved; this run's %s are lost: %v\n%s",
-			s.name, s.holds, withoutPaths(err), hintLine(err))
+		fmt.Fprintf(os.Stderr, "[!] The %s %s was never saved; this run's %s are lost: %v\n%s",
+			s.name, s.path, s.holds, withoutPaths(err), hintLine(err))
 	default:
-		fmt.Fprintf(os.Stderr, "[!] The %s was last saved after %s; later %s are lost: %v\n%s",
-			s.name, s.lastSaved, s.holds, withoutPaths(err), hintLine(err))
+		fmt.Fprintf(os.Stderr, "[!] The %s %s was last saved after %s; later %s are lost: %v\n%s",
+			s.name, s.path, s.lastSaved, s.holds, withoutPaths(err), hintLine(err))
 	}
 	s.saveErr = nil
 	return err != nil

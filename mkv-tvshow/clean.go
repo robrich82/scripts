@@ -19,6 +19,9 @@ func runClean(allIDs bool) {
 
 	total := 0
 	failed := false
+	// idsFailed is set when a cache pruned by show ID fails to save;
+	// show_cache.json is then left as it was, so a rerun finds the same shows.
+	idsFailed := false
 	// saved saves a cache whose stale entries were removed in memory, and
 	// reports whether the removal reached disk.
 	saved := func(file string, c interface{ Save() error }) bool {
@@ -37,6 +40,9 @@ func runClean(allIDs bool) {
 	if err != nil {
 		exitOnCacheLoadError(path("show_cache.json"), err)
 	}
+	// Judged before cleaning: a cache emptied because every folder is gone
+	// still names the shows whose ratings --all-ids removes.
+	hadShows := len(showCache.AllEntries()) > 0
 	removedIDs := showCache.CleanStaleFolders()
 	knownIDs := make(map[string]bool)
 	for _, id := range showCache.AllEntries() {
@@ -47,7 +53,7 @@ func runClean(allIDs bool) {
 	// removes none.
 	var stale func(showID string) bool
 	switch {
-	case allIDs && len(knownIDs) == 0:
+	case allIDs && !hadShows:
 		// Every show ID would look stale.
 		fmt.Println("show_cache.json is empty or missing, so --all-ids keeps the show IDs in rating_cache.json and missing_ignore.json.")
 	case allIDs:
@@ -87,9 +93,13 @@ func runClean(allIDs bool) {
 	if stale != nil {
 		nIDs = ratingCache.CleanStaleShowIDs(stale)
 	}
-	if n := nPaths + nIDs; n > 0 && saved("rating_cache.json", ratingCache) {
-		fmt.Printf("rating_cache.json:    removed %d stale entr%s (%d file paths, %d show IDs)\n", n, es(n), nPaths, nIDs)
-		total += n
+	if n := nPaths + nIDs; n > 0 {
+		if !saved("rating_cache.json", ratingCache) {
+			idsFailed = true
+		} else {
+			fmt.Printf("rating_cache.json:    removed %d stale entr%s (%d file paths, %d show IDs)\n", n, es(n), nPaths, nIDs)
+			total += n
+		}
 	}
 
 	// pending_dates.json: remove entries for files that no longer exist.
@@ -108,17 +118,22 @@ func runClean(allIDs bool) {
 		exitOnCacheLoadError(path("missing_ignore.json"), err)
 	}
 	if stale != nil {
-		if n := ignoreList.CleanStaleShowIDs(stale); n > 0 && saved("missing_ignore.json", ignoreList) {
-			fmt.Printf("missing_ignore.json:  removed %d stale entr%s\n", n, es(n))
-			total += n
+		if n := ignoreList.CleanStaleShowIDs(stale); n > 0 {
+			if !saved("missing_ignore.json", ignoreList) {
+				idsFailed = true
+			} else {
+				fmt.Printf("missing_ignore.json:  removed %d stale entr%s\n", n, es(n))
+				total += n
+			}
 		}
 	}
 
 	// show_cache.json goes last: while it still lists the gone folders, a
-	// rerun finds the same shows and redoes any removal that failed to save.
+	// rerun finds the same shows and redoes a show ID removal that failed to
+	// save. The file-path caches don't depend on it.
 	if n := len(removedIDs); n > 0 {
 		switch {
-		case failed:
+		case idsFailed:
 			fmt.Fprintf(os.Stderr, "show_cache.json was left unchanged, so running --clean again redoes the removals that failed.\n")
 		case saved("show_cache.json", showCache):
 			fmt.Printf("show_cache.json:      removed %d stale entr%s\n", n, es(n))
