@@ -289,6 +289,24 @@ environment, mkv-audit looks up each show/movie on TMDB to determine its
    gets `eng → en-CA`).
 2. `flag-original=1` is set on all tracks whose language matches the original language.
 
+It reuses the TMDB IDs that mkv-tvshow or mkv-movie has cached for the library's type (a
+movie by the ID mkv-movie recorded for its files, or by title and year), and otherwise
+searches TMDB and asks you to confirm the match; a typed ID must be a whole number. A
+movie folder uses the IDs mkv-movie maps the files directly in it to; files in its
+subfolders, such as extras, are used only when no file directly in the folder is
+mapped, and only when they all map to one movie. A mapping for a file that no longer
+exists is ignored. When the files map to different movies (a collection), it takes,
+without asking, the title-and-year ID if it is one of them, and otherwise the ID most of
+them map to (the lowest on a tie). When TMDB has no movie with an ID, the next one is
+tried. Confirmed IDs that TMDB finds are saved back to that cache, with a movie's `.mkv`
+files mapped to its ID; a movie found by title and year only has its file mapped too,
+when its folder holds a single `.mkv`. A folder that may hold several movies (its
+subfolder files map to different movies, or its name gives no year and it holds more
+than one `.mkv`, all in subfolders, as `A-M/<movie>` does) is, when no title-and-year ID
+is cached for it, searched and asked about, and the answer is used for that run only,
+not saved. A cache that can't be loaded is left untouched, with a
+warning, and the IDs confirmed that run are not saved to it.
+
 **`und_lang`** (optional, on library or override) — last-resort fallback language for
 tracks tagged `und` (undefined). Accepts an ISO 639-2/B code (`"eng"`) or IETF tag
 (`"en-US"`). Both `language` and `language-ietf` are updated. This is strictly a
@@ -352,7 +370,8 @@ The NZ rating is asked for once per movie and then cached. A rating found on
 TMDB or by the Classification Office is shown for you to confirm (blank) or
 override. With neither, you're prompted, with the rating Plex already has as the
 blank-input default (the movie is found in Plex by TMDB ID, then by title and
-release year).
+release year). The default is shown in brackets (`[M]`), and the chosen rating
+is echoed back (`→ R16`) before it is cached.
 
 ### Usage
 
@@ -491,6 +510,11 @@ same track that was skipped, a video keeps its extra text:
 and `01 - Old - Old-video (Second Version).mkv` → `01 - New - New-video (Second Version).mkv`.
 A renamed MKV's title tag is built from its new name, so text the rename drops
 (`(Second Version)` on a lone video, an ignored `[HD]`) is left out of the tag.
+Only `.mkv` videos are tagged; other formats are renamed only. The summary
+counts the MKVs whose tags were copied and timestamps synced (an MKV with no
+date header has no timestamps to sync; one already up to date isn't counted),
+and lists each one whose tag copy or timestamp sync failed, naming the step
+(`tags`, `date` when the header can't be read, `ctime`, `mtime`).
 
 ### Flags
 
@@ -542,6 +566,10 @@ Tags TV episode MKV files with metadata fetched from
 Episode files must contain a season/episode pattern in their name, e.g.
 `Show Name S01E03.mkv`.
 
+The NZ rating is asked for once per show and then cached. A source's rating, or
+else the one Plex already has, is the blank-input default, shown in brackets
+(`[M]`). The chosen rating is echoed back (`→ R16`) before it is cached.
+
 ### Usage
 
 Set your TMDB API key, then run from your TV library root:
@@ -578,8 +606,24 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 #### Output
 
 ```
-Done. Success: 12  Failed: 0  Skipped (old): 5
+Done. Success: 12  Failed: 0  Skipped (old): 5  Plex errors: 0
 ```
+
+A file whose tags couldn't be written counts as failed. So does one whose tags
+were written but whose poster download or timestamp change then failed, named
+on its result line as `(failed: …)`. Later runs retry either kind, even once it
+is older than the cutoff, until every step succeeds; after 5 runs in a row that
+fail, the file is dropped from the retry list with a message naming it, and
+`--all` retries it. A failed TMDB lookup doesn't count toward the 5, a run
+without `mkvpropedit` leaves the list as it was, and a file still waiting for
+TMDB to list an air date is never dropped. The list is `pending_dates.json` in the
+config folder. A file in `--ratings-only` or `--deband-only` whose timestamps
+couldn't be restored also counts as failed, but isn't retried.
+`Plex errors` counts failed Plex lookups of a show and its seasons and
+episodes (a show Plex doesn't have isn't an error), failed pushes of ratings,
+episode metadata and the audio-language preference (including the TMDB lookup
+of the show's original language), a failed show metadata refresh, and a failed
+library re-scan after extras were tagged.
 
 When a cache can't be saved, the run says what was lost, ends with `Cache saves failed: N` and exits 1. So do `--missing`, `--title-check` and `--language-only`.
 

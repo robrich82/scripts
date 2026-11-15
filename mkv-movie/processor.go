@@ -231,53 +231,26 @@ func (r *MovieRatingResolver) ResolveMovieRating(tmdbID, title, year string) NZR
 		plexDefault = r.plexRatingDefault(tmdbID, title, year)
 	}
 
-	var promptMsg string
-	blankDoes := "skip" // what a blank answer does, for the invalid-input re-prompt
+	var header, blankDoes string
+	def := suggested
 	switch {
 	case suggested != RatingNone:
 		was := ""
 		if haveCached {
 			was = fmt.Sprintf(" (cached: %s)", cached)
 		}
-		promptMsg = fmt.Sprintf(
-			"NZ rating for %q: %s%s — press enter to confirm, or enter a new rating (%s): ",
-			title, suggested, was, validRatings,
-		)
+		header = fmt.Sprintf("NZ rating for %q: %s%s", title, suggested, was)
 		blankDoes = "accept " + string(suggested)
 	case plexDefault != RatingNone:
-		promptMsg = fmt.Sprintf(
-			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
-			title, plexDefault, validRatings,
-		)
-		blankDoes = "use Plex's " + string(plexDefault)
+		header = fmt.Sprintf("No NZ rating found for %q. Plex currently has: %s", title, plexDefault)
+		def, blankDoes = plexDefault, "use Plex's "+string(plexDefault)
 	default:
-		promptMsg = fmt.Sprintf(
-			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, or classificationoffice.govt.nz\nLeave blank to skip: ",
-			title, validRatings,
-		)
+		header = fmt.Sprintf("No NZ rating found for %q.\nTip: check Netflix, or classificationoffice.govt.nz", title)
+		blankDoes = "skip"
 	}
-	var rating NZRating
-	for {
-		ans, _ := r.prompter(promptMsg)
-		ans = strings.TrimSpace(ans)
-		if ans == "" {
-			if suggested != RatingNone {
-				rating = suggested
-			} else {
-				rating = plexDefault
-			}
-			if rating != RatingNone {
-				r.cache.Set(tmdbID, rating)
-			}
-			break
-		}
-		parsed, ok := ParseNZRating(ans)
-		if ok {
-			rating = parsed
-			r.cache.Set(tmdbID, rating)
-			break
-		}
-		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to %s: ", ans, validRatings, blankDoes)
+	rating := askRating(r.prompter, header, def, blankDoes)
+	if rating != RatingNone {
+		r.cache.Set(tmdbID, rating)
 	}
 	r.sessionPrompted[tmdbID] = rating
 	return rating
@@ -905,16 +878,15 @@ var beforeFinalSave = func() { time.Sleep(time.Second) }
 
 // applyDebandOnlyFile updates only the DEBAND MKV tag for filePath, preserving
 // all other existing tags and restoring the original file timestamps afterward.
-func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer FileTimer) bool {
+// ok and failed are as for rewriteTags.
+func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer FileTimer) (failed []string, ok bool) {
 	if !tagger.Available() {
 		fmt.Println("  [!] mkvpropedit or mkvextract not found in PATH")
-		return false
+		return nil, false
 	}
-	// A failed timestamp restore is printed but still counts as updated (#164).
-	_, ok := rewriteTags(filePath, tagger, timer, func(xml string) (string, error) {
+	return rewriteTags(filePath, tagger, timer, func(xml string) (string, error) {
 		return updateDebandInXML(xml, deband)
 	})
-	return ok
 }
 
 // rewriteTags passes filePath's tags through update, writes the result back
@@ -986,12 +958,19 @@ func runDebandOnly(dir string, manualData map[string]MovieManualEntry, tagger MK
 			return nil
 		}
 		deband := *entry.Deband
-		if applyDebandOnlyFile(path, deband, tagger, timer) {
-			fmt.Printf("[✓] Deband updated: %s\n", d.Name())
-			stats.Updated++
-		} else {
+		failed, ok := applyDebandOnlyFile(path, deband, tagger, timer)
+		switch {
+		case !ok:
 			fmt.Printf("  [X] Deband update failed: %s\n", d.Name())
 			stats.Errors++
+		case len(failed) > 0:
+			// The tag is written, but the file now looks newly modified.
+			fmt.Printf("[ERR] Deband updated: %s", d.Name())
+			printFailed(failed)
+			stats.Errors++
+		default:
+			fmt.Printf("[✓] Deband updated: %s\n", d.Name())
+			stats.Updated++
 		}
 		return nil
 	})

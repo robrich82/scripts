@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -271,5 +272,34 @@ func TestParseMKVTagsXML_FirstValueWins(t *testing.T) {
 	lvl50, _ := parseMKVTagsXML(xmlPath)
 	if lvl50["TITLE"] != "First" {
 		t.Errorf("first value should win, got %q", lvl50["TITLE"])
+	}
+}
+
+func TestReadMKVHeaderDate_MissingMkvmerge_Errors(t *testing.T) {
+	dir := t.TempDir()
+	_, ok, err := readMKVHeaderDate(filepath.Join(dir, "no-mkvmerge.exe"), filepath.Join(dir, "a.mkv"))
+	if err == nil || ok {
+		t.Errorf("ok = %v, err = %v; want false and an error", ok, err)
+	}
+}
+
+// Runs the real mkvmerge when it is installed (CI doesn't have it).
+func TestReadMKVHeaderDate_RealMkvmerge(t *testing.T) {
+	mkvmerge, err := exec.LookPath("mkvmerge")
+	if err != nil {
+		t.Skip("mkvmerge not on PATH")
+	}
+	dir := t.TempDir()
+
+	if _, ok, err := readMKVHeaderDate(mkvmerge, filepath.Join(dir, "gone.mkv")); err == nil || ok {
+		t.Errorf("missing file: ok = %v, err = %v; want false and an error", ok, err)
+	}
+
+	notMKV := filepath.Join(dir, "text.mkv")
+	if err := os.WriteFile(notMKV, []byte("not a matroska file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := readMKVHeaderDate(mkvmerge, notMKV); err != nil || ok {
+		t.Errorf("unrecognised file: ok = %v, err = %v; want false and no error (no date header)", ok, err)
 	}
 }

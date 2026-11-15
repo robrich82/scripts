@@ -118,24 +118,25 @@ func readMKVHeaderTitle(mkvmergePath, mkvPath string) string {
 }
 
 // readMKVHeaderDate returns the date stored in the MKV container header.
-// date_utc from mkvmerge JSON is a Unix timestamp in seconds (UTC).
-// Returns zero time and false when absent or on error.
-func readMKVHeaderDate(mkvmergePath, mkvPath string) (time.Time, bool) {
+// Returns false when the header has no date, and an error when mkvmerge
+// can't read the file.
+func readMKVHeaderDate(mkvmergePath, mkvPath string) (time.Time, bool, error) {
 	var buf bytes.Buffer
 	cmd := exec.Command(mkvmergePath, "--identify", "--identification-format", "json", mkvPath)
 	cmd.Stdout = &buf
 	cmd.Stderr = io.Discard
-	if cmd.Run() != nil {
-		return time.Time{}, false
+	// Exit code 1 means warnings only.
+	if err := cmd.Run(); err != nil && (cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != 1) {
+		return time.Time{}, false, fmt.Errorf("mkvmerge --identify: %w", err)
 	}
 	var info mkvmergeIdentify
 	if err := json.Unmarshal(buf.Bytes(), &info); err != nil {
-		return time.Time{}, false
+		return time.Time{}, false, fmt.Errorf("mkvmerge --identify output: %w", err)
 	}
 	if info.Container.Properties.DateUTC == nil {
-		return time.Time{}, false
+		return time.Time{}, false, nil
 	}
-	return time.Unix(int64(*info.Container.Properties.DateUTC), 0).UTC(), true
+	return time.Unix(int64(*info.Container.Properties.DateUTC), 0).UTC(), true, nil
 }
 
 // extractMKACover finds the first image attachment in mkaPath and returns its
@@ -209,7 +210,7 @@ func readAudioTagsFromMKA(path, mkvextractPath, mkvmergePath string) (AudioTags,
 	}
 	// Fall back to the MKV container header date when DATE_RECORDED is absent.
 	if dateStr == "" {
-		if dt, ok := readMKVHeaderDate(mkvmergePath, path); ok {
+		if dt, ok, _ := readMKVHeaderDate(mkvmergePath, path); ok {
 			dateStr = dt.UTC().Format("2006-01-02")
 		}
 	}

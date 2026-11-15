@@ -279,9 +279,8 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 
 // applyFullTitle sets the MKV title metadata to fullTitle and caches the result.
 // The file's original timestamps are preserved so the normal processing mode's
-// cutoff filter is not affected.
-// Returns true when the title was already current (no work done) or when the
-// update succeeded. Silently succeeds when mkvpropedit is absent.
+// cutoff filter is not affected. Does nothing when the title is already
+// current or mkvpropedit is absent.
 func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 	if fullTitle == "" {
 		return
@@ -311,14 +310,13 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 	}
 
 	// Restore timestamps so normal mode's cutoff filter sees the original mtime.
-	if err := tc.timer.SetTimes(path, origStat.ModTime()); err != nil {
-		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-	}
-	if err := tc.timer.SetCreationTime(path, origStat.ModTime()); err != nil {
-		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-	}
+	failed := setFileTimes(tc.timer, path, origStat.ModTime())
 
 	tc.titleCache.Set(path, fullTitle)
+	if len(failed) > 0 {
+		fmt.Printf("  [X] MKV title set: %s (failed: %s)\n", fullTitle, strings.Join(failed, ", "))
+		return
+	}
 	fmt.Printf("  [✓] MKV title set: %s\n", fullTitle)
 }
 
