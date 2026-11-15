@@ -38,6 +38,7 @@ type titleTMDB struct {
 	ids      map[string]string // title → ID
 	langs    map[string]string // ID → original language
 	onSearch func()            // runs on each search, when set
+	onOrigin func()            // runs on each ID lookup, when set
 }
 
 func (f titleTMDB) GetTVOriginByID(id string) (OriginInfo, bool, error) {
@@ -45,6 +46,9 @@ func (f titleTMDB) GetTVOriginByID(id string) (OriginInfo, bool, error) {
 }
 
 func (f titleTMDB) GetMovieOriginByID(id string) (OriginInfo, bool, error) {
+	if f.onOrigin != nil {
+		f.onOrigin()
+	}
 	lang, ok := f.langs[id]
 	if ok && lang == "" {
 		return OriginInfo{}, false, errors.New("TMDB is down")
@@ -1005,6 +1009,13 @@ func TestFetchOrigins_CollectionUsesMostMappedID(t *testing.T) {
 		{"lowest as a number", func(p []string) map[string]map[string]string {
 			return map[string]map[string]string{"files": {p[0]: "1000", p[1]: "999"}}
 		}, "999"},
+		// mkv-movie keeps a typed ID as typed; one that isn't an ID is skipped.
+		{"typed with a leading zero", func(p []string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {p[0]: "0393", p[1]: "393", p[2]: "24"}}
+		}, "393"},
+		{"not an ID", func(p []string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {p[0]: "abc", p[1]: "abc", p[2]: "24"}}
+		}, "24"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, paths := siblingLibrary(t, "Kill Bill Collection", "Vol 1.mkv", "Vol 2.mkv", "Extra.mkv")
@@ -1032,10 +1043,10 @@ func TestFetchOrigins_CollectionUsesMostMappedID(t *testing.T) {
 }
 
 // A movie found by a title key alone (as older mkv-audit saved it) gets its
-// .mkv files mapped to the ID, so mkv-movie --clean keeps it; the next run
+// .mkv file mapped to the ID, so mkv-movie --clean keeps it; the next run
 // finds the mapping and leaves the cache alone.
 func TestFetchOrigins_TitleKeyHitMapsFiles(t *testing.T) {
-	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv", "b.mkv")
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv", "a.eng.mka")
 	writeSibling(t, movieRatingCachePath(), `{"tmdb_ids":{"Amelie:2001":"194"}}`)
 	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
 
@@ -1046,8 +1057,8 @@ func TestFetchOrigins_TitleKeyHitMapsFiles(t *testing.T) {
 	})
 
 	ids, files := readMovieSections(t)
-	if len(ids) != 1 || ids["Amelie:2001"] != "194" || len(files) != 2 || files[paths[0]] != "194" || files[paths[1]] != "194" {
-		t.Errorf("tmdb_ids = %v, files = %v; want the title key kept and both files → 194", ids, files)
+	if len(ids) != 1 || ids["Amelie:2001"] != "194" || len(files) != 1 || files[paths[0]] != "194" {
+		t.Errorf("tmdb_ids = %v, files = %v; want the title key kept and the .mkv → 194", ids, files)
 	}
 	before, _ := os.ReadFile(movieRatingCachePath())
 	captureStdout(t, func() { fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}) })
@@ -1115,6 +1126,8 @@ func TestFetchOrigins_MovieFileMappingUsed(t *testing.T) {
 				path = filepath.Join(root, "Amelie (2001).mkv")
 			} else {
 				path = addEntry(t, root, "Amelie (2001)", "a.mkv")[0]
+				addEntry(t, root, filepath.Join("Amelie (2001)", "old"), "Amelie.mkv")
+				addEntry(t, root, "Amelie (2001) extras", "x.mkv")
 			}
 			writeSibling(t, movieRatingCachePath(), mustJSON(t, tc.cache(root, path)))
 			before, _ := os.ReadFile(movieRatingCachePath())
@@ -1154,4 +1167,188 @@ func TestFetchOrigins_MappedFileMatchesAnySpelling(t *testing.T) {
 			t.Errorf("origins = %v; want fr from the mapped file", origins)
 		}
 	})
+}
+
+// assertCacheUnchanged fails if mkv-movie's cache no longer holds before.
+func assertCacheUnchanged(t *testing.T, before []byte) {
+	t.Helper()
+	if after, _ := os.ReadFile(movieRatingCachePath()); string(after) != string(before) {
+		t.Errorf("cache rewritten:\n%s\nwant it left as\n%s", after, before)
+	}
+}
+
+// A title key isn't mapped to the files of a root holding more than one .mkv,
+// subfolders included: they may be different movies.
+func TestFetchOrigins_TitleKeyNotMappedToSeveralFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		nested string // a second .mkv in this subfolder, or "" for one beside the first
+	}{
+		{"two in the folder", ""},
+		{"one in a subfolder", "Extras"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+			if tc.nested == "" {
+				paths = append(paths, addEntry(t, root, "Amelie (2001)", "b.mkv")...)
+			} else {
+				addEntry(t, root, filepath.Join("Amelie (2001)", tc.nested), "b.mkv")
+			}
+			writeSibling(t, movieRatingCachePath(), `{"tmdb_ids":{"Amelie:2001":"194"}}`)
+			before, _ := os.ReadFile(movieRatingCachePath())
+			tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
+
+			captureStdout(t, func() {
+				if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+					t.Errorf("origins = %v; want fr from the title key", origins)
+				}
+			})
+			assertCacheUnchanged(t, before)
+		})
+	}
+}
+
+// Files directly in the root count ahead of files in its subfolders: an extra
+// mkv-movie mapped to another movie doesn't win a tie with the main file. The
+// title key's ID wins among the root's IDs.
+func TestFetchOrigins_RootFilesBeatExtras(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cache  func(main, extra string) map[string]map[string]string
+		wantID string
+	}{
+		{"extra mapped to a lower ID", func(main, extra string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {main: "194", extra: "5"}}
+		}, "194"},
+		{"title key among the IDs", func(main, extra string) map[string]map[string]string {
+			return map[string]map[string]string{"tmdb_ids": {"Amelie:2001": "194"}, "files": {main: "194", extra: "5"}}
+		}, "194"},
+		{"title key breaks a tie", func(main, extra string) map[string]map[string]string {
+			return map[string]map[string]string{"tmdb_ids": {"Amelie:2001": "194"},
+				"files": {main: "5", filepath.Join(filepath.Dir(main), "b.mkv"): "194"}}
+		}, "194"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv", "b.mkv")
+			extra := addEntry(t, root, filepath.Join("Amelie (2001)", "Extras"), "Trailer.mkv")[0]
+			writeSibling(t, movieRatingCachePath(), mustJSON(t, tc.cache(paths[0], extra)))
+			before, _ := os.ReadFile(movieRatingCachePath())
+			tmdb := titleTMDB{langs: map[string]string{"5": "en", "194": "fr"}}
+
+			captureStdout(t, func() {
+				origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t})
+				if got, want := origins["Amelie (2001)"].OrigLang, tmdb.langs[tc.wantID]; got != want {
+					t.Errorf("origin = %q; want %q from ID %s", got, want, tc.wantID)
+				}
+			})
+			assertCacheUnchanged(t, before)
+		})
+	}
+}
+
+// A mapping for a file that no longer exists doesn't count.
+func TestFetchOrigins_GoneFileMappingIgnored(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	dir := filepath.Dir(paths[0])
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {
+		paths[0]: "194", filepath.Join(dir, "old1.mkv"): "5", filepath.Join(dir, "old2.mkv"): "5",
+	}}))
+	tmdb := titleTMDB{langs: map[string]string{"5": "en", "194": "fr"}}
+
+	captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("origins = %v; want fr from the file that exists", origins)
+		}
+	})
+}
+
+// A folder whose movies are only in subfolders, mapped to different IDs, may
+// be a grouping folder (A-M/<movie>) rather than a collection, so it is asked
+// about rather than given one of their IDs.
+func TestFetchOrigins_GroupingFolderAsked(t *testing.T) {
+	root, _ := siblingLibrary(t, "A-M")
+	amelie := addEntry(t, root, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")
+	coco := addEntry(t, root, filepath.Join("A-M", "Coco (2017)"), "c.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {amelie[0]: "194", coco[0]: "9"}}))
+	tmdb := titleTMDB{langs: map[string]string{"9": "es", "194": "fr"}}
+	p := &scriptPrompter{answers: []string{""}}
+
+	captureStdout(t, func() {
+		if origins := fetchOrigins(append(amelie, coco...), root, "movie", tmdb, p); len(origins) != 0 {
+			t.Errorf("origins = %v; want none, the question was skipped", origins)
+		}
+	})
+	if len(p.asked) != 1 {
+		t.Errorf("asked %d times; want once", len(p.asked))
+	}
+}
+
+// An ID TMDB no longer has falls back to the next: the next most mapped, then
+// the title key.
+func TestFetchOrigins_MissingIDFallsBack(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cache func(p []string) map[string]map[string]string
+	}{
+		{"next mapped ID", func(p []string) map[string]map[string]string {
+			return map[string]map[string]string{"files": {p[0]: "5", p[1]: "5", p[2]: "194"}}
+		}},
+		{"title key", func(p []string) map[string]map[string]string {
+			return map[string]map[string]string{"tmdb_ids": {"Amelie:2001": "194"}, "files": {p[0]: "5"}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv", "b.mkv", "c.mkv")
+			writeSibling(t, movieRatingCachePath(), mustJSON(t, tc.cache(paths)))
+			before, _ := os.ReadFile(movieRatingCachePath())
+			tmdb := titleTMDB{langs: map[string]string{"194": "fr"}} // no 5
+
+			out := captureStdout(t, func() {
+				if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+					t.Errorf("origins = %v; want fr from ID 194", origins)
+				}
+			})
+			if want := "TMDB has no movie with id 5, trying id 194"; !strings.Contains(out, want) {
+				t.Errorf("output lacks %q:\n%s", want, out)
+			}
+			assertCacheUnchanged(t, before)
+		})
+	}
+}
+
+// A file mapped to "" by hand isn't mapped over, and the cache isn't
+// rewritten on every run for it.
+func TestFetchOrigins_EmptyMappingNotRewritten(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{
+		"tmdb_ids": {"Amelie:2001": "194"}, "files": {paths[0]: ""},
+	}))
+	before, _ := os.ReadFile(movieRatingCachePath())
+	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
+
+	captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("origins = %v; want fr from the title key", origins)
+		}
+	})
+	assertCacheUnchanged(t, before)
+}
+
+// A title-key movie whose file mapping can't be saved isn't called lost: its
+// title key is still in the cache, so the next run asks nothing.
+func TestFetchOrigins_BackfillSaveFailureNotCalledLost(t *testing.T) {
+	root, paths := siblingLibrary(t, "Amelie (2001)", "a.mkv")
+	writeSibling(t, movieRatingCachePath(), `{"tmdb_ids":{"Amelie:2001":"194"}}`)
+	tmdb := titleTMDB{langs: map[string]string{"194": "fr"},
+		onOrigin: func() { writeSibling(t, movieRatingCachePath(), `{"tmdb_ids":`) }}
+	old := beforeFinalSiblingSave
+	beforeFinalSiblingSave = func() {}
+	t.Cleanup(func() { beforeFinalSiblingSave = old })
+
+	out := captureStdout(t, func() { fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}) })
+
+	if strings.Contains(out, "asks for them again") || !strings.Contains(out, "files aren't mapped to their IDs yet") ||
+		!strings.Contains(out, "Amelie (2001) (id 194)") {
+		t.Errorf("want the movie named as unmapped, not lost:\n%s", out)
+	}
 }

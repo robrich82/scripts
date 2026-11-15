@@ -208,25 +208,36 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		}
 		root := filepath.Join(libraryRoot, dir)
 
-		var id string
-		var unmapped bool // a movie found by title key, with no file mapped to it
+		var ids []string   // best first
+		var titleOnly bool // a movie found by title key, with no file mapped to it
 		getOrigin := tmdb.GetMovieOriginByID
 		if libType == "tv" {
-			id = sibling.lookupTV(dir, libraryRoot)
+			if id := sibling.lookupTV(dir, libraryRoot); id != "" {
+				ids = []string{id}
+			}
 			getOrigin = tmdb.GetTVOriginByID
 		} else {
-			id, unmapped = sibling.lookupMovie(title, year, root)
+			ids, titleOnly = sibling.lookupMovie(title, year, root)
 		}
-		cached := id != ""
+		cached := len(ids) > 0
 		if !cached && !skipAll {
-			id = resolveTMDBID(dir, title, year, libType, tmdb, prompter, &autoAll, &skipAll)
+			if id := resolveTMDBID(dir, title, year, libType, tmdb, prompter, &autoAll, &skipAll); id != "" {
+				ids = []string{id}
+			}
 		}
 
+		var id string
 		var info OriginInfo
 		var found bool
 		var err error
-		if id != "" {
-			info, found, err = getOrigin(id)
+		for i, next := range ids {
+			if i > 0 {
+				fmt.Printf("[TMDB]   %s: TMDB has no %s with id %s, trying id %s\n", dir, libType, id, next)
+			}
+			id = next
+			if info, found, err = getOrigin(id); err != nil || found {
+				break
+			}
 		}
 		if err != nil {
 			fmt.Printf("[TMDB]   %s: %v\n", dir, err)
@@ -240,10 +251,13 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		switch {
 		case !cached && libType == "tv":
 			sibling.rememberTV(dir, root, id)
+		case !cached:
+			sibling.rememberMovie(dir, title, year, id, dirFiles[dir], false)
 		// A title key alone (as older mkv-audit saved) is pruned by
-		// mkv-movie --clean, so map the root's files to it too.
-		case !cached || unmapped && slices.ContainsFunc(dirFiles[dir], isMKV):
-			sibling.rememberMovie(dir, title, year, id, dirFiles[dir])
+		// mkv-movie --clean, so map the root's file to it too. Only a sole
+		// .mkv: a collection's files are different movies.
+		case titleOnly && slices.ContainsFunc(dirFiles[dir], isMKV) && soleMKV(root):
+			sibling.rememberMovie(dir, title, year, id, dirFiles[dir], true)
 		}
 	}
 	return origins

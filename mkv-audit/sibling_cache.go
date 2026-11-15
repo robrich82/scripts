@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -61,10 +64,12 @@ var errAbs = errors.New("can't resolve path")
 type tvEntry struct{ dir, absPath, id string }
 
 // movieEntry is a confirmed movie ID to save to mkv-movie's cache, with the
-// .mkv files to map to it.
+// .mkv files to map to it. backfill marks one found by a title key already in
+// the cache, whose files only are new.
 type movieEntry struct {
 	dir, title, year, id string
 	files                []string
+	backfill             bool
 }
 
 // saveTVShowCacheEntries adds or updates entries in mkv-tvshow's
@@ -114,8 +119,12 @@ func saveMovieTMDBIDEntries(path string, entries []movieEntry) error {
 		byFile = map[string]string{}
 	}
 	mapped := shape.fileView()
+	changed := false
 	for _, e := range entries {
-		ids[e.title+":"+e.year] = e.id
+		if key := e.title + ":" + e.year; ids[key] != e.id {
+			ids[key] = e.id
+			changed = true
+		}
 		for _, f := range e.files {
 			if !isMKV(f) { // mkv-movie only walks .mkv files
 				continue
@@ -127,8 +136,12 @@ func saveMovieTMDBIDEntries(path string, entries []movieEntry) error {
 			if _, ok := mapped[pathKey(abs)]; !ok {
 				byFile[abs] = e.id
 				mapped[pathKey(abs)] = e.id
+				changed = true
 			}
 		}
+	}
+	if !changed { // e.g. a file mapped to "" by hand: don't rewrite it every run
+		return nil
 	}
 	for key, section := range map[string]map[string]string{"tmdb_ids": ids, "files": byFile} {
 		if raw[key], err = json.Marshal(section); err != nil {
@@ -290,7 +303,8 @@ func loadSiblingCaches(libType string) *siblingTMDBCaches {
 		})
 	case "movie":
 		sc.movie = &siblingSaver[movieEntry]{cache: movieSibling, save: saveMovieTMDBIDEntries,
-			describe: func(e movieEntry) string { return fmt.Sprintf("%s (id %s)", e.dir, e.id) }}
+			describe: func(e movieEntry) string { return fmt.Sprintf("%s (id %s)", e.dir, e.id) },
+			refound:  func(e movieEntry) bool { return e.backfill }}
 		sc.movie.open(func(path string) error {
 			// A type error still fills the other sections; none is used, as
 			// the load warning says.
@@ -315,8 +329,9 @@ func (sc *siblingTMDBCaches) rememberTV(dir, absPath, id string) {
 
 // rememberMovie records a movie ID for a content root none of whose files
 // mkv-movie maps yet, for this run and in mkv-movie's cache: under its title
-// key, and for each of files, so mkv-movie --clean keeps the ID.
-func (sc *siblingTMDBCaches) rememberMovie(dir, title, year, id string, files []string) {
+// key, and for each of files, so mkv-movie --clean keeps the ID. backfill
+// marks an ID found by its title key, which only the files are new for.
+func (sc *siblingTMDBCaches) rememberMovie(dir, title, year, id string, files []string, backfill bool) {
 	if sc.movieIDs == nil {
 		sc.movieIDs = map[string]string{}
 	}
@@ -329,7 +344,7 @@ func (sc *siblingTMDBCaches) rememberMovie(dir, title, year, id string, files []
 			sc.movieFiles[k] = id
 		}
 	}
-	sc.movie.add(movieEntry{dir, title, year, id, files})
+	sc.movie.add(movieEntry{dir, title, year, id, files, backfill})
 }
 
 // finish retries any save that failed.
@@ -352,54 +367,117 @@ func (sc *siblingTMDBCaches) lookupTV(folderName, libraryRoot string) string {
 	return ""
 }
 
-// lookupMovie returns the TMDB movie ID for the content root at root (a
-// folder, or the file itself in a flat library), or "". The ID mkv-movie maps
-// the files under root to comes first. When they map to different movies (a
-// collection), the one most of them map to is used: mkv-audit takes one
-// origin per root, and asking would only pick among mkv-movie's answers.
-// Failing that, the "title:YEAR" key is tried ("title:" when year is empty);
-// unmapped reports that the ID came from it and no file under root is mapped.
-func (sc *siblingTMDBCaches) lookupMovie(title, year, root string) (id string, unmapped bool) {
-	if id := mostMappedID(sc.rootMovieIDs(root)); id != "" {
-		return id, false
+// lookupMovie returns the TMDB movie IDs to try for the content root at root
+// (a folder, or the file itself in a flat library), best first, so one TMDB
+// no longer has falls back to the next. The IDs mkv-movie maps root's files
+// to come first; when they differ (a collection), the one most files directly
+// in root map to, since an extra in a subfolder may be mapped to another
+// movie. The "title:YEAR" key ("title:" when year is empty) goes ahead of
+// them when it is one of them, and otherwise after them. Files only in
+// subfolders that map to different movies are a grouping folder (A-M/<movie>)
+// as likely as a collection, so none of them is picked. titleOnly reports
+// that no file under root is mapped and the only ID is the title key's.
+func (sc *siblingTMDBCaches) lookupMovie(title, year, root string) (ids []string, titleOnly bool) {
+	titleID, _ := normalizeTMDBID(sc.movieIDs[title+":"+year])
+	direct, nested := sc.rootMovieIDs(root)
+	if len(direct) == 0 && len(nested) == 0 {
+		if titleID == "" {
+			return nil, false
+		}
+		return []string{titleID}, true
 	}
-	id = sc.movieIDs[title+":"+year]
-	return id, id != ""
+	if titleID != "" && (direct[titleID] > 0 || nested[titleID] > 0) {
+		ids = append(ids, titleID)
+	}
+	switch {
+	case len(direct) > 0:
+		ids = append(ids, rankedIDs(direct)...)
+	case len(nested) == 1:
+		ids = append(ids, rankedIDs(nested)...)
+	}
+	if titleID != "" {
+		ids = append(ids, titleID)
+	}
+	return uniqueIDs(ids), false
 }
 
-// rootMovieIDs counts the files under root mkv-movie maps to each ID.
-func (sc *siblingTMDBCaches) rootMovieIDs(root string) map[string]int {
+// rootMovieIDs counts the files under root that mkv-movie maps to each ID:
+// direct for root itself or files directly in it, nested for files in its
+// subfolders. IDs are counted as TMDB writes them (mkv-movie keeps a typed
+// "0603" as typed), and a mapping that isn't an ID, or whose file is gone, is
+// skipped. A file on an offline drive counts.
+func (sc *siblingTMDBCaches) rootMovieIDs(root string) (direct, nested map[string]int) {
 	rootKey := pathKey(root)
 	prefix := rootKey + string(filepath.Separator)
-	ids := map[string]int{}
+	direct, nested = map[string]int{}, map[string]int{}
 	for k, v := range sc.movieFiles {
-		if v != "" && (k == rootKey || strings.HasPrefix(k, prefix)) {
-			ids[v]++
+		if k != rootKey && !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		id, ok := normalizeTMDBID(v)
+		if !ok || pathGone(k) {
+			continue
+		}
+		if k == rootKey || !strings.ContainsRune(k[len(prefix):], filepath.Separator) {
+			direct[id]++
+		} else {
+			nested[id]++
 		}
 	}
+	return direct, nested
+}
+
+// rankedIDs returns the IDs in counts, most files first, a tie going to the
+// lower ID, so the order doesn't change from run to run.
+func rankedIDs(counts map[string]int) []string {
+	ids := slices.Collect(maps.Keys(counts))
+	slices.SortFunc(ids, func(a, b string) int {
+		if c := cmp.Compare(counts[b], counts[a]); c != 0 {
+			return c
+		}
+		return compareIDs(a, b)
+	})
 	return ids
 }
 
-// mostMappedID returns the ID with the most files, a tie going to the lowest
-// ID (as a number), so the answer doesn't change from run to run. "" when
-// counts is empty.
-func mostMappedID(counts map[string]int) string {
-	best := ""
-	for id, n := range counts {
-		if best == "" || n > counts[best] || n == counts[best] && lowerID(id, best) {
-			best = id
-		}
+// compareIDs orders TMDB IDs as numbers. They are normalized (digits with no
+// leading zeros), so the shorter one is the smaller.
+func compareIDs(a, b string) int {
+	if c := cmp.Compare(len(a), len(b)); c != 0 {
+		return c
 	}
-	return best
+	return strings.Compare(a, b)
 }
 
-// lowerID reports whether TMDB ID a is below b. IDs are digit strings with no
-// leading zeros, so the shorter one is the smaller.
-func lowerID(a, b string) bool {
-	if len(a) != len(b) {
-		return len(a) < len(b)
-	}
-	return a < b
+// uniqueIDs drops repeats from ids, keeping the first of each.
+func uniqueIDs(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	return slices.DeleteFunc(ids, func(id string) bool {
+		if seen[id] {
+			return true
+		}
+		seen[id] = true
+		return false
+	})
+}
+
+// soleMKV reports whether root (a folder, or the file itself in a flat
+// library) holds exactly one .mkv file, subfolders included. One that can't
+// be read in full doesn't.
+func soleMKV(root string) bool {
+	n := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && isMKV(path) {
+			if n++; n > 1 {
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return err == nil && n == 1
 }
 
 // siblingSaver saves confirmed IDs to one sibling cache as they come. A
@@ -413,6 +491,9 @@ type siblingSaver[E any] struct {
 	err      error  // the last save's error
 	save     func(path string, entries []E) error
 	describe func(E) string
+	// refound, when set, reports an entry whose ID is still in the cache
+	// unsaved, so the next run finds it again without asking.
+	refound func(E) bool
 }
 
 // open finds the cache and loads it with load, turning saving off with one
@@ -472,12 +553,22 @@ func (s *siblingSaver[E]) finish() {
 		s.pending = nil
 		return
 	}
-	lost := make([]string, len(s.pending))
-	for i, e := range s.pending {
-		lost[i] = s.describe(e)
+	var lost, unmapped []string
+	for _, e := range s.pending {
+		if s.refound != nil && s.refound(e) {
+			unmapped = append(unmapped, s.describe(e))
+		} else {
+			lost = append(lost, s.describe(e))
+		}
 	}
-	fmt.Printf("[WARN] %s still can't be saved, so these TMDB IDs are lost and the next run asks for them again: %s\n       %v%s\n",
-		s.cache.name, strings.Join(lost, ", "), err, saveHint(err))
+	fmt.Printf("[WARN] %s still can't be saved: %v%s\n", s.cache.name, err, saveHint(err))
+	if len(lost) > 0 {
+		fmt.Printf("       These TMDB IDs are lost, and the next run asks for them again: %s\n", strings.Join(lost, ", "))
+	}
+	if len(unmapped) > 0 {
+		fmt.Printf("       These %ss' files aren't mapped to their IDs yet; the next run maps them, unless mkv-movie --clean drops the IDs first: %s\n",
+			s.cache.items, strings.Join(unmapped, ", "))
+	}
 }
 
 // beforeFinalSiblingSave runs before siblingSaver.finish's last save attempt; tests replace it.
