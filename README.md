@@ -289,6 +289,24 @@ environment, mkv-audit looks up each show/movie on TMDB to determine its
    gets `eng → en-CA`).
 2. `flag-original=1` is set on all tracks whose language matches the original language.
 
+It reuses the TMDB IDs that mkv-tvshow or mkv-movie has cached for the library's type (a
+movie by the ID mkv-movie recorded for its files, or by title and year), and otherwise
+searches TMDB and asks you to confirm the match; a typed ID must be a whole number. A
+movie folder uses the IDs mkv-movie maps the files directly in it to; files in its
+subfolders, such as extras, are used only when no file directly in the folder is
+mapped, and only when they all map to one movie. A mapping for a file that no longer
+exists is ignored. When the files map to different movies (a collection), it takes,
+without asking, the title-and-year ID if it is one of them, and otherwise the ID most of
+them map to (the lowest on a tie). When TMDB has no movie with an ID, the next one is
+tried. Confirmed IDs that TMDB finds are saved back to that cache, with a movie's `.mkv`
+files mapped to its ID; a movie found by title and year only has its file mapped too,
+when its folder holds a single `.mkv`. A folder that may hold several movies (its
+subfolder files map to different movies, or its name gives no year and it holds more
+than one `.mkv`, all in subfolders, as `A-M/<movie>` does) is, when no title-and-year ID
+is cached for it, searched and asked about, and the answer is used for that run only,
+not saved. A cache that can't be loaded is left untouched, with a
+warning, and the IDs confirmed that run are not saved to it.
+
 **`und_lang`** (optional, on library or override) — last-resort fallback language for
 tracks tagged `und` (undefined). Accepts an ISO 639-2/B code (`"eng"`) or IETF tag
 (`"en-US"`). Both `language` and `language-ietf` are updated. This is strictly a

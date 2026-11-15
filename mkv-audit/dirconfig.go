@@ -89,7 +89,7 @@ func saveGlobalConfig(cfg *GlobalConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0644)
+	return atomicWriteFile(filepath.Join(cfgDir, "config.json"), data)
 }
 
 // detectLibrary finds the library whose Path is a prefix of cwd.
