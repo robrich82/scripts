@@ -87,6 +87,12 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		tmp.Close()
 		return err
 	}
+	// Flush to disk before the rename, so a power loss can't leave the new
+	// name pointing at unwritten (zero-filled) data.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}

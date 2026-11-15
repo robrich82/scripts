@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -653,7 +654,7 @@ func TestHTTPPlexMovieClient_RefreshLibraries_RefreshesMovieSections(t *testing.
 			// One movie section and one show section — only the movie section should be refreshed.
 			fmt.Fprint(w, `{"MediaContainer":{"Directory":[{"key":"1","type":"movie"},{"key":"2","type":"show"}]}}`)
 		} else {
-			refreshPaths = append(refreshPaths, r.URL.Path)
+			refreshPaths = append(refreshPaths, r.Method+" "+r.URL.Path)
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -663,8 +664,27 @@ func TestHTTPPlexMovieClient_RefreshLibraries_RefreshesMovieSections(t *testing.
 	if err := c.RefreshLibraries(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(refreshPaths) != 1 || refreshPaths[0] != "/library/sections/1/refresh" {
-		t.Errorf("refreshPaths = %v; want [/library/sections/1/refresh]", refreshPaths)
+	if len(refreshPaths) != 1 || refreshPaths[0] != "POST /library/sections/1/refresh" {
+		t.Errorf("refresh requests = %v; want [POST /library/sections/1/refresh]", refreshPaths)
+	}
+}
+
+// A failed section refresh is returned, naming the section, so the caller can
+// warn that Plex didn't rescan.
+func TestHTTPPlexMovieClient_RefreshLibraries_RefreshError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/library/sections" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"MediaContainer":{"Directory":[{"key":"1","type":"movie"}]}}`)
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	err := newHTTPPlexMovieClient(srv.URL, "token").RefreshLibraries()
+	if err == nil || !strings.Contains(err.Error(), "refresh section 1") {
+		t.Errorf("err %v; want it to name section 1", err)
 	}
 }
 
@@ -683,5 +703,33 @@ func TestHTTPPlexMovieClient_FindMovieByTitle_NotFound(t *testing.T) {
 	_, err := c.FindMovieByTitle("The Matrix", "1999")
 	if err != ErrPlexMovieNotFound {
 		t.Errorf("expected ErrPlexMovieNotFound, got %v", err)
+	}
+}
+
+// A title with no ASCII letters or digits normalises to "", like every other
+// such title, so it matches only its exact title.
+func TestHTTPPlexMovieClient_FindMovieByTitle_NonASCIITitle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/library/sections" {
+			fmt.Fprint(w, plexMovieSectionsJSON("2", "movie"))
+		} else {
+			fmt.Fprint(w, `{"MediaContainer":{"Metadata":[{"ratingKey":"77","title":"もののけ姫","year":2001}]}}`)
+		}
+	}))
+	defer srv.Close()
+
+	c := newHTTPPlexMovieClient(srv.URL, "token")
+	if key, err := c.FindMovieByTitle("千と千尋の神隠し", "2001"); err != ErrPlexMovieNotFound {
+		t.Errorf("other title: got key %q, err %v; want ErrPlexMovieNotFound", key, err)
+	}
+	if key, err := c.FindMovieByTitle("もののけ姫", "2001"); err != nil || key != "77" {
+		t.Errorf("exact title: got key %q, err %v; want 77", key, err)
+	}
+	if key, err := c.FindMovieByTitle("もののけ姫", "1997"); err != ErrPlexMovieNotFound {
+		t.Errorf("exact title, other year: got key %q, err %v; want ErrPlexMovieNotFound", key, err)
+	}
+	if key, err := c.FindMovieByTitle(" ", ""); err != ErrPlexMovieNotFound {
+		t.Errorf("blank title: got key %q, err %v; want ErrPlexMovieNotFound", key, err)
 	}
 }

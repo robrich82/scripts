@@ -160,3 +160,56 @@ func TestResolveEpisodeRating_RepromptNamesWhatBlankDoes(t *testing.T) {
 		})
 	}
 }
+
+// A full run records the rating it writes to an episode's tags in the applied
+// map, as --ratings-only does, so the map can't disagree with the tags.
+func TestRun_RecordsAppliedRating(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cached NZRating // the show's cached rating
+		runner *fakeMKVRunner
+		want   NZRating // applied afterwards; RatingNone means no entry
+	}{
+		{"written", RatingR16, &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}, RatingR16},
+		{"no rating clears it", RatingNone, &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}, RatingNone},
+		{"write fails", RatingR16, &fakeMKVRunner{avail: true, applyRC: 2, tagsPath: "t.xml"}, RatingM},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			showDir := filepath.Join(dir, "Rated Show")
+			if err := os.MkdirAll(showDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(showDir, "Rated Show - S01E01.mkv")
+			if err := os.WriteFile(path, []byte{}, 0644); err != nil {
+				t.Fatal(err)
+			}
+			rc := emptyRatingCache(t)
+			rc.SetShowRating("999", tc.cached)
+			rc.MarkApplied(path, RatingM) // left by an earlier --ratings-only run
+			tmdb := &fakeTMDB{seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2022-01-01"}}}}
+			p := NewProcessor(Config{MediaDir: dir, ProcessAll: true},
+				cacheWith(t, map[string]string{"Rated Show": "999"}), map[string]ManualEntry{}, tmdb, tc.runner,
+				&scriptedPrompter{answers: []string{""}}, &captureFileTimer{}, emptyRetryList(t), rc, nil, nil, nil)
+			captureStdout(t, func() { p.Run() })
+
+			saved, err := LoadRatingCache(rc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, ok := saved.data.Applied[path]
+			if NZRating(got) != tc.want || ok != (tc.want != RatingNone) {
+				t.Errorf("saved applied = %q (present %v); want %q", got, ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestMarkApplied_NoneClears(t *testing.T) {
+	rc := emptyRatingCache(t)
+	rc.MarkApplied("/a.mkv", RatingR16)
+	rc.MarkApplied("/a.mkv", RatingNone)
+	if _, ok := rc.data.Applied["/a.mkv"]; ok {
+		t.Error("RatingNone should delete the applied entry, not store \"\"")
+	}
+}
