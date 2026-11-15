@@ -79,8 +79,13 @@ func (c *RatingCache) IsApplied(filePath string, r NZRating) bool {
 	return NZRating(c.data.Applied[filePath]) == r && r != RatingNone
 }
 
-// MarkApplied records that filePath has had its rating tags successfully written.
+// MarkApplied records that filePath has had its rating tags successfully
+// written. RatingNone clears the entry: the tags hold no rating.
 func (c *RatingCache) MarkApplied(filePath string, r NZRating) {
+	if r == RatingNone {
+		delete(c.data.Applied, filePath)
+		return
+	}
 	c.data.Applied[filePath] = string(r)
 }
 

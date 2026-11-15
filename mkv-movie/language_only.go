@@ -10,9 +10,12 @@ import (
 
 // walkLanguageOnly sets the Plex audio and subtitle streams of every movie the
 // cache maps a file to, without reading the files, so an offline drive doesn't
-// matter. Movies go in order of their first file name, and the cache is saved
-// after each one. plex must not be nil.
+// matter. Movies go in case-insensitive order of their first file name, and
+// the cache is saved after each one. plex must not be nil.
 func walkLanguageOnly(tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRatingCache, manualData map[string]MovieManualEntry, overwrite bool) Stats {
+	byName := func(a, b string) int {
+		return cmp.Or(cmp.Compare(strings.ToLower(a), strings.ToLower(b)), cmp.Compare(a, b))
+	}
 	movies := make(map[string][]string) // TMDB ID → its files' stems, sorted
 	for id, paths := range cache.FilesByMovie() {
 		if id == "" { // only in a hand-edited cache; it can match an unrelated Plex item
@@ -22,14 +25,14 @@ func walkLanguageOnly(tmdb TMDBMovieClient, plex PlexMovieClient, cache *MovieRa
 			base := filepath.Base(p)
 			movies[id] = append(movies[id], strings.TrimSuffix(base, filepath.Ext(base)))
 		}
-		slices.Sort(movies[id])
+		slices.SortFunc(movies[id], byName)
 	}
 	ids := make([]string, 0, len(movies))
 	for id := range movies {
 		ids = append(ids, id)
 	}
 	slices.SortFunc(ids, func(a, b string) int {
-		return cmp.Or(cmp.Compare(movies[a][0], movies[b][0]), cmp.Compare(a, b))
+		return cmp.Or(byName(movies[a][0], movies[b][0]), cmp.Compare(a, b))
 	})
 
 	var stats Stats

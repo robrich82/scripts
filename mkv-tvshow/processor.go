@@ -653,6 +653,12 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 		fmt.Printf("  [i] mkvpropedit returned rc=%d but reported success.\n%s\n", rc, combined)
 	}
 
+	// Record the rating now in the tags (the merge drops an old one when this
+	// is RatingNone), so --ratings-only skips the file only when it matches.
+	if success && p.ratingCache != nil {
+		p.ratingCache.MarkApplied(filePath, rating)
+	}
+
 	// Update filesystem timestamps to the episode air date.
 	if stampDate != "" {
 		datePart := strings.SplitN(stampDate, "T", 2)[0]
