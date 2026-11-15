@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -101,19 +102,35 @@ func (s *sfChecker) check(app App) (*CheckResult, error) {
 	// Build asset list from matched items.
 	patterns := app.Checker.AssetPatterns
 	var assets []Asset
+	depth := map[string]int{} // asset name -> path depth of the item kept for it
 	for _, item := range bestItems {
 		name := path.Base(item.Title)
-		if len(patterns) > 0 {
-			for _, pat := range patterns {
-				if matchAssetPattern(pat, name) {
-					assets = append(assets, Asset{Name: name, URL: item.Link})
-					break
-				}
-			}
+		if !matchesAnyAssetPattern(patterns, name) {
+			continue
+		}
+		// One file can sit in several folders (e.g. Windows/ and
+		// Windows/old_platforms/); keep the shallowest so only one is downloaded.
+		d := strings.Count(item.Title, "/")
+		prev, seen := depth[name]
+		if seen && d >= prev {
+			continue
+		}
+		depth[name] = d
+		asset := Asset{Name: name, URL: item.Link}
+		if i := slices.IndexFunc(assets, func(a Asset) bool { return a.Name == name }); i >= 0 {
+			assets[i] = asset
 		} else {
-			assets = append(assets, Asset{Name: name, URL: item.Link})
+			assets = append(assets, asset)
 		}
 	}
 
 	return &CheckResult{Version: bestVer, Assets: assets}, nil
+}
+
+// matchesAnyAssetPattern reports whether name matches one of patterns; no patterns matches everything.
+func matchesAnyAssetPattern(patterns []string, name string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(patterns, func(pat string) bool { return matchAssetPattern(pat, name) })
 }

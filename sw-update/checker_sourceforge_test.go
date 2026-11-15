@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -100,6 +101,33 @@ func TestSFChecker(t *testing.T) {
 		}
 		if len(result.Assets) != 1 || result.Assets[0].Name != "app-1.0.0.exe" {
 			t.Errorf("unexpected assets: %v", result.Assets)
+		}
+	})
+
+	t.Run("same file in several folders keeps the shallowest", func(t *testing.T) {
+		body := sfRSSBody([]struct{ title, link string }{
+			{"/myproject/1.0.0/Windows/old_platforms/app-1.0.0-amd64.exe", "https://sf.net/old"},
+			{"/myproject/1.0.0/Windows/app-1.0.0-win32.exe", "https://sf.net/win32"},
+			{"/myproject/1.0.0/Windows/app-1.0.0-amd64.exe", "https://sf.net/current"},
+			{"/myproject/1.0.0/Windows/legacy/deep/app-1.0.0-amd64.exe", "https://sf.net/deeper"},
+		})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, body)
+		}))
+		defer srv.Close()
+
+		appWithPattern := app
+		appWithPattern.Checker.AssetPatterns = []string{`app-.*\.exe`}
+		result, err := (&sfChecker{client: clientFor(srv)}).check(appWithPattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []Asset{
+			{Name: "app-1.0.0-amd64.exe", URL: "https://sf.net/current"},
+			{Name: "app-1.0.0-win32.exe", URL: "https://sf.net/win32"},
+		}
+		if !slices.Equal(result.Assets, want) {
+			t.Errorf("assets = %v, want %v", result.Assets, want)
 		}
 	})
 
