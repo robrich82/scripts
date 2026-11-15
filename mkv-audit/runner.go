@@ -243,6 +243,15 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 			fmt.Printf("[TMDB]   %s: %v\n", dir, err)
 			continue
 		}
+		if !found && cached {
+			src := movieSibling
+			if libType == "tv" {
+				src = tvShowSibling
+			}
+			fmt.Printf("[TMDB]   %s: no original language from TMDB for %s id %s (from %s, %s); fix or remove it there\n",
+				dir, src.items, id, src.name, src.file)
+			continue
+		}
 		if !found {
 			fmt.Printf("[TMDB]   %s: no match found\n", dir)
 			continue
@@ -253,8 +262,9 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 			sibling.rememberTV(dir, root, id)
 		// A root whose files mkv-movie maps to IDs that didn't settle it, or
 		// that holds movie folders, may be several movies: the answer is for
-		// this run only, not saved under its name or onto its files.
-		case !cached && (sibling.rootMapped(root) || groupsMovies(root)):
+		// this run only, not saved under its name or onto its files. One whose
+		// name gives a year is one movie, even split across subfolders (discs).
+		case !cached && (sibling.rootMapped(root) || year == "" && groupsMovies(root)):
 			fmt.Printf("[TMDB]   %s: id %s used for this run only, not saved: the folder may hold several movies\n", dir, id)
 		case !cached:
 			sibling.rememberMovie(dir, title, year, id, dirFiles[dir], false)

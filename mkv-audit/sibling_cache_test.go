@@ -1507,10 +1507,32 @@ func TestFetchOrigins_AllIDsMissing(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "Amelie (2001): no match found") {
-		t.Errorf("output lacks no match found:\n%s", out)
+	// The last ID tried is named, with the cache it came from.
+	want := "Amelie (2001): no original language from TMDB for movie id 7 (from mkv-movie's cache, movie_rating_cache.json); fix or remove it there"
+	if !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
 	}
 	assertCacheUnchanged(t, before)
+}
+
+// A movie split across subfolders (discs) is one movie when its folder name
+// gives a year: the answer is saved, and the next run asks nothing.
+func TestFetchOrigins_MultiDiscMovieSaved(t *testing.T) {
+	root, _ := siblingLibrary(t, "Amelie (2001)")
+	paths := addEntry(t, root, filepath.Join("Amelie (2001)", "Disc1"), "a.mkv")
+	paths = append(paths, addEntry(t, root, filepath.Join("Amelie (2001)", "Disc2"), "b.mkv")...)
+
+	captureStdout(t, func() { fetchOrigins(paths, root, "movie", searchTMDB{}, &scriptPrompter{answers: []string{"y"}}) })
+
+	ids, files := readMovieSections(t)
+	if ids["Amelie:2001"] != "42" || files[paths[0]] != "42" || files[paths[1]] != "42" {
+		t.Errorf("tmdb_ids = %v, files = %v; want the answer saved for both discs", ids, files)
+	}
+	captureStdout(t, func() {
+		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+			t.Errorf("run 2 origins = %v; want fr without asking", origins)
+		}
+	})
 }
 
 // Files only in subfolders that agree on one ID give that ID without asking.

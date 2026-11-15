@@ -19,6 +19,7 @@ import (
 // siblingCache describes one sibling tool's cache, for loading and messages.
 type siblingCache struct {
 	name  string // "mkv-movie's cache"
+	file  string // "movie_rating_cache.json"
 	items string // what it holds IDs for: "movie"
 	// trailingOK matches how the owner parses the file: mkv-tvshow decodes the
 	// first JSON value and ignores the rest, mkv-movie unmarshals the whole file.
@@ -31,6 +32,7 @@ type siblingCache struct {
 var (
 	tvShowSibling = siblingCache{
 		name:       "mkv-tvshow's cache",
+		file:       "show_cache.json",
 		items:      "show",
 		trailingOK: true,
 		ifDeleted: "If you delete it instead, run mkv-tvshow over your whole library to rebuild it before any mkv-tvshow --clean,\n" +
@@ -39,6 +41,7 @@ var (
 	}
 	movieSibling = siblingCache{
 		name:      "mkv-movie's cache",
+		file:      "movie_rating_cache.json",
 		items:     "movie",
 		ifDeleted: "If you delete it instead, mkv-movie asks for every rating again.",
 		path:      siblingCachePath("mkv-movie", "movie_rating_cache.json"),
