@@ -51,6 +51,7 @@ type MissingChecker struct {
 	tmdb       TMDBClient
 	prompter   Prompter
 	ignoreList *MissingIgnoreList
+	LostSaves  int // set by Run: 1 when its ignore list changes couldn't be saved
 }
 
 // NewMissingChecker constructs a MissingChecker.
@@ -86,6 +87,7 @@ func (mc *MissingChecker) Run() error {
 	}
 
 	anyFound := false
+	saver := newIgnoreSaver(mc.ignoreList)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -318,9 +320,10 @@ func (mc *MissingChecker) Run() error {
 			}
 		}
 
-		if err := mc.ignoreList.Save(); err != nil {
-			fmt.Printf("Warning: could not save ignore list: %v\n", err)
-		}
+		saver.save(showName)
+	}
+	if saver.finish() {
+		mc.LostSaves = 1
 	}
 
 	if !anyFound {

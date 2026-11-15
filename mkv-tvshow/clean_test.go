@@ -79,7 +79,7 @@ func TestRunClean_OfflineDriveKeepsEntries(t *testing.T) {
 	ignore.AddShow("200")
 	mustSave(t, ignore.Save())
 
-	captureStdout(t, func() { runClean() })
+	captureStdout(t, func() { runClean(false) })
 
 	shows, _ = LoadCache(filepath.Join(cfg, "show_cache.json"))
 	for folder, want := range map[string]bool{offlineDir: true, goneDir: false, keptDir: true} {
@@ -142,7 +142,7 @@ func TestRunClean_KeepsLegacyFolderNameKeys(t *testing.T) {
 	ignore.AddShow("100")
 	mustSave(t, ignore.Save())
 
-	captureStdout(t, func() { runClean() })
+	captureStdout(t, func() { runClean(false) })
 
 	shows, _ = LoadCache(filepath.Join(cfg, "show_cache.json"))
 	if _, ok := shows.Get("Legacy Show"); !ok {

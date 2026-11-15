@@ -350,7 +350,7 @@ func TestRunLanguageOnly_FailedSave_RetriedAtEnd(t *testing.T) {
 		want     string
 	}{
 		{"recovers", true, "[i] Rating cache saved."},
-		{"fails again", false, "[!] The rating cache was never saved; this run's Plex keys and audio languages are lost"},
+		{"fails again", false, "rating_cache.json was never saved; this run's Plex keys and audio languages are lost"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "missing")
@@ -369,7 +369,11 @@ func TestRunLanguageOnly_FailedSave_RetriedAtEnd(t *testing.T) {
 			tmdb := &langTMDB{fakeTMDB: &fakeTMDB{}, langs: map[string]string{"1": "ja", "2": "ko"}}
 			p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "1", "Show B": "2"}), nil, tmdb, nil, nil, nil, nil, rc, nil, plex, nil)
 
-			out := captureStdout(t, func() { p.RunLanguageOnly() })
+			var stats LanguageOnlyStats
+			out := captureOutput(t, func() { stats = p.RunLanguageOnly() })
+			if want := map[bool]int{true: 0, false: 1}[tc.recovers]; stats.LostSaves != want {
+				t.Errorf("LostSaves = %d; want %d", stats.LostSaves, want)
+			}
 
 			if n := strings.Count(out, "Failed to save rating cache"); n != 1 {
 				t.Errorf("save failure printed %d times; want once:\n%s", n, out)
@@ -413,9 +417,9 @@ func TestRunLanguageOnly_FailedSave_NamesLastSaved(t *testing.T) {
 	plex := &langPlex{fakePlexClient: &fakePlexClient{}, byTMDB: map[string]string{"1": "k1", "2": "k2"}}
 	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "1", "Show B": "2"}), nil, tmdb, nil, nil, nil, nil, rc, nil, plex, nil)
 
-	out := captureStdout(t, func() { p.RunLanguageOnly() })
+	out := captureOutput(t, func() { p.RunLanguageOnly() })
 
-	if !strings.Contains(out, "[!] The rating cache was last saved after Show A; later Plex keys and audio languages are lost") {
+	if !strings.Contains(out, "[!] The rating cache "+path+" was last saved after Show A; later Plex keys and audio languages are lost") {
 		t.Errorf("no warning naming Show A:\n%s", out)
 	}
 }
@@ -447,7 +451,7 @@ func TestRunLanguageOnly_FailedSave_RecoversMidRun(t *testing.T) {
 	plex := &langPlex{fakePlexClient: &fakePlexClient{}, byTMDB: map[string]string{"1": "k1", "2": "k2", "3": "k3"}}
 	p := NewProcessor(Config{}, cacheWith(t, map[string]string{"Show A": "1", "Show B": "2", "Show C": "3"}), nil, tmdb, nil, nil, nil, nil, rc, nil, plex, nil)
 
-	out := captureStdout(t, func() { p.RunLanguageOnly() })
+	out := captureOutput(t, func() { p.RunLanguageOnly() })
 
 	if n := strings.Count(out, "Failed to save rating cache"); n != 2 {
 		t.Errorf("save failure printed %d times; want twice:\n%s", n, out)

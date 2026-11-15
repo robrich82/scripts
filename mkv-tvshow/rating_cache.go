@@ -103,31 +103,30 @@ func (c *RatingCache) CleanStalePaths() int {
 }
 
 // CleanStaleShowIDs removes Shows, Episodes, LanguageApplied, and PlexKeys
-// entries whose TMDB show ID is not present in knownIDs.
-// Returns the number of entries removed.
-func (c *RatingCache) CleanStaleShowIDs(knownIDs map[string]bool) int {
+// entries whose TMDB show ID stale reports. Returns the number removed.
+func (c *RatingCache) CleanStaleShowIDs(stale func(showID string) bool) int {
 	removed := 0
 	for id := range c.data.Shows {
-		if !knownIDs[id] {
+		if stale(id) {
 			delete(c.data.Shows, id)
 			removed++
 		}
 	}
 	for key := range c.data.Episodes {
 		showID, _, _ := strings.Cut(key, "/")
-		if !knownIDs[showID] {
+		if stale(showID) {
 			delete(c.data.Episodes, key)
 			removed++
 		}
 	}
 	for id := range c.data.LanguageApplied {
-		if !knownIDs[id] {
+		if stale(id) {
 			delete(c.data.LanguageApplied, id)
 			removed++
 		}
 	}
 	for id := range c.data.PlexKeys {
-		if !knownIDs[id] {
+		if stale(id) {
 			delete(c.data.PlexKeys, id)
 			removed++
 		}

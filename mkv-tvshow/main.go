@@ -21,6 +21,7 @@ func main() {
 	titleCheckMode := flag.Bool("title-check", false, "Check episode titles in filenames against TMDB and offer to rename.")
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	cleanFlag := flag.Bool("clean", false, "Remove stale cache entries for shows and files that no longer exist on disk, then exit.")
+	allIDsFlag := flag.Bool("all-ids", false, "With --clean, also remove ratings and ignores for every show ID not in show_cache.json, not only those of show folders this --clean removes. This includes the season override IDs of shows that still exist.")
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a show and reset its applied state (folder substring or TMDB ID), then exit.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every show in the current directory, overriding any cached value, then exit.")
 	flag.Parse()
@@ -34,8 +35,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *allIDsFlag && !*cleanFlag {
+		fmt.Fprintln(os.Stderr, "Error: --all-ids only works with --clean.")
+		os.Exit(1)
+	}
+
 	if *cleanFlag {
-		runClean()
+		runClean(*allIDsFlag)
 		return
 	}
 
@@ -125,8 +131,7 @@ func main() {
 
 	cache, err := LoadCache(filepath.Join(cfgDir, "show_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading cache: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "show_cache.json"), err)
 	}
 
 	tmdb := newHTTPTMDBClient(apiKey, "https://api.themoviedb.org/3")
@@ -135,8 +140,7 @@ func main() {
 	if *missingMode {
 		ignoreList, err := LoadMissingIgnoreList(filepath.Join(cfgDir, "missing_ignore.json"))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading missing_ignore.json: %v\n", err)
-			os.Exit(1)
+			exitOnCacheLoadError(filepath.Join(cfgDir, "missing_ignore.json"), err)
 		}
 		missingManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
 		if err != nil {
@@ -150,21 +154,20 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
+		exitIfSavesLost(checker.LostSaves)
 		return
 	}
 
 	titleCache, err := LoadTitleCache(filepath.Join(cfgDir, "title_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading title_cache.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "title_cache.json"), err)
 	}
 
 	// --language-only mode: apply Plex audio language preference for all cached shows.
 	if *languageOnly {
 		ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading rating_cache.json: %v\n", err)
-			os.Exit(1)
+			exitOnCacheLoadError(filepath.Join(cfgDir, "rating_cache.json"), err)
 		}
 		langManualData, err := LoadManualData(filepath.Join(cfgDir, "manual_data.json"))
 		if err != nil {
@@ -177,6 +180,7 @@ func main() {
 		fmt.Println("Setting the Plex audio language for every cached show...")
 		stats := processor.RunLanguageOnly()
 		fmt.Printf("\nDone. Updated: %d  Skipped: %d  Errors: %d\n", stats.Updated, stats.Skipped, stats.Errors)
+		exitIfSavesLost(stats.LostSaves)
 		return
 	}
 
@@ -191,6 +195,7 @@ func main() {
 		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter, mkv, titleCache, timer)
 		fmt.Printf("Checking episode titles in %s...\n", mediaDir)
 		checker.Run()
+		exitIfSavesLost(checker.LostSaves)
 		return
 	}
 
@@ -205,14 +210,12 @@ func main() {
 
 	retryList, err := LoadRetryList(filepath.Join(cfgDir, "pending_dates.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading pending_dates.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "pending_dates.json"), err)
 	}
 
 	ratingCache, err := LoadRatingCache(filepath.Join(cfgDir, "rating_cache.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading rating_cache.json: %v\n", err)
-		os.Exit(1)
+		exitOnCacheLoadError(filepath.Join(cfgDir, "rating_cache.json"), err)
 	}
 
 	cfg := Config{
@@ -247,6 +250,7 @@ func main() {
 
 	fmt.Printf("\nDone. Success: %d  Failed: %d  Skipped (old): %d  Plex errors: %d\n",
 		stats.Success, stats.Failed, stats.SkippedOld, stats.PlexErrors)
+	exitIfSavesLost(stats.LostSaves)
 }
 
 // oneShotMode is a flag that picks what a run does instead of the main pass.

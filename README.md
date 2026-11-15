@@ -596,7 +596,8 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--language-only` | false | Apply Plex audio language preference for every cached show folder without scanning files, printing a line per show and a `Done.` summary. Needs `PLEX_URL`/`PLEX_TOKEN`. Skips shows already set (unless `--overwrite-language`), shows with no known language and shows not in Plex. A show cached under several folders takes each language key from the first folder, by name, whose manual_data.json entry sets it |
 | `--missing` | false | Check for missing episodes (see below) |
 | `--title-check` | false | Check episode titles in filenames against TMDB (see below) |
-| `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit. Entries on an offline drive are kept |
+| `--clean` | false | Remove stale cache entries for show folders and episode files that no longer exist, then exit. Entries on an offline drive are kept. Ratings and `--missing` ignores are removed only for the shows whose folders it removes, so a show missing from `show_cache.json` for another reason (a rebuilt cache, a `manual_data.json` season override's ID) keeps them; so does a removed show's season override ID. A cache it can't save is left unchanged and makes it exit 1; when that's `rating_cache.json` or `missing_ignore.json` and show IDs were removed from it, `show_cache.json` is left unchanged too, so running the same `--clean` again finishes the job |
+| `--all-ids` | false | With `--clean`, also remove ratings and ignores for every show ID not in `show_cache.json`, including the season override IDs of shows that still exist ([#203](https://github.com/robrich82/scripts/issues/203)). Ignored when `show_cache.json` is empty or missing; when every show folder in it is gone, only those shows' IDs are removed |
 | `--reset-rating <query>` | — | Clear the cached NZ rating for a show and reset the applied state on all its files so the next run re-fetches and re-applies it. `query` is a folder name substring or TMDB ID |
 | `--set-rating <RATING>` | — | Set `RATING` as the NZ rating for **every** show in the current directory, overriding any cached value, then exit (see below) |
 
@@ -623,6 +624,8 @@ episodes (a show Plex doesn't have isn't an error), failed pushes of ratings,
 episode metadata and the audio-language preference (including the TMDB lookup
 of the show's original language), a failed show metadata refresh, and a failed
 library re-scan after extras were tagged.
+
+When a cache can't be saved, the run says what was lost, ends with `Cache saves failed: N` and exits 1. So do `--missing`, `--title-check` and `--language-only`.
 
 ### Bulk rating override (`--set-rating`)
 
