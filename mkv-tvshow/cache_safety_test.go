@@ -560,24 +560,63 @@ func TestMain_Clean_OnlyGoneShowsLoseRatings(t *testing.T) {
 	}
 }
 
-// With every show folder gone, --all-ids still removes those shows' ratings
-// and ignores: show_cache.json is judged empty before --clean empties it.
+// With every show folder gone, --all-ids removes those shows' ratings and
+// ignores, but not every other show ID: with nothing left to compare against,
+// all of them would look stale.
 func TestMain_Clean_AllFoldersGoneWithAllIDs(t *testing.T) {
 	cfgHome := t.TempDir()
 	cfg := staleCaches(t, cfgHome)
+	ratings, _ := LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
+	ratings.SetShowRating("300", RatingM) // never in show_cache.json
+	mustSave(t, ratings.Save())
 
 	out, err := runMain(t, t.TempDir(), cfgHome, "--clean", "--all-ids")
 
 	if err != nil {
 		t.Fatalf("--clean --all-ids = %v:\n%s", err, out)
 	}
-	if strings.Contains(out, "--all-ids keeps the show IDs") {
-		t.Errorf("a cache emptied by --clean was treated as missing:\n%s", out)
+	if !strings.Contains(out, "Every show folder in show_cache.json is gone, so --all-ids removes only those shows' IDs") {
+		t.Errorf("output lacks the gone-folders note:\n%s", out)
 	}
-	ratings, _ := LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
+	ratings, _ = LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
 	ignores, _ := LoadMissingIgnoreList(filepath.Join(cfg, "missing_ignore.json"))
 	if _, ok := ratings.GetShowRating("200"); ok || ignores.IsShowIgnored("200") {
 		t.Errorf("gone show 200 kept: rating %v, ignored %v", ok, ignores.IsShowIgnored("200"))
+	}
+	if _, ok := ratings.GetShowRating("300"); !ok {
+		t.Error("show 300, never in show_cache.json, lost its rating")
+	}
+}
+
+// A rating_cache.json save that fails when only file paths were pruned
+// doesn't hold back show_cache.json: no show ID removal needs redoing.
+func TestMain_Clean_RatingPathsOnlyFailureSavesShowCache(t *testing.T) {
+	cfgHome := t.TempDir()
+	cfg := filepath.Join(cfgHome, "mkv-tvshow")
+	if err := os.MkdirAll(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	media := t.TempDir()
+	if err := os.Mkdir(filepath.Join(media, "Show A"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shows, _ := LoadCache(filepath.Join(cfg, "show_cache.json"))
+	shows.Set(filepath.Join(media, "Show A"), "100")
+	shows.Set(filepath.Join(media, "Gone Copy"), "100") // gone, but 100 is still in use
+	mustSave(t, shows.Save())
+	ratings, _ := LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
+	ratings.SetShowRating("100", RatingPG)
+	ratings.MarkApplied(filepath.Join(media, "Gone Copy", "S01E01.mkv"), RatingPG)
+	mustSave(t, ratings.Save())
+	readOnly(t, filepath.Join(cfg, "rating_cache.json"))
+
+	out, err := runMain(t, t.TempDir(), cfgHome, "--clean")
+
+	if err == nil || !strings.Contains(out, "Nothing was removed from rating_cache.json.") {
+		t.Errorf("--clean = %v; want the rating cache save error:\n%s", err, out)
+	}
+	if strings.Contains(out, "show_cache.json was left unchanged") || !cleanRemoved(out, "show_cache.json") {
+		t.Errorf("show_cache.json held back although no show ID was removed:\n%s", out)
 	}
 }
 

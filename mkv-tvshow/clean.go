@@ -40,37 +40,40 @@ func runClean(allIDs bool) {
 	if err != nil {
 		exitOnCacheLoadError(path("show_cache.json"), err)
 	}
-	// Judged before cleaning: a cache emptied because every folder is gone
-	// still names the shows whose ratings --all-ids removes.
 	hadShows := len(showCache.AllEntries()) > 0
 	removedIDs := showCache.CleanStaleFolders()
 	knownIDs := make(map[string]bool)
 	for _, id := range showCache.AllEntries() {
 		knownIDs[id] = true
 	}
+	// The shows whose folders are gone. A show missing from show_cache.json
+	// for another reason (a rebuilt cache, a manual_data season override's
+	// ID) keeps its ratings and ignores.
+	gone := make(map[string]bool)
+	for _, id := range removedIDs {
+		if !knownIDs[id] { // another folder still uses it
+			gone[id] = true
+		}
+	}
 
 	// stale picks the show IDs whose ratings and ignores are removed; nil
 	// removes none.
 	var stale func(showID string) bool
 	switch {
-	case allIDs && !hadShows:
-		// Every show ID would look stale.
-		fmt.Println("show_cache.json is empty or missing, so --all-ids keeps the show IDs in rating_cache.json and missing_ignore.json.")
-	case allIDs:
-		stale = func(id string) bool { return !knownIDs[id] }
-	default:
-		// Only the shows whose folders are gone. A show missing from
-		// show_cache.json for another reason (a rebuilt cache, a manual_data
-		// season override's ID) keeps its ratings and ignores.
-		gone := make(map[string]bool)
-		for _, id := range removedIDs {
-			if !knownIDs[id] { // another folder still uses it
-				gone[id] = true
-			}
+	case allIDs && len(knownIDs) == 0:
+		// Every show ID would look stale, so only the gone shows' are removed.
+		if hadShows {
+			fmt.Println("Every show folder in show_cache.json is gone, so --all-ids removes only those shows' IDs from rating_cache.json and missing_ignore.json.")
+		} else {
+			fmt.Println("show_cache.json is empty or missing, so --all-ids keeps the show IDs in rating_cache.json and missing_ignore.json.")
 		}
 		if len(gone) > 0 {
 			stale = func(id string) bool { return gone[id] }
 		}
+	case allIDs:
+		stale = func(id string) bool { return !knownIDs[id] }
+	case len(gone) > 0:
+		stale = func(id string) bool { return gone[id] }
 	}
 
 	// title_cache.json: remove entries for files that no longer exist.
@@ -95,7 +98,7 @@ func runClean(allIDs bool) {
 	}
 	if n := nPaths + nIDs; n > 0 {
 		if !saved("rating_cache.json", ratingCache) {
-			idsFailed = true
+			idsFailed = nIDs > 0
 		} else {
 			fmt.Printf("rating_cache.json:    removed %d stale entr%s (%d file paths, %d show IDs)\n", n, es(n), nPaths, nIDs)
 			total += n
@@ -134,7 +137,7 @@ func runClean(allIDs bool) {
 	if n := len(removedIDs); n > 0 {
 		switch {
 		case idsFailed:
-			fmt.Fprintf(os.Stderr, "show_cache.json was left unchanged, so running --clean again redoes the removals that failed.\n")
+			fmt.Fprintf(os.Stderr, "show_cache.json was left unchanged, so running the same --clean again redoes the removals that failed.\n")
 		case saved("show_cache.json", showCache):
 			fmt.Printf("show_cache.json:      removed %d stale entr%s\n", n, es(n))
 			total += n
