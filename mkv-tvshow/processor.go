@@ -297,7 +297,7 @@ func (p *Processor) Run() Stats {
 						} else {
 							fmt.Printf("  [X] Failed (extra): %s\n", file)
 							stats.Failed++
-							p.trackRetry(filePath, file, stampDate, []string{"tags"})
+							p.trackTagFailure(filePath, file, stampDate)
 						}
 						time.Sleep(50 * time.Millisecond)
 						continue
@@ -399,7 +399,7 @@ func (p *Processor) Run() Stats {
 			} else {
 				fmt.Printf("  [X] Failed: %s\n", file)
 				stats.Failed++
-				p.trackRetry(filePath, file, stampDate, []string{"tags"})
+				p.trackTagFailure(filePath, file, stampDate)
 			}
 
 			time.Sleep(50 * time.Millisecond)
@@ -1214,19 +1214,35 @@ func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, sea
 // trackRetry keeps a file on the retry list until it has a real air date and
 // no step failed, so a later run finishes it even once it falls before the
 // cutoff. A file that fails a step on maxRetryAttempts runs in a row is
-// dropped, so a step that always fails doesn't rewrite it on every run.
+// dropped, so a step that always fails doesn't rewrite it on every run. One
+// still waiting for an air date is never dropped.
 func (p *Processor) trackRetry(filePath, file, stampDate string, failed []string) {
 	switch {
-	case len(failed) > 0:
-		if p.retryList.Fail(filePath) {
-			fmt.Printf("  [!] Not retrying %s after %d runs in a row failed (failed: %s); run with --all to try again.\n",
-				file, maxRetryAttempts, strings.Join(failed, ", "))
-		}
 	case stampDate == "":
 		p.retryList.Keep(filePath)
+	case len(failed) > 0:
+		if p.retryList.Fail(filePath) {
+			hint := "" // under --all it is processed on every run anyway
+			if !p.cfg.CutoffDate.IsZero() {
+				hint = "; run with --all to try again"
+			}
+			fmt.Printf("  [!] Not retrying %s after %d runs in a row failed (failed: %s)%s.\n",
+				file, maxRetryAttempts, strings.Join(failed, ", "), hint)
+		}
 	default:
 		p.retryList.Remove(filePath)
 	}
+}
+
+// trackTagFailure is trackRetry for a file whose tags couldn't be written.
+// Missing MKVToolNix fails every file alike, so like a failed TMDB lookup it
+// keeps the file on the list without counting the run.
+func (p *Processor) trackTagFailure(filePath, file, stampDate string) {
+	if !p.mkv.Available() {
+		p.retryList.Add(filePath)
+		return
+	}
+	p.trackRetry(filePath, file, stampDate, []string{"tags"})
 }
 
 // failTMDBLookup reports a failed TMDB season lookup for file and leaves it

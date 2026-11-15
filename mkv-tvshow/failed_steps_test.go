@@ -449,6 +449,52 @@ func TestRun_RetryListPlaceholderDateNotCapped(t *testing.T) {
 	}
 }
 
+// A file still waiting for an air date is never dropped, even when a step
+// fails on every run.
+func TestRun_RetryListPlaceholderDateWithFailedStepNotDropped(t *testing.T) {
+	dir, file, retryPath := oldStepShow(t)
+	failing := func() *fakeMKVRunner {
+		return &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 404")}
+	}
+	stepShowRun(t, dir, retryPath, time.Time{}, "", failing())
+	for run := 2; run <= maxRetryAttempts+1; run++ {
+		_, out := stepShowRun(t, dir, retryPath, time.Now(), "", failing())
+		if strings.Contains(out, "Not retrying") {
+			t.Fatalf("run %d gave up on a file waiting for an air date:\n%s", run, out)
+		}
+	}
+	if r, _ := LoadRetryList(retryPath); !r.Has(file) {
+		t.Error("file waiting for an air date dropped from the retry list")
+	}
+}
+
+// Under --all the file is processed on every run, so the give-up message
+// doesn't suggest it.
+func TestRun_RetryListGivesUpUnderAllHasNoHint(t *testing.T) {
+	dir, _, retryPath := oldStepShow(t)
+	var out string
+	for range maxRetryAttempts {
+		_, out = stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01",
+			&fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 404")})
+	}
+	want := "Not retrying Step Show - S01E01.mkv after 5 runs in a row failed (failed: poster).\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+}
+
+// Missing MKVToolNix fails every file alike, so it keeps the file on the list
+// without counting toward the cap.
+func TestRun_TagWriteFailureWithoutMKVToolNixNotCounted(t *testing.T) {
+	dir, file, retryPath := oldStepShow(t)
+	for range maxRetryAttempts + 1 {
+		stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01", &fakeMKVRunner{avail: false, tagsPath: "t.xml"})
+	}
+	if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != 0 {
+		t.Errorf("on list = %v, attempts = %d; want true, 0", r.Has(file), r.Attempts(file))
+	}
+}
+
 // A file whose tags couldn't be written at all goes on the retry list.
 func TestRun_TagWriteFailureRetried(t *testing.T) {
 	dir, file, retryPath := oldStepShow(t)
@@ -491,5 +537,21 @@ func TestRetryList_Formats(t *testing.T) {
 	}
 	if got.Attempts(a) != 1 || !got.Has(b) || got.Attempts(b) != 0 {
 		t.Errorf("reloaded %v; want a:1 b:0", got.data)
+	}
+}
+
+// A corrupt file is parsed only as the format its first byte names, so the
+// error is about that format rather than the other one.
+func TestRetryList_CorruptArrayErrorNamesArray(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pending_dates.json")
+	if err := os.WriteFile(path, []byte(` ["C:\\tv\\a.mkv", 3]`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadRetryList(path)
+	if err == nil {
+		t.Fatal("corrupt array loaded without error")
+	}
+	if strings.Contains(err.Error(), "map") || !strings.Contains(err.Error(), "string") {
+		t.Errorf("err = %v; want it about the array's string entries", err)
 	}
 }

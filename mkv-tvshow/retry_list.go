@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 )
@@ -31,8 +32,11 @@ func LoadRetryList(path string) (*RetryList, error) {
 	if err != nil {
 		return nil, err
 	}
-	var paths []string
-	if err := json.Unmarshal(data, &paths); err == nil {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 && trimmed[0] == '[' {
+		var paths []string
+		if err := json.Unmarshal(data, &paths); err != nil {
+			return nil, err
+		}
 		for _, p := range paths {
 			r.data[p] = 0
 		}
