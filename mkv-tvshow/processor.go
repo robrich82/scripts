@@ -733,51 +733,24 @@ func (p *Processor) resolveEpisodeRating(tmdbID, showName, filePath string, seas
 
 	plexDefault := p.plexRatingDefault(tmdbID, showName, filePath)
 
-	// Prompt the user once per show per run.
-	// When a source found a rating, show it as the default so the user can
-	// confirm with Enter or type a new value to override.
-	var promptMsg string
-	blankDoes := "skip" // what a blank answer does, for the invalid-input re-prompt
+	// Prompt the user once per show per run, offering a source's rating, or
+	// else Plex's, as the default.
+	var header, blankDoes string
+	def := suggested
 	switch {
 	case suggested != RatingNone:
-		promptMsg = fmt.Sprintf(
-			"NZ rating for %q: %s — press enter to confirm, or enter a new rating (%s): ",
-			showName, suggested, validRatings,
-		)
+		header = fmt.Sprintf("NZ rating for %q: %s", showName, suggested)
 		blankDoes = "accept " + string(suggested)
 	case plexDefault != RatingNone:
-		promptMsg = fmt.Sprintf(
-			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
-			showName, plexDefault, validRatings,
-		)
-		blankDoes = "use Plex's " + string(plexDefault)
+		header = fmt.Sprintf("No NZ rating found for %q. Plex currently has: %s", showName, plexDefault)
+		def, blankDoes = plexDefault, "use Plex's "+string(plexDefault)
 	default:
-		promptMsg = fmt.Sprintf(
-			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz\nLeave blank to skip: ",
-			showName, validRatings,
-		)
+		header = fmt.Sprintf("No NZ rating found for %q.\nTip: check Netflix, Crunchyroll, HiDive, or classificationoffice.govt.nz", showName)
+		blankDoes = "skip"
 	}
-	var r NZRating
-	for {
-		ans, _ := p.prompter.Ask(promptMsg)
-		ans = strings.TrimSpace(ans)
-		if ans == "" {
-			if suggested != RatingNone {
-				r = suggested
-				p.ratingCache.SetShowRating(tmdbID, r)
-			} else if plexDefault != RatingNone {
-				r = plexDefault
-				p.ratingCache.SetShowRating(tmdbID, r)
-			}
-			break
-		}
-		parsed, ok := ParseNZRating(ans)
-		if ok {
-			r = parsed
-			p.ratingCache.SetShowRating(tmdbID, r)
-			break
-		}
-		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to %s: ", ans, validRatings, blankDoes)
+	r := askRating(p.prompter.Ask, header, def, blankDoes)
+	if r != RatingNone {
+		p.ratingCache.SetShowRating(tmdbID, r)
 	}
 	p.sessionPromptedRating[tmdbID] = r
 	return r

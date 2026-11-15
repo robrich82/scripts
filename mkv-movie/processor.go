@@ -231,53 +231,26 @@ func (r *MovieRatingResolver) ResolveMovieRating(tmdbID, title, year string) NZR
 		plexDefault = r.plexRatingDefault(tmdbID, title, year)
 	}
 
-	var promptMsg string
-	blankDoes := "skip" // what a blank answer does, for the invalid-input re-prompt
+	var header, blankDoes string
+	def := suggested
 	switch {
 	case suggested != RatingNone:
 		was := ""
 		if haveCached {
 			was = fmt.Sprintf(" (cached: %s)", cached)
 		}
-		promptMsg = fmt.Sprintf(
-			"NZ rating for %q: %s%s — press enter to confirm, or enter a new rating (%s): ",
-			title, suggested, was, validRatings,
-		)
+		header = fmt.Sprintf("NZ rating for %q: %s%s", title, suggested, was)
 		blankDoes = "accept " + string(suggested)
 	case plexDefault != RatingNone:
-		promptMsg = fmt.Sprintf(
-			"No NZ rating found for %q.\nPlex currently has: %s\nEnter rating (%s) to override, or blank to use Plex's value: ",
-			title, plexDefault, validRatings,
-		)
-		blankDoes = "use Plex's " + string(plexDefault)
+		header = fmt.Sprintf("No NZ rating found for %q. Plex currently has: %s", title, plexDefault)
+		def, blankDoes = plexDefault, "use Plex's "+string(plexDefault)
 	default:
-		promptMsg = fmt.Sprintf(
-			"No NZ rating found for %q.\nEnter rating (%s)\nTip: check Netflix, or classificationoffice.govt.nz\nLeave blank to skip: ",
-			title, validRatings,
-		)
+		header = fmt.Sprintf("No NZ rating found for %q.\nTip: check Netflix, or classificationoffice.govt.nz", title)
+		blankDoes = "skip"
 	}
-	var rating NZRating
-	for {
-		ans, _ := r.prompter(promptMsg)
-		ans = strings.TrimSpace(ans)
-		if ans == "" {
-			if suggested != RatingNone {
-				rating = suggested
-			} else {
-				rating = plexDefault
-			}
-			if rating != RatingNone {
-				r.cache.Set(tmdbID, rating)
-			}
-			break
-		}
-		parsed, ok := ParseNZRating(ans)
-		if ok {
-			rating = parsed
-			r.cache.Set(tmdbID, rating)
-			break
-		}
-		promptMsg = fmt.Sprintf("  %q is not a valid rating. Enter (%s) or blank to %s: ", ans, validRatings, blankDoes)
+	rating := askRating(r.prompter, header, def, blankDoes)
+	if rating != RatingNone {
+		r.cache.Set(tmdbID, rating)
 	}
 	r.sessionPrompted[tmdbID] = rating
 	return rating
