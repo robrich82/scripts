@@ -878,16 +878,15 @@ var beforeFinalSave = func() { time.Sleep(time.Second) }
 
 // applyDebandOnlyFile updates only the DEBAND MKV tag for filePath, preserving
 // all other existing tags and restoring the original file timestamps afterward.
-func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer FileTimer) bool {
+// ok and failed are as for rewriteTags.
+func applyDebandOnlyFile(filePath string, deband bool, tagger MKVTagger, timer FileTimer) (failed []string, ok bool) {
 	if !tagger.Available() {
 		fmt.Println("  [!] mkvpropedit or mkvextract not found in PATH")
-		return false
+		return nil, false
 	}
-	// A failed timestamp restore is printed but still counts as updated (#164).
-	_, ok := rewriteTags(filePath, tagger, timer, func(xml string) (string, error) {
+	return rewriteTags(filePath, tagger, timer, func(xml string) (string, error) {
 		return updateDebandInXML(xml, deband)
 	})
-	return ok
 }
 
 // rewriteTags passes filePath's tags through update, writes the result back
@@ -959,12 +958,19 @@ func runDebandOnly(dir string, manualData map[string]MovieManualEntry, tagger MK
 			return nil
 		}
 		deband := *entry.Deband
-		if applyDebandOnlyFile(path, deband, tagger, timer) {
-			fmt.Printf("[✓] Deband updated: %s\n", d.Name())
-			stats.Updated++
-		} else {
+		failed, ok := applyDebandOnlyFile(path, deband, tagger, timer)
+		switch {
+		case !ok:
 			fmt.Printf("  [X] Deband update failed: %s\n", d.Name())
 			stats.Errors++
+		case len(failed) > 0:
+			// The tag is written, but the file now looks newly modified.
+			fmt.Printf("[ERR] Deband updated: %s", d.Name())
+			printFailed(failed)
+			stats.Errors++
+		default:
+			fmt.Printf("[✓] Deband updated: %s\n", d.Name())
+			stats.Updated++
 		}
 		return nil
 	})

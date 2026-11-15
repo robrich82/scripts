@@ -160,7 +160,7 @@ func TestApplyDebandOnlyFile_TaggerNotAvailable_ReturnsFalse(t *testing.T) {
 	tagger := &fakeMKVTagger{available: false}
 	timer := &fakeFileTimer{}
 	path := makeTempMKVNamed(t, "Movie.2020.mkv")
-	if applyDebandOnlyFile(path, true, tagger, timer) {
+	if _, ok := applyDebandOnlyFile(path, true, tagger, timer); ok {
 		t.Error("expected false when tagger not available")
 	}
 }
@@ -169,7 +169,7 @@ func TestApplyDebandOnlyFile_ExtractError_ReturnsFalse(t *testing.T) {
 	tagger := &fakeMKVTagger{available: true, extractErr: os.ErrNotExist}
 	timer := &fakeFileTimer{}
 	path := makeTempMKVNamed(t, "Movie.2020.mkv")
-	if applyDebandOnlyFile(path, true, tagger, timer) {
+	if _, ok := applyDebandOnlyFile(path, true, tagger, timer); ok {
 		t.Error("expected false when extract fails")
 	}
 }
@@ -185,7 +185,7 @@ func TestApplyDebandOnlyFile_Success_CallsApplyAndRestoresTimestamp(t *testing.T
 	tagger := &fakeMKVTagger{available: true, extractedXML: existingXML}
 	timer := &fakeFileTimer{}
 
-	if !applyDebandOnlyFile(path, true, tagger, timer) {
+	if _, ok := applyDebandOnlyFile(path, true, tagger, timer); !ok {
 		t.Fatal("expected true on success")
 	}
 	if len(tagger.appliedPaths) != 1 || tagger.appliedPaths[0] != path {
@@ -204,7 +204,7 @@ func TestApplyDebandOnlyFile_StatError_DoesNotTag(t *testing.T) {
 	tagger := &fakeMKVTagger{available: true, extractedXML: `<Tags><Tag><Targets></Targets></Tag></Tags>`}
 
 	var ok bool
-	out := captureStdout(t, func() { ok = applyDebandOnlyFile(path, true, tagger, &fakeFileTimer{}) })
+	out := captureStdout(t, func() { _, ok = applyDebandOnlyFile(path, true, tagger, &fakeFileTimer{}) })
 	if ok {
 		t.Error("expected false when the file can't be stat'd")
 	}
@@ -216,7 +216,54 @@ func TestApplyDebandOnlyFile_StatError_DoesNotTag(t *testing.T) {
 	}
 }
 
+// debandApplied reports whether applyDebandOnlyFile wrote the tags.
+func debandApplied(path string, deband bool, tagger MKVTagger, timer FileTimer) bool {
+	_, ok := applyDebandOnlyFile(path, deband, tagger, timer)
+	return ok
+}
+
+func TestApplyDebandOnlyFile_TimestampRestoreFails_NamesSteps(t *testing.T) {
+	path := makeTempMKVNamed(t, "Movie.2020.mkv")
+	tagger := &fakeMKVTagger{available: true, extractedXML: `<Tags><Tag><Targets></Targets></Tag></Tags>`}
+	timer := &fakeFileTimer{setTimesErr: os.ErrPermission, setCreationTimeErr: os.ErrPermission}
+
+	failed, ok := applyDebandOnlyFile(path, true, tagger, timer)
+	if !ok {
+		t.Fatal("ok = false, want true: the tags were written")
+	}
+	if strings.Join(failed, ",") != "mtime,ctime" {
+		t.Errorf("failed = %v, want [mtime ctime]", failed)
+	}
+}
+
 // --- runDebandOnly tests ---
+
+func TestRunDebandOnly_TimestampRestoreFails_CountsAsError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Coco (2017).mkv"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	debandTrue := true
+	manualData := map[string]MovieManualEntry{"Coco (2017)": {Deband: &debandTrue}}
+	tagger := &fakeMKVTagger{available: true, extractedXML: `<Tags><Tag><Targets></Targets></Tag></Tags>`}
+	timer := &fakeFileTimer{setCreationTimeErr: os.ErrPermission}
+
+	var stats Stats
+	out := captureStdout(t, func() { stats = runDebandOnly(dir, manualData, tagger, timer) })
+
+	if stats.Updated != 0 || stats.Errors != 1 {
+		t.Errorf("stats = %+v, want Updated=0 Errors=1", stats)
+	}
+	if len(tagger.appliedPaths) != 1 {
+		t.Errorf("ApplyTags calls = %v, want 1", tagger.appliedPaths)
+	}
+	if !strings.Contains(out, "[ERR] Deband updated: Coco (2017).mkv (failed: ctime)") {
+		t.Errorf("result line doesn't name the failed step:\n%s", out)
+	}
+	if strings.Contains(out, "[✓]") {
+		t.Errorf("output reports success:\n%s", out)
+	}
+}
 
 func TestRunDebandOnly_SkipsFilesNotInManualData(t *testing.T) {
 	dir := t.TempDir()

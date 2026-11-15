@@ -175,7 +175,7 @@ func TestMergeMovieTags_PreservesTrackTagsReplacesMovieBlock(t *testing.T) {
 func TestApplyDebandOnlyFile_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
 	tagger := &fakeMKVTagger{available: true,
 		extractedXML: `<Tags><Tag><Targets /><Simple><Name>DEBAND</Name><String>true</String></Simple></Tag></Tags>`}
-	if !applyDebandOnlyFile(makeTempMKVNamed(t, "Movie.2020.mkv"), false, tagger, &fakeFileTimer{}) {
+	if _, ok := applyDebandOnlyFile(makeTempMKVNamed(t, "Movie.2020.mkv"), false, tagger, &fakeFileTimer{}); !ok {
 		t.Fatal("applyDebandOnlyFile failed")
 	}
 	if tagger.writtenXML != emptyTagsDoc {
@@ -185,7 +185,7 @@ func TestApplyDebandOnlyFile_EmptiedBlock_WritesEmptyTagsDoc(t *testing.T) {
 
 func TestApplyDebandOnlyFile_NotTagsDocument_DoesNotApply(t *testing.T) {
 	tagger := &fakeMKVTagger{available: true, extractedXML: "<Tags/>"}
-	if applyDebandOnlyFile(makeTempMKVNamed(t, "Movie.2020.mkv"), true, tagger, &fakeFileTimer{}) {
+	if debandApplied(makeTempMKVNamed(t, "Movie.2020.mkv"), true, tagger, &fakeFileTimer{}) {
 		t.Error("applyDebandOnlyFile succeeded, want failure")
 	}
 	if len(tagger.appliedPaths) != 0 {
@@ -447,7 +447,7 @@ func TestRealMKVApplier_TagUpdates_KeepOtherTagsWithoutDuplicates(t *testing.T) 
 	for _, rating := range []NZRating{RatingM, RatingR16} {
 		applyMovieTags(t, applier, movie, buildMovieTagXML("a < b & c", "42", "2020-01-02", rating, true))
 	}
-	if !applyDebandOnlyFile(movie, false, newRealMKVTagger(), &fakeFileTimer{}) {
+	if !debandApplied(movie, false, newRealMKVTagger(), &fakeFileTimer{}) {
 		t.Fatal("applyDebandOnlyFile failed")
 	}
 
@@ -502,12 +502,12 @@ func TestRealMKVTagger_DebandOnOff_NoEmptyBlock(t *testing.T) {
 		t.Fatalf("untagged fixture has tags:\n%s", tags)
 	}
 
-	if !applyDebandOnlyFile(statsOnly, true, tagger, &fakeFileTimer{}) || !applyDebandOnlyFile(statsOnly, false, tagger, &fakeFileTimer{}) {
+	if !debandApplied(statsOnly, true, tagger, &fakeFileTimer{}) || !debandApplied(statsOnly, false, tagger, &fakeFileTimer{}) {
 		t.Fatal("applyDebandOnlyFile on a stats-only file failed")
 	}
 	assertNameCounts(t, extractRealTags(t, statsOnly), map[string]int{"DEBAND": 0, "_STATISTICS_TAGS": 1})
 
-	if !applyDebandOnlyFile(untagged, false, tagger, &fakeFileTimer{}) {
+	if !debandApplied(untagged, false, tagger, &fakeFileTimer{}) {
 		t.Fatal("applyDebandOnlyFile on an untagged file failed")
 	}
 }
