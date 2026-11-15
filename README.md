@@ -605,8 +605,24 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 #### Output
 
 ```
-Done. Success: 12  Failed: 0  Skipped (old): 5
+Done. Success: 12  Failed: 0  Skipped (old): 5  Plex errors: 0
 ```
+
+A file whose tags couldn't be written counts as failed. So does one whose tags
+were written but whose poster download or timestamp change then failed, named
+on its result line as `(failed: …)`. Later runs retry either kind, even once it
+is older than the cutoff, until every step succeeds; after 5 runs in a row that
+fail, the file is dropped from the retry list with a message naming it, and
+`--all` retries it. A failed TMDB lookup doesn't count toward the 5, a run
+without `mkvpropedit` leaves the list as it was, and a file still waiting for
+TMDB to list an air date is never dropped. The list is `pending_dates.json` in the
+config folder. A file in `--ratings-only` or `--deband-only` whose timestamps
+couldn't be restored also counts as failed, but isn't retried.
+`Plex errors` counts failed Plex lookups of a show and its seasons and
+episodes (a show Plex doesn't have isn't an error), failed pushes of ratings,
+episode metadata and the audio-language preference (including the TMDB lookup
+of the show's original language), a failed show metadata refresh, and a failed
+library re-scan after extras were tagged.
 
 ### Bulk rating override (`--set-rating`)
 

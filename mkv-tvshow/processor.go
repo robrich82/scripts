@@ -33,6 +33,19 @@ type Stats struct {
 	Success    int
 	Failed     int
 	SkippedOld int
+	PlexErrors int // show-level Plex lookups and pushes, and the post-run library scan, that failed
+}
+
+// countTagged reports a file whose tags were written: "[✓] label: file", or,
+// when a later step failed, "[X] label: file (failed: …)", counted as failed.
+func (s *Stats) countTagged(label, file string, failed []string) {
+	if len(failed) == 0 {
+		fmt.Printf("[✓] %s: %s\n", label, file)
+		s.Success++
+		return
+	}
+	fmt.Printf("  [X] %s: %s (failed: %s)\n", label, file, strings.Join(failed, ", "))
+	s.Failed++
 }
 
 // Processor orchestrates the scan loop, TMDB lookups, and MKV metadata updates.
@@ -276,19 +289,15 @@ func (p *Processor) Run() Stats {
 
 						rating := p.resolveEpisodeRating(showID, showName, filePath, posterSeason, 0)
 						deband := entry.resolveDeband(fmt.Sprintf("S%02d", posterSeason), "")
-						if p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating, deband) {
-							if stampDate != "" {
-								p.retryList.Remove(filePath)
-							} else {
-								p.retryList.Add(filePath)
-							}
+						if wrote, failed := p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating, deband); wrote {
+							p.trackRetry(filePath, file, stampDate, failed)
 							showTouched = true
 							extrasProcessed = true
-							fmt.Printf("[✓] Processed (extra): %s\n", file)
-							stats.Success++
+							stats.countTagged("Processed (extra)", file, failed)
 						} else {
 							fmt.Printf("  [X] Failed (extra): %s\n", file)
 							stats.Failed++
+							p.trackTagFailure(filePath, file, stampDate)
 						}
 						time.Sleep(50 * time.Millisecond)
 						continue
@@ -311,10 +320,9 @@ func (p *Processor) Run() Stats {
 
 			if p.cfg.RatingsOnly {
 				// Ratings-only mode: only write LAW_RATING to MKV, skip all other processing.
-				if p.applyRatingOnlyMKV(filePath, rating) {
+				if failed, ok := p.applyRatingOnlyMKV(filePath, rating); ok {
 					showTouched = true
-					fmt.Printf("[✓] Rating updated: %s\n", file)
-					stats.Success++
+					stats.countTagged("Rating updated", file, failed)
 				} else {
 					fmt.Printf("  [X] Rating update failed: %s\n", file)
 					stats.Failed++
@@ -384,18 +392,14 @@ func (p *Processor) Run() Stats {
 					fmt.Sprintf("S%02dE%02d", sNum, eNum),
 				)
 			}
-			if p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating, deband) {
-				if stampDate != "" {
-					p.retryList.Remove(filePath)
-				} else {
-					p.retryList.Add(filePath)
-				}
+			if wrote, failed := p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating, deband); wrote {
+				p.trackRetry(filePath, file, stampDate, failed)
 				showTouched = true
-				fmt.Printf("[✓] Processed: %s\n", file)
-				stats.Success++
+				stats.countTagged("Processed", file, failed)
 			} else {
 				fmt.Printf("  [X] Failed: %s\n", file)
 				stats.Failed++
+				p.trackTagFailure(filePath, file, stampDate)
 			}
 
 			time.Sleep(50 * time.Millisecond)
@@ -407,7 +411,7 @@ func (p *Processor) Run() Stats {
 				fmt.Printf("[!] Failed to save rating cache: %v\n", err)
 			}
 		}
-		p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, p.manualData[showFolder])
+		stats.PlexErrors += p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, p.manualData[showFolder])
 	}
 
 	if err := p.retryList.Save(); err != nil {
@@ -420,6 +424,7 @@ func (p *Processor) Run() Stats {
 	if extrasProcessed && p.plex != nil {
 		if err := p.plex.RefreshLibraries(); err != nil {
 			fmt.Printf("[!] Plex library refresh failed: %v\n", err)
+			stats.PlexErrors++
 		} else {
 			fmt.Println("  [i] Plex: library re-scanned for extras.")
 		}
@@ -575,11 +580,13 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 // applyMKV writes TMDB metadata into an MKV file using mkvpropedit, downloads
 // the poster as a cover attachment, and sets filesystem timestamps to the
 // episode air date. dateStr is written to MKV metadata; stampDate (which may
-// differ or be empty) is used for filesystem timestamps.
-func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDate, posterURL string, rating NZRating, deband bool) bool {
+// differ or be empty) is used for filesystem timestamps. wrote is whether
+// mkvpropedit wrote the file; failed names the later steps that didn't
+// complete ("poster", "timestamps", "mtime", "ctime"). Errors are printed.
+func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDate, posterURL string, rating NZRating, deband bool) (wrote bool, failed []string) {
 	if !p.mkv.Available() {
 		fmt.Println("  [!] mkvpropedit not found in PATH")
-		return false
+		return false, nil
 	}
 
 	args := []string{"--edit", "info", "--set", "title=" + title}
@@ -593,15 +600,15 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 		existing, err := p.mkv.ExtractTags(filePath)
 		if err != nil {
 			fmt.Printf("  [!] Failed to extract tags: %v\n", err)
-			return false
+			return false, nil
 		}
 		if xml, err = mergeEpisodeTags(existing, xml); err != nil {
 			fmt.Printf("  [!] Failed to merge tags: %v\n", err)
-			return false
+			return false, nil
 		}
 		if tagsPath, err = p.mkv.WriteTempTags(xml); err != nil {
 			fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
-			return false
+			return false, nil
 		}
 		args = append(args, "--tags", "all:"+tagsPath)
 	}
@@ -612,6 +619,7 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 	if posterURL != "" {
 		if path, err := p.mkv.DownloadPoster(posterURL); err != nil {
 			fmt.Printf("  [!] Poster download failed; cover unchanged: %v\n", err)
+			failed = append(failed, "poster")
 		} else {
 			posterPath = path
 			attachInfo, _ := p.mkv.ProbeAttachments(filePath)
@@ -634,36 +642,48 @@ func (p *Processor) applyMKV(filePath, title, summary, tmdbID, dateStr, stampDat
 
 	if err != nil {
 		fmt.Printf("  [!] subprocess error: %v\n", err)
-		return false
+		return false, nil
 	}
 
-	success := mkvpropeditWrote(rc)
-	if !success {
+	if !mkvpropeditWrote(rc) {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
-	} else if rc != 0 {
+		return false, nil
+	}
+	if rc != 0 {
 		fmt.Printf("  [i] mkvpropedit returned rc=%d but reported success.\n%s\n", rc, combined)
 	}
 
 	// Record the rating now in the tags (the merge drops an old one when this
 	// is RatingNone), so --ratings-only skips the file only when it matches.
-	if success && p.ratingCache != nil {
+	if p.ratingCache != nil {
 		p.ratingCache.MarkApplied(filePath, rating)
 	}
 
 	// Update filesystem timestamps to the episode air date.
-	if success && stampDate != "" {
+	if stampDate != "" {
 		datePart := strings.SplitN(stampDate, "T", 2)[0]
-		if dt, err := time.ParseInLocation("2006-01-02", datePart, time.Local); err == nil {
-			if err := p.timer.SetTimes(filePath, dt); err != nil {
-				fmt.Printf("  [!] Timestamp error: %v\n", err)
-			}
-			if err := p.timer.SetCreationTime(filePath, dt); err != nil {
-				fmt.Printf("  [!] Timestamp error: %v\n", err)
-			}
+		dt, err := time.ParseInLocation("2006-01-02", datePart, time.Local)
+		if err != nil {
+			fmt.Printf("  [!] Air date %q can't be read; timestamps not set: %v\n", stampDate, err)
+			return true, append(failed, "timestamps")
 		}
+		failed = append(failed, setFileTimes(p.timer, filePath, dt)...)
 	}
+	return true, failed
+}
 
-	return success
+// setFileTimes sets filePath's modified and creation times to t through timer,
+// printing any error, and names the ones that failed ("mtime", "ctime").
+func setFileTimes(timer FileTimer, filePath string, t time.Time) (failed []string) {
+	if err := timer.SetTimes(filePath, t); err != nil {
+		fmt.Printf("  [!] Setting the modified time failed: %v\n", err)
+		failed = append(failed, "mtime")
+	}
+	if err := timer.SetCreationTime(filePath, t); err != nil {
+		fmt.Printf("  [!] Setting the creation time failed: %v\n", err)
+		failed = append(failed, "ctime")
+	}
+	return failed
 }
 
 // resolveEpisodeRating returns the best NZ rating for a single episode.
@@ -810,107 +830,73 @@ func (p *Processor) plexRatingDefault(tmdbID, showName, filePath string) NZRatin
 // skipping all other metadata (title, date, poster, timestamps).
 // The original file timestamps are preserved so that downstream tools (e.g.
 // mkv-tvshow in full mode) don't see every file as newly modified.
-// Returns true even when rating is RatingNone (nothing to do, not a failure).
-func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) bool {
+// ok is true even when rating is RatingNone (nothing to do, not a failure);
+// failed is as rewriteTags'.
+func (p *Processor) applyRatingOnlyMKV(filePath string, rating NZRating) (failed []string, ok bool) {
 	if !p.mkv.Available() {
 		fmt.Println("  [!] mkvpropedit not found in PATH")
-		return false
+		return nil, false
 	}
 	if rating == RatingNone {
-		return true // nothing to write
+		return nil, true // nothing to write
 	}
 
 	// Skip if this file already has these tags written (avoids re-writing every run).
 	if p.ratingCache != nil && !p.cfg.OverwriteRatings && p.ratingCache.IsApplied(filePath, rating) {
-		return true
+		return nil, true
 	}
 
-	// Snapshot the current mtime before mkvpropedit touches it.
-	origStat, err := os.Stat(filePath)
-	if err != nil {
-		fmt.Printf("  [!] Cannot read timestamps to restore, not tagging: %v\n", err)
-		return false
-	}
-
-	// Extract existing tags so other tags (DEBAND, SUMMARY, TMDB_ID, etc.) are preserved.
-	currentXML, err := p.mkv.ExtractTags(filePath)
-	if err != nil {
-		fmt.Printf("  [!] Failed to extract tags: %v\n", err)
-		return false
-	}
-
-	updatedXML, err := updateRatingInXML(currentXML, rating)
-	if err != nil {
-		fmt.Printf("  [!] Failed to update tags: %v\n", err)
-		return false
-	}
-
-	tagsPath, err := p.mkv.WriteTempTags(updatedXML)
-	if err != nil {
-		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
-		return false
-	}
-
-	combined, rc, err := p.mkv.Apply(filePath, []string{"--tags", "all:" + tagsPath})
-	p.mkv.Cleanup(tagsPath)
-
-	if err != nil {
-		fmt.Printf("  [!] subprocess error: %v\n", err)
-		return false
-	}
-	success := mkvpropeditWrote(rc)
-	if !success {
-		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
-		return false
-	}
-
-	// Restore the original timestamps so the file appears unmodified to other tools.
-	if err := p.timer.SetTimes(filePath, origStat.ModTime()); err != nil {
-		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-	}
-	if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
-		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-	}
-
+	failed, ok = p.rewriteTags(filePath, func(xml string) (string, error) {
+		return updateRatingInXML(xml, rating)
+	})
 	// Record that the tags have been written so subsequent runs can skip this file.
-	if p.ratingCache != nil {
+	if ok && p.ratingCache != nil {
 		p.ratingCache.MarkApplied(filePath, rating)
 	}
-	return true
+	return failed, ok
 }
 
 // applyDebandOnlyMKV updates only the DEBAND tag in an MKV file, preserving
 // all other existing tags and restoring the original file timestamps afterward.
-// It extracts the current tag XML, splices in or out the DEBAND element, then
-// writes the result back with mkvpropedit.
-func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
+// failed and ok are as rewriteTags'.
+func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) (failed []string, ok bool) {
 	if !p.mkv.Available() {
 		fmt.Println("  [!] mkvpropedit not found in PATH")
-		return false
+		return nil, false
 	}
+	return p.rewriteTags(filePath, func(xml string) (string, error) {
+		return updateDebandInXML(xml, deband)
+	})
+}
 
+// rewriteTags passes filePath's tags through update, writes the result back
+// with mkvpropedit and restores the file's timestamps, so it appears
+// unmodified to other tools. ok is false when the tags weren't written; failed
+// names the timestamps ("mtime", "ctime") that couldn't be restored. Errors
+// are printed.
+func (p *Processor) rewriteTags(filePath string, update func(string) (string, error)) (failed []string, ok bool) {
 	origStat, err := os.Stat(filePath)
 	if err != nil {
 		fmt.Printf("  [!] Cannot read timestamps to restore, not tagging: %v\n", err)
-		return false
+		return nil, false
 	}
 
 	currentXML, err := p.mkv.ExtractTags(filePath)
 	if err != nil {
 		fmt.Printf("  [!] Failed to extract tags: %v\n", err)
-		return false
+		return nil, false
 	}
 
-	updatedXML, err := updateDebandInXML(currentXML, deband)
+	updatedXML, err := update(currentXML)
 	if err != nil {
 		fmt.Printf("  [!] Failed to update tags: %v\n", err)
-		return false
+		return nil, false
 	}
 
 	tagsPath, err := p.mkv.WriteTempTags(updatedXML)
 	if err != nil {
 		fmt.Printf("  [!] Failed to write tags XML: %v\n", err)
-		return false
+		return nil, false
 	}
 
 	combined, rc, err := p.mkv.Apply(filePath, []string{"--tags", "all:" + tagsPath})
@@ -918,22 +904,14 @@ func (p *Processor) applyDebandOnlyMKV(filePath string, deband bool) bool {
 
 	if err != nil {
 		fmt.Printf("  [!] subprocess error: %v\n", err)
-		return false
+		return nil, false
 	}
-	success := mkvpropeditWrote(rc)
-	if !success {
+	if !mkvpropeditWrote(rc) {
 		fmt.Printf("  [!] mkvpropedit failed (rc=%d)\n%s\n", rc, strings.TrimSpace(combined))
-		return false
+		return nil, false
 	}
 
-	if err := p.timer.SetTimes(filePath, origStat.ModTime()); err != nil {
-		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-	}
-	if err := p.timer.SetCreationTime(filePath, origStat.ModTime()); err != nil {
-		fmt.Printf("  [!] Timestamp restore error: %v\n", err)
-	}
-
-	return true
+	return setFileTimes(p.timer, filePath, origStat.ModTime()), true
 }
 
 // RunDebandOnly scans MediaDir and updates only the DEBAND MKV tag for files
@@ -993,9 +971,8 @@ func (p *Processor) RunDebandOnly() Stats {
 					continue
 				}
 				deband := entry.resolveDeband(seasonKey, "")
-				if p.applyDebandOnlyMKV(filePath, deband) {
-					fmt.Printf("[✓] Deband updated (extra): %s\n", file)
-					stats.Success++
+				if failed, ok := p.applyDebandOnlyMKV(filePath, deband); ok {
+					stats.countTagged("Deband updated (extra)", file, failed)
 				} else {
 					fmt.Printf("  [X] Deband update failed: %s\n", file)
 					stats.Failed++
@@ -1017,9 +994,8 @@ func (p *Processor) RunDebandOnly() Stats {
 			}
 
 			deband := entry.resolveDeband(seasonKey, episodeKey)
-			if p.applyDebandOnlyMKV(filePath, deband) {
-				fmt.Printf("[✓] Deband updated: %s\n", file)
-				stats.Success++
+			if failed, ok := p.applyDebandOnlyMKV(filePath, deband); ok {
+				stats.countTagged("Deband updated", file, failed)
 			} else {
 				fmt.Printf("  [X] Deband update failed: %s\n", file)
 				stats.Failed++
@@ -1036,10 +1012,11 @@ func (p *Processor) RunDebandOnly() Stats {
 // showName is used as a title-match fallback when TMDB GUID lookup fails.
 // showFolder is the show's directory name, used to look up manual_data overrides.
 // entry is the show's manual_data entry, supplying any per-account audio
-// language overrides.
-func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]string, showName, showFolder string, touched bool, entry ManualEntry) {
+// language overrides. errs counts the lookups and pushes that failed, each
+// printed.
+func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]string, showName, showFolder string, touched bool, entry ManualEntry) (errs int) {
 	if p.plex == nil || p.ratingCache == nil {
-		return
+		return errs
 	}
 
 	// Use the showKey already discovered during rating lookup if available;
@@ -1051,18 +1028,20 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 		if err != nil {
 			if err != ErrPlexNotFound {
 				fmt.Printf("  [!] Plex: FindShowByTMDBID(%s): %v\n", tmdbID, err)
+				errs++
 			} else {
 				// Title fallback for shows using non-TMDB agents (e.g. HAMA).
 				var titleErr error
 				showKey, titleErr = p.plex.FindShowByTitle(showName)
 				if titleErr != nil && titleErr != ErrPlexNotFound {
 					fmt.Printf("  [!] Plex: FindShowByTitle(%q): %v\n", showName, titleErr)
+					errs++
 				}
 			}
 		}
 	}
 	if showKey == "" {
-		return
+		return errs
 	}
 	// Persist the resolved key so --language-only can find this show without scanning files.
 	p.ratingCache.SetPlexKey(tmdbID, showKey)
@@ -1070,7 +1049,8 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 	seasons, err := p.plex.GetSeasons(showKey)
 	if err != nil {
 		fmt.Printf("  [!] Plex: GetSeasons(%s): %v\n", showKey, err)
-		return
+		errs++
+		return errs
 	}
 
 	// Build an inverse mapping from (Plex season, Plex episode) → local epKey
@@ -1091,6 +1071,7 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 		episodes, err := p.plex.GetEpisodes(season.RatingKey)
 		if err != nil {
 			fmt.Printf("  [!] Plex: GetEpisodes(%s) season %d: %v\n", season.RatingKey, season.SeasonNumber, err)
+			errs++
 			continue
 		}
 
@@ -1111,6 +1092,7 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 			}
 			if err := p.plex.SetContentRating(ep.RatingKey, PlexTypeEpisode, r); err != nil {
 				fmt.Printf("  [!] Plex: set episode %s rating: %v\n", ep.RatingKey, err)
+				errs++
 			}
 			seasonMax = MaxRating(seasonMax, r)
 		}
@@ -1129,12 +1111,14 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 			epTitle := cleanMetadataTitle(manualEntry.TitleOverrides[localKey])
 			if err := p.plex.SetEpisodeMetadata(ep.RatingKey, epTitle, epDate); err != nil {
 				fmt.Printf("  [!] Plex: set episode %s metadata: %v\n", ep.RatingKey, err)
+				errs++
 			}
 		}
 
 		if seasonMax != RatingNone {
 			if err := p.plex.SetContentRating(season.RatingKey, PlexTypeSeason, seasonMax); err != nil {
 				fmt.Printf("  [!] Plex: set season %s rating: %v\n", season.RatingKey, err)
+				errs++
 			}
 			showMax = MaxRating(showMax, seasonMax)
 		}
@@ -1143,20 +1127,25 @@ func (p *Processor) applyPlexRatings(tmdbID string, seasonEffectiveID map[int]st
 	if showMax != RatingNone {
 		if err := p.plex.SetContentRating(showKey, PlexTypeShow, showMax); err != nil {
 			fmt.Printf("  [!] Plex: set show %s rating: %v\n", showKey, err)
+			errs++
 		}
 	}
 
 	if !p.cfg.RatingsOnly {
-		p.applyPlexAudioLanguage(showKey, tmdbID, showName, entry)
+		if !p.applyPlexAudioLanguage(showKey, tmdbID, showName, entry) {
+			errs++
+		}
 	}
 
 	if touched {
 		if err := p.plex.RefreshMetadata(showKey); err != nil {
 			fmt.Printf("  [!] Plex: refresh metadata for show %s: %v\n", showKey, err)
+			errs++
 		} else {
 			fmt.Printf("  [i] Plex: metadata refresh triggered for show %s\n", showKey)
 		}
 	}
+	return errs
 }
 
 // originalLang returns the TMDB original_language code (ISO 639-1) for the
@@ -1201,6 +1190,40 @@ func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, sea
 	return sr, nil
 }
 
+// trackRetry keeps a file on the retry list until it has a real air date and
+// no step failed, so a later run finishes it even once it falls before the
+// cutoff. A file that fails a step on maxRetryAttempts runs in a row is
+// dropped, so a step that always fails doesn't rewrite it on every run. One
+// still waiting for an air date is never dropped.
+func (p *Processor) trackRetry(filePath, file, stampDate string, failed []string) {
+	switch {
+	case stampDate == "":
+		p.retryList.Keep(filePath)
+	case len(failed) > 0:
+		if p.retryList.Fail(filePath) {
+			hint := "" // under --all it is processed on every run anyway
+			if !p.cfg.CutoffDate.IsZero() {
+				hint = "; run with --all to try again"
+			}
+			fmt.Printf("  [!] Not retrying %s after %d runs in a row failed (failed: %s)%s.\n",
+				file, maxRetryAttempts, strings.Join(failed, ", "), hint)
+		}
+	default:
+		p.retryList.Remove(filePath)
+	}
+}
+
+// trackTagFailure is trackRetry for a file whose tags couldn't be written.
+// Missing mkvpropedit fails every file alike, so the list is left as it was:
+// the run doesn't count, and a file not on it isn't added (under --all that
+// would put the whole library on it).
+func (p *Processor) trackTagFailure(filePath, file, stampDate string) {
+	if !p.mkv.Available() {
+		return
+	}
+	p.trackRetry(filePath, file, stampDate, []string{"tags"})
+}
+
 // failTMDBLookup reports a failed TMDB season lookup for file and leaves it
 // untagged rather than writing partial metadata. The retry list brings it back
 // on the next run even once it falls before the cutoff.
@@ -1217,22 +1240,24 @@ func (p *Processor) failTMDBLookup(stats *Stats, filePath, file string, err erro
 // overwritten on subsequent runs. The language is manual_data.json's "language"
 // if set, otherwise TMDB's original_language; "alt-language" and
 // "alt2-language" override it for the corresponding alt accounts. Nothing is
-// applied when no language is known for the primary account.
-func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, entry ManualEntry) {
+// applied when no language is known for the primary account. ok is false when
+// the TMDB lookup or the push failed (printed); a failed alt account is only
+// named, as in --language-only.
+func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, entry ManualEntry) (ok bool) {
 	if p.ratingCache == nil {
-		return
+		return true
 	}
 	langs, err := p.showAudioLangs(tmdbID, entry)
 	if err != nil {
 		fmt.Printf("  [!] TMDB show lookup failed for ID %s (original language unknown): %v\n", tmdbID, err)
-		return
+		return false
 	}
 	if langs.Default == "" {
-		return
+		return true
 	}
 	applied, due := p.languageDue(tmdbID, langs)
 	if !due {
-		return
+		return true
 	}
 	set, altSuffix, err := p.setAudioLanguage(showKey, tmdbID, langs, applied)
 	switch {
@@ -1240,9 +1265,11 @@ func (p *Processor) applyPlexAudioLanguage(showKey, tmdbID, showName string, ent
 		// The show key is stale and was cleared; the next run looks it up again.
 	case err != nil:
 		fmt.Printf("  [!] Plex: set audio language for %q: %v\n", showName, err)
+		return false
 	case set != "" || altSuffix != "":
 		fmt.Printf("  [i] Plex: audio language for %q set to %q%s\n", showName, appliedLangSignature(p.plex, langs), altSuffix)
 	}
+	return true
 }
 
 // showAudioLangs returns the show's audio languages from its manual_data.json

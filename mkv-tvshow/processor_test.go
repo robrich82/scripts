@@ -95,7 +95,7 @@ func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tm
 
 func emptyRetryList(t *testing.T) *RetryList {
 	t.Helper()
-	return &RetryList{path: filepath.Join(t.TempDir(), "pending_dates.json"), data: make(map[string]bool)}
+	return &RetryList{path: filepath.Join(t.TempDir(), "pending_dates.json"), data: make(map[string]int)}
 }
 
 func emptyRatingCache(t *testing.T) *RatingCache {
@@ -303,7 +303,7 @@ func TestNormalizeFilename_ThreeEpisodes_Renamed(t *testing.T) {
 func TestApplyMKV_MkvpropeditNotFound(t *testing.T) {
 	runner := &fakeMKVRunner{avail: false}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyMKV("file.mkv", "Title", "", "id", "", "", "", RatingNone, false)
+	ok := wroteMKV(p.applyMKV("file.mkv", "Title", "", "id", "", "", "", RatingNone, false))
 	if ok {
 		t.Error("expected false when mkvpropedit not available")
 	}
@@ -472,7 +472,7 @@ func TestApplyMKV_Failure_NoTimestamps(t *testing.T) {
 func TestApplyDebandOnlyMKV_MkvpropeditNotFound(t *testing.T) {
 	runner := &fakeMKVRunner{avail: false}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyDebandOnlyMKV("file.mkv", true)
+	ok := tagOnlyOK(p.applyDebandOnlyMKV("file.mkv", true))
 	if ok {
 		t.Error("expected false when mkvpropedit unavailable")
 	}
@@ -491,7 +491,7 @@ func debandTestFile(t *testing.T) string {
 func TestApplyDebandOnlyMKV_ExtractTagsFails(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, extractTagsErr: fmt.Errorf("mkvextract not found")}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyDebandOnlyMKV(debandTestFile(t), true)
+	ok := tagOnlyOK(p.applyDebandOnlyMKV(debandTestFile(t), true))
 	if ok {
 		t.Error("expected false when ExtractTags fails")
 	}
@@ -510,7 +510,7 @@ func TestApplyDebandOnlyMKV_StatError_DoesNotTag(t *testing.T) {
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
 
 	var ok bool
-	out := captureStdout(t, func() { ok = p.applyDebandOnlyMKV(filepath.Join(t.TempDir(), "missing.mkv"), true) })
+	out := captureStdout(t, func() { ok = tagOnlyOK(p.applyDebandOnlyMKV(filepath.Join(t.TempDir(), "missing.mkv"), true)) })
 	if ok {
 		t.Error("expected false when the file can't be stat'd")
 	}
@@ -541,7 +541,7 @@ func TestApplyDebandOnlyMKV_Success_RestoresTimestamps(t *testing.T) {
 	}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
-	ok := p.applyDebandOnlyMKV(filePath, true)
+	ok := tagOnlyOK(p.applyDebandOnlyMKV(filePath, true))
 	if !ok {
 		t.Fatal("expected success")
 	}
@@ -588,7 +588,7 @@ func TestApplyRatingOnlyMKV_RestoresTimestamps(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
-	ok := p.applyRatingOnlyMKV(filePath, RatingR16)
+	ok := tagOnlyOK(p.applyRatingOnlyMKV(filePath, RatingR16))
 	if !ok {
 		t.Fatal("expected success")
 	}
@@ -605,7 +605,7 @@ func TestApplyRatingOnlyMKV_RestoresTimestamps(t *testing.T) {
 func TestApplyRatingOnlyMKV_RatingNone_NoMkvpropedit(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyRatingOnlyMKV("file.mkv", RatingNone)
+	ok := tagOnlyOK(p.applyRatingOnlyMKV("file.mkv", RatingNone))
 	if !ok {
 		t.Error("expected true (nothing to do)")
 	}
@@ -618,7 +618,7 @@ func TestApplyRatingOnlyMKV_Failure_NoTimestampRestore(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, applyRC: 2, applyResult: "Error"}
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer}
-	ok := p.applyRatingOnlyMKV(debandTestFile(t), RatingPG)
+	ok := tagOnlyOK(p.applyRatingOnlyMKV(debandTestFile(t), RatingPG))
 	if ok {
 		t.Error("expected false on mkvpropedit failure")
 	}
@@ -630,7 +630,7 @@ func TestApplyRatingOnlyMKV_Failure_NoTimestampRestore(t *testing.T) {
 func TestApplyRatingOnlyMKV_ExtractTagsFails_ReturnsFalse(t *testing.T) {
 	runner := &fakeMKVRunner{avail: true, extractTagsErr: fmt.Errorf("mkvextract not found")}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyRatingOnlyMKV(debandTestFile(t), RatingM)
+	ok := tagOnlyOK(p.applyRatingOnlyMKV(debandTestFile(t), RatingM))
 	if ok {
 		t.Error("expected false when ExtractTags fails")
 	}
@@ -649,7 +649,7 @@ func TestApplyRatingOnlyMKV_PreservesExistingDebandTag(t *testing.T) {
 		extractTagsXML: existingXML,
 	}
 	p := &Processor{mkv: runner, timer: &captureFileTimer{}}
-	ok := p.applyRatingOnlyMKV(debandTestFile(t), RatingM)
+	ok := tagOnlyOK(p.applyRatingOnlyMKV(debandTestFile(t), RatingM))
 	if !ok {
 		t.Fatal("expected success")
 	}
@@ -863,7 +863,7 @@ func TestApplyRatingOnlyMKV_AlreadyApplied_SkipsWrite(t *testing.T) {
 	timer := &captureFileTimer{}
 	p := &Processor{mkv: runner, timer: timer, ratingCache: rc}
 
-	ok := p.applyRatingOnlyMKV(filePath, RatingR16)
+	ok := tagOnlyOK(p.applyRatingOnlyMKV(filePath, RatingR16))
 	if !ok {
 		t.Error("expected true (already applied counts as success)")
 	}
@@ -1136,7 +1136,7 @@ func TestProcessorRun_FallbackDate_AddsToRetryList(t *testing.T) {
 
 	p.Run()
 
-	if !retryList.Has(mkvPath) {
+	if !onDiskRetry(t, retryList).Has(mkvPath) {
 		t.Errorf("expected %q to be in retry list after fallback date", mkvPath)
 	}
 }
@@ -1165,7 +1165,7 @@ func TestProcessorRun_RealDate_RemovesFromRetryList(t *testing.T) {
 
 	p.Run()
 
-	if retryList.Has(mkvPath) {
+	if onDiskRetry(t, retryList).Has(mkvPath) {
 		t.Errorf("expected %q to be removed from retry list after real date found", mkvPath)
 	}
 }
@@ -2207,7 +2207,7 @@ func TestApplyRatingOnlyMKV_StatError_DoesNotTag(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.mkv")
 
 	var ok bool
-	out := captureStdout(t, func() { ok = p.applyRatingOnlyMKV(path, RatingM) })
+	out := captureStdout(t, func() { ok = tagOnlyOK(p.applyRatingOnlyMKV(path, RatingM)) })
 	if ok {
 		t.Error("expected false when the file can't be stat'd")
 	}
@@ -2228,10 +2228,10 @@ func TestApplyPaths_MkvpropeditWarningIsSuccess(t *testing.T) {
 	tags := `<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets></Tag></Tags>`
 	paths := map[string]func(p *Processor, file string) bool{
 		"applyMKV": func(p *Processor, file string) bool {
-			return p.applyMKV(file, "T", "", "", "2020-06-15T00:00:00Z", "2020-06-15T00:00:00Z", "", RatingNone, false)
+			return wroteMKV(p.applyMKV(file, "T", "", "", "2020-06-15T00:00:00Z", "2020-06-15T00:00:00Z", "", RatingNone, false))
 		},
-		"applyRatingOnlyMKV": func(p *Processor, file string) bool { return p.applyRatingOnlyMKV(file, RatingPG) },
-		"applyDebandOnlyMKV": func(p *Processor, file string) bool { return p.applyDebandOnlyMKV(file, true) },
+		"applyRatingOnlyMKV": func(p *Processor, file string) bool { return tagOnlyOK(p.applyRatingOnlyMKV(file, RatingPG)) },
+		"applyDebandOnlyMKV": func(p *Processor, file string) bool { return tagOnlyOK(p.applyDebandOnlyMKV(file, true)) },
 	}
 	for name, apply := range paths {
 		for _, tc := range []struct {
@@ -2254,3 +2254,9 @@ func TestApplyPaths_MkvpropeditWarningIsSuccess(t *testing.T) {
 		}
 	}
 }
+
+// wroteMKV is applyMKV's wrote result, for tests that only check it.
+func wroteMKV(wrote bool, _ []string) bool { return wrote }
+
+// tagOnlyOK is a tag-only update's ok result, for tests that only check it.
+func tagOnlyOK(_ []string, ok bool) bool { return ok }
