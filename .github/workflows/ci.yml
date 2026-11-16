@@ -76,7 +76,7 @@ jobs:
       # Linters at the versions mise.toml pins. Go stays with setup-go (go.mod's
       # version, build cache); without MISE_DISABLE_TOOLS mise refuses to build
       # govulncheck until its own Go is installed.
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         env:
           MISE_DISABLE_TOOLS: go
         with:
