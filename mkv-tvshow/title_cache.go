@@ -8,7 +8,8 @@ import (
 )
 
 // TitleCache stores the full MKV title for files whose title was explicitly set
-// by --title-check. The full title may be longer than the filename (which is
+// by --title-check, as last written to the MKV (a normal run updates its episode
+// code after a multi-episode rename). The full title may be longer than the filename (which is
 // constrained by MAX_PATH) because MKV metadata has no path-length limit.
 //
 // The normal processing mode reads this cache before computing a title from the

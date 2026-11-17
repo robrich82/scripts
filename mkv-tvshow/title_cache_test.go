@@ -170,12 +170,19 @@ func TestRun_TitleCacheSaveFailureAfterMove(t *testing.T) {
 // set, and returns the MKV runner.
 func runTitledShow(t *testing.T, dir string, titles *TitleCache, stats *Stats) *fakeMKVRunner {
 	t.Helper()
+	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
+	runTitledShowWith(t, dir, titles, stats, runner)
+	return runner
+}
+
+// runTitledShowWith is runTitledShow with the given MKV runner.
+func runTitledShowWith(t *testing.T, dir string, titles *TitleCache, stats *Stats, runner *fakeMKVRunner) {
+	t.Helper()
 	tmdb := &fakeTMDB{
 		showDetails:   ShowDetails{FirstAirDate: "2022-01-01"},
 		seasonResult:  SeasonResult{AirDate: "2022-02-01", Episodes: []Episode{{EpisodeNumber: 1, AirDate: "2022-03-01"}}},
 		contentRating: RatingPG,
 	}
-	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml"}
 	p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cacheWith(t, map[string]string{"Show A": "999"}),
 		map[string]ManualEntry{}, tmdb, runner, &scriptedPrompter{}, &captureFileTimer{}, emptyRetryList(t),
 		nil, nil, nil, titles)
@@ -184,7 +191,6 @@ func runTitledShow(t *testing.T, dir string, titles *TitleCache, stats *Stats) *
 	if stats != nil {
 		*stats = s
 	}
-	return runner
 }
 
 // --deband-only's multi-episode rename moves the title-cache entry and saves
@@ -254,5 +260,38 @@ func TestWithEpisodeCode(t *testing.T) {
 		if got := withEpisodeCode(tc.title, tc.stem); got != tc.want {
 			t.Errorf("withEpisodeCode(%q, %q) = %q; want %q", tc.title, tc.stem, got, tc.want)
 		}
+	}
+}
+
+// A normal run whose MKV write fails keeps the cached title the MKV still has,
+// so --title-check later sees the difference and fixes it.
+func TestRun_FailedWriteKeepsCachedTitle(t *testing.T) {
+	dir := showLibrary(t, "Show A", "Show A - S01E01E02E03.mkv")
+	const old = "Show A - S01E01E02E03 - One + Two + Three"
+	titles := titleCacheWith(t, map[string]string{filepath.Join(dir, "Show A", "Show A - S01E01E02E03.mkv"): old})
+	newPath := filepath.Join(dir, "Show A", "Show A - S01E01-E03.mkv")
+
+	runTitledShowWith(t, dir, titles, nil, &fakeMKVRunner{avail: true, applyResult: "Error.", applyRC: 2, tagsPath: "t.xml"})
+
+	if got := savedTitles(t, titles); len(got) != 1 || got[newPath] != old {
+		t.Errorf("title cache on disk = %v; want %q under %s", got, old, newPath)
+	}
+}
+
+// A normal run over a file an earlier --deband-only or --ratings-only run
+// renamed writes and saves the cached title with the new episode code.
+func TestRun_RetitlesFileRenamedEarlier(t *testing.T) {
+	dir := showLibrary(t, "Show A", "Show A - S01E01-E03.mkv")
+	path := filepath.Join(dir, "Show A", "Show A - S01E01-E03.mkv")
+	titles := titleCacheWith(t, map[string]string{path: "Show A - S01E01E02E03 - One + Two + Three"})
+	const want = "Show A - S01E01-E03 - One + Two + Three"
+
+	runner := runTitledShow(t, dir, titles, nil)
+
+	if len(runner.calls) == 0 || !containsAll(runner.calls[0].args, "title="+want) {
+		t.Errorf("tag call = %v; want the title with the new episode code", runner.calls)
+	}
+	if got := savedTitles(t, titles); len(got) != 1 || got[path] != want {
+		t.Errorf("title cache on disk = %v; want %q under %s", got, want, path)
 	}
 }
