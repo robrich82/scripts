@@ -91,11 +91,17 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
 			os.Exit(1)
 		}
+		// A multi-episode rename moves the file's retry-list entry.
+		debandRetryList, err := LoadRetryList(filepath.Join(cfgDir, "pending_dates.json"))
+		if err != nil {
+			exitOnCacheLoadError(filepath.Join(cfgDir, "pending_dates.json"), err)
+		}
 		cfg := Config{MediaDir: mediaDir}
-		processor := NewProcessor(cfg, nil, debandManualData, nil, mkv, nil, timer, nil, nil, nil, nil, nil)
+		processor := NewProcessor(cfg, nil, debandManualData, nil, mkv, nil, timer, debandRetryList, nil, nil, nil, nil)
 		fmt.Printf("Updating DEBAND tags in %s...\n", mediaDir)
 		stats := processor.RunDebandOnly()
 		fmt.Printf("\nDone. Updated: %d  Failed: %d\n", stats.Success, stats.Failed)
+		exitIfSavesLost(stats.LostSaves)
 		return
 	}
 

@@ -59,6 +59,7 @@ type Processor struct {
 	prompter   Prompter
 	timer      FileTimer
 	retryList  *RetryList
+	retryMoved bool // a rename moved a retry-list entry, so the list needs saving
 	titleCache *TitleCache
 
 	// Rating pipeline — all optional (nil disables the feature).
@@ -579,8 +580,8 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 		// If rename fails, continue with the original name.
 		return file, filepath.Join(dir, file)
 	}
-	if p.retryList != nil {
-		p.retryList.Move(filepath.Join(dir, file), newPath)
+	if p.retryList != nil && p.retryList.Move(filepath.Join(dir, file), newPath) {
+		p.retryMoved = true
 	}
 	return newFile, newPath
 }
@@ -1011,6 +1012,10 @@ func (p *Processor) RunDebandOnly() Stats {
 		}
 	}
 
+	// Only a rename changes the list, so an untouched one isn't rewritten.
+	if p.retryMoved && newRetrySaver(p.retryList).saveOnce() {
+		stats.LostSaves++
+	}
 	return stats
 }
 
