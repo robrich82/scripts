@@ -116,21 +116,22 @@ func TestRun_TitleCacheMatchesPathInAnotherCase(t *testing.T) {
 	}
 }
 
-// A normal run that renames a multi-episode file keeps its cached title, and
-// saves the cache with the entry under the new name.
+// A normal run that renames a multi-episode file keeps its cached title with
+// the new episode code, and saves the cache with the entry under the new name.
 func TestRun_RenameMovesTitleCacheEntry(t *testing.T) {
 	dir := showLibrary(t, "Show A", "Show A - S01E01E02E03.mkv")
 	oldPath := filepath.Join(dir, "Show A", "Show A - S01E01E02E03.mkv")
 	newPath := filepath.Join(dir, "Show A", "Show A - S01E01-E03.mkv")
-	titles := titleCacheWith(t, map[string]string{oldPath: "Show A - Part One, Two & Three"})
+	titles := titleCacheWith(t, map[string]string{oldPath: "Show A - S01E01E02E03 - One + Two + Three"})
+	const want = "Show A - S01E01-E03 - One + Two + Three"
 
 	runner := runTitledShow(t, dir, titles, nil)
 
-	if len(runner.calls) == 0 || !containsAll(runner.calls[0].args, "title=Show A - Part One, Two & Three") {
-		t.Errorf("tag call = %v; want the cached full title", runner.calls)
+	if len(runner.calls) == 0 || !containsAll(runner.calls[0].args, "title="+want) {
+		t.Errorf("tag call = %v; want the cached title with the new episode code", runner.calls)
 	}
-	if got := savedTitles(t, titles); len(got) != 1 || got[newPath] != "Show A - Part One, Two & Three" {
-		t.Errorf("title cache on disk = %v; want the title under %s", got, newPath)
+	if got := savedTitles(t, titles); len(got) != 1 || got[newPath] != want {
+		t.Errorf("title cache on disk = %v; want %q under %s", got, want, newPath)
 	}
 }
 
@@ -186,20 +187,22 @@ func runTitledShow(t *testing.T, dir string, titles *TitleCache, stats *Stats) *
 	return runner
 }
 
-// --deband-only's multi-episode rename moves the title-cache entry and saves it.
+// --deband-only's multi-episode rename moves the title-cache entry, with the
+// new episode code, and saves it.
 func TestRunDebandOnly_RenameMovesTitleCacheEntry(t *testing.T) {
 	dir := showLibrary(t, "Banded", "Banded - S01E01E02E03.mkv")
 	oldPath := filepath.Join(dir, "Banded", "Banded - S01E01E02E03.mkv")
 	newPath := filepath.Join(dir, "Banded", "Banded - S01E01-E03.mkv")
-	titles := titleCacheWith(t, map[string]string{oldPath: "Full"})
+	titles := titleCacheWith(t, map[string]string{oldPath: "Banded - S01E01E02E03 - One + Two + Three"})
+	const want = "Banded - S01E01-E03 - One + Two + Three"
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: "<Tags></Tags>"}
 	manual := map[string]ManualEntry{"Banded": {DebandEpisodes: map[string]bool{"S01E01": true}}}
 	p := NewProcessor(Config{MediaDir: dir}, nil, manual, nil, runner, nil, noopTimer{}, emptyRetryList(t), nil, nil, nil, titles)
 
 	captureStdout(t, func() { p.RunDebandOnly() })
 
-	if got := savedTitles(t, titles); len(got) != 1 || got[newPath] != "Full" {
-		t.Errorf("title cache on disk = %v; want the title under %s", got, newPath)
+	if got := savedTitles(t, titles); len(got) != 1 || got[newPath] != want {
+		t.Errorf("title cache on disk = %v; want %q under %s", got, want, newPath)
 	}
 }
 

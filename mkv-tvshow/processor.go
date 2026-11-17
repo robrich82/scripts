@@ -575,7 +575,8 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 
 	first := eNums[0][1]
 	last := eNums[len(eNums)-1][1]
-	newFile := strings.Replace(file, m[2], fmt.Sprintf("E%s-E%s", first, last), 1)
+	newCode := fmt.Sprintf("E%s-E%s", first, last)
+	newFile := strings.Replace(file, m[2], newCode, 1)
 	newPath := filepath.Join(dir, newFile)
 	if err := os.Rename(filepath.Join(dir, file), newPath); err != nil {
 		// If rename fails, continue with the original name.
@@ -585,6 +586,9 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 		p.retryMoved = true
 	}
 	if p.titleCache.Move(filepath.Join(dir, file), newPath) {
+		// The cached title carries the file's episode code (buildFullMKVTitle).
+		title, _ := p.titleCache.Get(newPath)
+		p.titleCache.Set(newPath, strings.Replace(title, m[0], m[1]+newCode, 1))
 		p.titleMoved = true
 	}
 	return newFile, newPath
