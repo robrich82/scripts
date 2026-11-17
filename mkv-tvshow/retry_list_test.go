@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -153,5 +155,169 @@ func TestRetryList_Move(t *testing.T) {
 	}
 	if r.Move("/tv/x.mkv", "/tv/y.mkv") || r.Has("/tv/y.mkv") || r.Len() != 2 {
 		t.Errorf("Move of an unlisted path changed the list: %v", r.data)
+	}
+}
+
+// retryClockStart is the day setRetryClock starts the retry list's clock on.
+var retryClockStart = time.Date(2026, 11, 18, 12, 0, 0, 0, time.Local)
+
+// setRetryClock sets the retry list's clock to retryClockStart and returns a
+// func that moves it on by days.
+func setRetryClock(t *testing.T) (advance func(days int)) {
+	t.Helper()
+	old, day := retryNow, 0
+	retryNow = func() time.Time { return retryClockStart.AddDate(0, 0, day) }
+	t.Cleanup(func() { retryNow = old })
+	return func(days int) { day += days }
+}
+
+// The cap needs both maxRetryAttempts runs in a row and maxRetryDays since
+// the first of them.
+func TestRetryList_CapNeedsRunsAndDays(t *testing.T) {
+	t.Run("runs within the days", func(t *testing.T) {
+		advance := setRetryClock(t)
+		r := emptyRetryList(t)
+		for run := 1; run <= maxRetryAttempts+1; run++ {
+			if gaveUp, _, _ := r.Fail("/tv/a.mkv"); gaveUp {
+				t.Fatalf("gave up after %d runs within %d days", run, run-1)
+			}
+			advance(1)
+		}
+		// Runs 1–6 fell on days 0–5; run 7 is on day 6, still inside the 7 days.
+		if gaveUp, _, _ := r.Fail("/tv/a.mkv"); gaveUp {
+			t.Fatal("gave up on day 6")
+		}
+		advance(1)
+		gaveUp, runs, days := r.Fail("/tv/a.mkv")
+		if !gaveUp || runs != 8 || days != maxRetryDays || r.Has("/tv/a.mkv") {
+			t.Errorf("day 7: gaveUp %v, runs %d, days %d, on list %v; want true, 8, 7, false", gaveUp, runs, days, r.Has("/tv/a.mkv"))
+		}
+	})
+	t.Run("days before the runs", func(t *testing.T) {
+		advance := setRetryClock(t)
+		r := emptyRetryList(t)
+		r.Fail("/tv/a.mkv")
+		advance(maxRetryDays + 3)
+		for run := 2; run < maxRetryAttempts; run++ {
+			if gaveUp, _, _ := r.Fail("/tv/a.mkv"); gaveUp {
+				t.Fatalf("gave up after %d runs", run)
+			}
+		}
+		if gaveUp, runs, days := r.Fail("/tv/a.mkv"); !gaveUp || runs != maxRetryAttempts || days != maxRetryDays+3 {
+			t.Errorf("run 5: gaveUp %v, runs %d, days %d; want true, 5, 10", gaveUp, runs, days)
+		}
+	})
+}
+
+// A run with no failed step, or leaving the list, starts a new streak.
+func TestRetryList_StreakResets(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reset func(r *RetryList, path string)
+	}{
+		{"Keep", (*RetryList).Keep},
+		{"Remove", func(r *RetryList, path string) { r.Remove(path); r.Add(path) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			advance := setRetryClock(t)
+			r := emptyRetryList(t)
+			for range maxRetryAttempts - 1 {
+				r.Fail("/tv/a.mkv")
+			}
+			tc.reset(r, "/tv/a.mkv")
+			advance(maxRetryDays)
+			for run := 1; run <= maxRetryAttempts; run++ {
+				if gaveUp, _, _ := r.Fail("/tv/a.mkv"); gaveUp {
+					t.Fatalf("gave up on run %d of the new streak, its first day", run)
+				}
+			}
+		})
+	}
+}
+
+// The retry list reads the older count form, dating a count from the load,
+// and saves the current form; the current form keeps its date.
+func TestRetryList_LoadsCountFormAndSavesObjects(t *testing.T) {
+	advance := setRetryClock(t)
+	path := filepath.Join(t.TempDir(), "pending_dates.json")
+	if err := os.WriteFile(path, []byte(`{"/tv/a.mkv": 4, "/tv/b.mkv": 0, "/tv/c.mkv": {"fails": 2}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRetryList(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustSave(t, r.Save())
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]retryJSON
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]retryJSON{
+		"/tv/a.mkv": {Fails: 4, Since: "2026-11-18"},
+		"/tv/b.mkv": {Fails: 0},
+		"/tv/c.mkv": {Fails: 2, Since: "2026-11-18"},
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("saved %v; want %v", got, want)
+	}
+
+	// A week later the saved date still counts from the first load.
+	advance(maxRetryDays)
+	r, err = LoadRetryList(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gaveUp, runs, days := r.Fail("/tv/a.mkv"); !gaveUp || runs != 5 || days != maxRetryDays {
+		t.Errorf("Fail = %v, %d, %d; want true, 5, 7", gaveUp, runs, days)
+	}
+}
+
+// A date that doesn't parse fails the load and names the entry.
+func TestRetryList_BadSinceFailsLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pending_dates.json")
+	if err := os.WriteFile(path, []byte(`{"/tv/a.mkv": {"fails": 1, "since": "18/11/2026"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRetryList(path); err == nil || !strings.Contains(err.Error(), "/tv/a.mkv") {
+		t.Errorf("err = %v; want one naming the entry", err)
+	}
+}
+
+// Move keeps the date of the first failed run.
+func TestRetryList_MoveKeepsSince(t *testing.T) {
+	advance := setRetryClock(t)
+	r := emptyRetryList(t)
+	r.Fail("/tv/a.mkv")
+	advance(maxRetryDays)
+	r.Move("/tv/a.mkv", "/tv/b.mkv")
+	for range maxRetryAttempts - 2 {
+		r.Fail("/tv/b.mkv")
+	}
+	if gaveUp, _, days := r.Fail("/tv/b.mkv"); !gaveUp || days != maxRetryDays {
+		t.Errorf("Fail = %v over %d days; want it to give up over 7", gaveUp, days)
+	}
+}
+
+// A file that fails a step on 5 runs within a few days stays on the list.
+func TestRun_RetryListKeepsFileWithinDays(t *testing.T) {
+	dir, file, retryPath := oldStepShow(t)
+	advance := setRetryClock(t)
+	r := newRetryList(retryPath)
+	r.Add(file)
+	mustSave(t, r.Save())
+	for run := 1; run <= maxRetryAttempts; run++ {
+		_, out := stepShowRun(t, dir, retryPath, time.Now(), "2020-01-01",
+			&fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 503")})
+		if strings.Contains(out, "Not retrying") {
+			t.Fatalf("run %d, on day %d, gave up:\n%s", run, run-1, out)
+		}
+		advance(1)
+	}
+	if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != maxRetryAttempts {
+		t.Errorf("on list = %v, attempts = %d; want true, %d", r.Has(file), r.Attempts(file), maxRetryAttempts)
 	}
 }

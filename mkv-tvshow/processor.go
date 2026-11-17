@@ -1200,21 +1200,21 @@ func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, sea
 
 // trackRetry keeps a file on the retry list while it is awaiting an air date
 // or a step failed, so a later run finishes it even once it falls before the
-// cutoff. A file that fails a step on maxRetryAttempts runs in a row is
-// dropped, so a step that always fails doesn't rewrite it on every run. One
-// still waiting for an air date is never dropped.
+// cutoff. A file that keeps failing a step is dropped once RetryList.Fail
+// gives up on it, so a step that always fails doesn't rewrite it on every run.
+// One still waiting for an air date is never dropped.
 func (p *Processor) trackRetry(filePath, file string, awaitingDate bool, failed []string) {
 	switch {
 	case awaitingDate:
 		p.retryList.Keep(filePath)
 	case len(failed) > 0:
-		if p.retryList.Fail(filePath) {
+		if gaveUp, runs, days := p.retryList.Fail(filePath); gaveUp {
 			hint := "" // under --all it is processed on every run anyway
 			if !p.cfg.CutoffDate.IsZero() {
 				hint = "; run with --all to try again"
 			}
-			fmt.Printf("  [!] Not retrying %s after %d runs in a row failed (failed: %s)%s.\n",
-				file, maxRetryAttempts, strings.Join(failed, ", "), hint)
+			fmt.Printf("  [!] Not retrying %s after %d runs in a row failed over %d days (failed: %s)%s.\n",
+				file, runs, days, strings.Join(failed, ", "), hint)
 		}
 	default:
 		p.retryList.Remove(filePath)

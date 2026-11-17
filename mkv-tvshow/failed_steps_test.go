@@ -399,16 +399,18 @@ func TestRun_RetryListSecondRunFinishesFile(t *testing.T) {
 	}
 }
 
-// A file that fails a step on maxRetryAttempts runs in a row is dropped, and
-// a run with the cutoff then skips it.
+// A file that fails a step on maxRetryAttempts runs in a row, spanning
+// maxRetryDays or more, is dropped, and a run with the cutoff then skips it.
 func TestRun_RetryListGivesUp(t *testing.T) {
 	dir, file, retryPath := oldStepShow(t)
+	advance := setRetryClock(t)
 	failing := func() *fakeMKVRunner {
 		return &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 404")}
 	}
 
 	stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01", failing()) // as with --all
 	for run := 2; run <= maxRetryAttempts; run++ {
+		advance(2)
 		_, out := stepShowRun(t, dir, retryPath, time.Now(), "2020-01-01", failing())
 		r, _ := LoadRetryList(retryPath)
 		if run < maxRetryAttempts {
@@ -420,7 +422,7 @@ func TestRun_RetryListGivesUp(t *testing.T) {
 		if r.Has(file) {
 			t.Fatalf("still on the retry list after %d failed runs", run)
 		}
-		want := "Not retrying Step Show - S01E01.mkv after 5 runs in a row failed (failed: poster); run with --all to try again."
+		want := "Not retrying Step Show - S01E01.mkv after 5 runs in a row failed over 8 days (failed: poster); run with --all to try again."
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -440,8 +442,10 @@ func TestRun_RetryListPlaceholderDateNotCapped(t *testing.T) {
 	ok := func() *fakeMKVRunner {
 		return &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterPath: "p.jpg"}
 	}
+	advance := setRetryClock(t)
 	stepShowRun(t, dir, retryPath, time.Time{}, "", ok())
 	for run := 2; run <= maxRetryAttempts+1; run++ {
+		advance(2)
 		stepShowRun(t, dir, retryPath, time.Now(), "", ok())
 	}
 	if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != 0 {
@@ -456,8 +460,10 @@ func TestRun_RetryListPlaceholderDateWithFailedStepNotDropped(t *testing.T) {
 	failing := func() *fakeMKVRunner {
 		return &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 404")}
 	}
+	advance := setRetryClock(t)
 	stepShowRun(t, dir, retryPath, time.Time{}, "", failing())
 	for run := 2; run <= maxRetryAttempts+1; run++ {
+		advance(2)
 		_, out := stepShowRun(t, dir, retryPath, time.Now(), "", failing())
 		if strings.Contains(out, "Not retrying") {
 			t.Fatalf("run %d gave up on a file waiting for an air date:\n%s", run, out)
@@ -472,12 +478,14 @@ func TestRun_RetryListPlaceholderDateWithFailedStepNotDropped(t *testing.T) {
 // doesn't suggest it.
 func TestRun_RetryListGivesUpUnderAllHasNoHint(t *testing.T) {
 	dir, _, retryPath := oldStepShow(t)
+	advance := setRetryClock(t)
 	var out string
 	for range maxRetryAttempts {
 		_, out = stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01",
 			&fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 404")})
+		advance(2)
 	}
-	want := "Not retrying Step Show - S01E01.mkv after 5 runs in a row failed (failed: poster).\n"
+	want := "Not retrying Step Show - S01E01.mkv after 5 runs in a row failed over 8 days (failed: poster).\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("output lacks %q:\n%s", want, out)
 	}
@@ -488,11 +496,13 @@ func TestRun_RetryListGivesUpUnderAllHasNoHint(t *testing.T) {
 func TestRun_TagWriteFailureWithoutMKVToolNixNotCounted(t *testing.T) {
 	t.Run("on the list", func(t *testing.T) {
 		dir, file, retryPath := oldStepShow(t)
+		advance := setRetryClock(t)
 		r, _ := LoadRetryList(retryPath)
 		r.Fail(file)
 		r.Fail(file)
 		mustSave(t, r.Save())
 		for range maxRetryAttempts + 1 {
+			advance(2)
 			stepShowRun(t, dir, retryPath, time.Time{}, "2020-01-01", &fakeMKVRunner{avail: false, tagsPath: "t.xml"})
 		}
 		if r, _ := LoadRetryList(retryPath); !r.Has(file) || r.Attempts(file) != 2 {

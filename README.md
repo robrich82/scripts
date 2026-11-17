@@ -612,9 +612,10 @@ Done. Success: 12  Failed: 0  Skipped (old): 5  Plex errors: 0
 A file whose tags couldn't be written counts as failed. So does one whose tags
 were written but whose poster download or timestamp change then failed, named
 on its result line as `(failed: …)`. Later runs retry either kind, even once it
-is older than the cutoff, until every step succeeds; after 5 runs in a row that
-fail, the file is dropped from the retry list with a message naming it, and
-`--all` retries it. A failed TMDB lookup doesn't count toward the 5, a run
+is older than the cutoff, until every step succeeds; once at least 5 runs in a
+row have failed and at least 7 days have passed since the first of them, the
+file is dropped from the retry list with a message naming it, and
+`--all` retries it. A failed TMDB lookup doesn't count as a failed run, a run
 without `mkvpropedit` leaves the list as it was, and a file still waiting for
 TMDB to list an air date is never dropped. The list is `pending_dates.json` in the
 config folder. A file in `--ratings-only` or `--deband-only` whose timestamps
