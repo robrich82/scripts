@@ -36,7 +36,9 @@ type TitleChecker struct {
 	mkv        MKVRunner   // nil → MKV title setting is skipped
 	titleCache *TitleCache // nil → caching/setting skipped
 	timer      FileTimer
-	LostSaves  int // set by Run: 1 when its title cache changes couldn't be saved
+	retryList  *RetryList // nil → a rename leaves the retry list alone
+	moved      bool       // a rename moved a retry entry since the last save
+	LostSaves  int        // set by Run: how many caches' changes couldn't be saved
 }
 
 // NewTitleChecker creates a TitleChecker.
@@ -49,6 +51,7 @@ func NewTitleChecker(
 	mkv MKVRunner,
 	titleCache *TitleCache,
 	timer FileTimer,
+	retryList *RetryList,
 ) *TitleChecker {
 	return &TitleChecker{
 		cfg:        cfg,
@@ -59,6 +62,7 @@ func NewTitleChecker(
 		mkv:        mkv,
 		titleCache: titleCache,
 		timer:      timer,
+		retryList:  retryList,
 	}
 }
 
@@ -105,6 +109,7 @@ func (tc *TitleChecker) Run() {
 	})
 
 	saver := newTitleSaver(tc.titleCache)
+	retrySaver := newRetrySaver(tc.retryList)
 	for _, showFolder := range showOrder {
 		cacheKey := filepath.Join(tc.cfg.MediaDir, showFolder)
 		showID, ok := tc.cache.Get(cacheKey)
@@ -222,9 +227,15 @@ func (tc *TitleChecker) Run() {
 		}
 
 		saver.save(showFolder)
+		if tc.moved {
+			retrySaver.save(showFolder)
+			tc.moved = false
+		}
 	}
-	if saver.finish() {
-		tc.LostSaves = 1
+	for _, lost := range []bool{saver.finish(), retrySaver.finish()} {
+		if lost {
+			tc.LostSaves++
+		}
 	}
 }
 
@@ -274,6 +285,9 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 		return path
 	}
 	fmt.Printf("  [✓] Renamed to: %s\n", newStem+ext)
+	if tc.retryList != nil && tc.retryList.Move(path, newPath) {
+		tc.moved = true
+	}
 	return newPath
 }
 

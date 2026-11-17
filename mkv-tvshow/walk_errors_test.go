@@ -41,7 +41,7 @@ func TestWalks_UnreadableRootWarns(t *testing.T) {
 		"RunDebandOnly": func(t *testing.T) { newProcessor(t).RunDebandOnly() },
 		"TitleChecker.Run": func(t *testing.T) {
 			tc := NewTitleChecker(Config{MediaDir: root}, cacheWith(t, map[string]string{}), nil,
-				&fakeTMDB{}, &scriptedPrompter{}, nil, newNullTitleCache(t), noopTimer{})
+				&fakeTMDB{}, &scriptedPrompter{}, nil, newNullTitleCache(t), noopTimer{}, nil)
 			tc.Run()
 		},
 		"showFoldersWithMKV": func(t *testing.T) {

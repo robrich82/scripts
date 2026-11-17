@@ -128,6 +128,19 @@ func (r *RetryList) Remove(path string) {
 	delete(r.data, pathKey(path))
 }
 
+// Move moves from's entry, with its failed-run count, to the path to, and
+// reports whether from was on the list.
+func (r *RetryList) Move(from, to string) bool {
+	e, ok := r.data[pathKey(from)]
+	if !ok {
+		return false
+	}
+	delete(r.data, pathKey(from))
+	e.path = to
+	r.data[pathKey(to)] = e
+	return true
+}
+
 // Len returns the number of entries in the retry list.
 func (r *RetryList) Len() int {
 	return len(r.data)

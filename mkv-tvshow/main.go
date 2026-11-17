@@ -191,8 +191,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
 			os.Exit(1)
 		}
+		retryList, err := LoadRetryList(filepath.Join(cfgDir, "pending_dates.json"))
+		if err != nil {
+			exitOnCacheLoadError(filepath.Join(cfgDir, "pending_dates.json"), err)
+		}
 		cfg := Config{MediaDir: mediaDir}
-		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter, mkv, titleCache, timer)
+		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter, mkv, titleCache, timer, retryList)
 		fmt.Printf("Checking episode titles in %s...\n", mediaDir)
 		checker.Run()
 		exitIfSavesLost(checker.LostSaves)

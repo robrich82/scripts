@@ -171,7 +171,7 @@ func TestApplyFullTitle_TimestampRestoreFailureIsNamed(t *testing.T) {
 	path := debandTestFile(t)
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done."}
 	tc := NewTitleChecker(Config{}, nil, nil, nil, nil, runner, newNullTitleCache(t),
-		failingTimer{timesErr: errors.New("denied"), ctimeErr: errors.New("denied")})
+		failingTimer{timesErr: errors.New("denied"), ctimeErr: errors.New("denied")}, nil)
 
 	out := captureStdout(t, func() { tc.applyFullTitle(path, "Full Title") })
 

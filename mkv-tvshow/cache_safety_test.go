@@ -218,7 +218,7 @@ func TestTitleCheck_TitleCacheSaveFailure(t *testing.T) {
 	}
 	tmdb := &fakeTMDB{seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 2, Name: "Episode 2"}}}}
 	checker := NewTitleChecker(Config{MediaDir: dir}, cacheWith(t, map[string]string{"Show": "999"}), nil, tmdb,
-		&assertNoAskPrompter{t: t}, nil, titles, noopTimer{})
+		&assertNoAskPrompter{t: t}, nil, titles, noopTimer{}, nil)
 
 	out := captureOutput(t, checker.Run)
 
@@ -238,7 +238,7 @@ func TestTitleCheck_TitleCacheSaveFailure(t *testing.T) {
 // --title-check runs without a title cache, which it documents as allowed.
 func TestTitleCheck_NilTitleCache(t *testing.T) {
 	checker := NewTitleChecker(Config{MediaDir: t.TempDir()}, cacheWith(t, map[string]string{}), nil, &fakeTMDB{},
-		&assertNoAskPrompter{t: t}, nil, nil, noopTimer{})
+		&assertNoAskPrompter{t: t}, nil, nil, noopTimer{}, nil)
 	captureOutput(t, checker.Run)
 	if checker.LostSaves != 0 {
 		t.Errorf("LostSaves = %d; want 0", checker.LostSaves)

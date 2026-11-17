@@ -137,3 +137,21 @@ func TestRun_RetryListMatchesPathInAnotherCase(t *testing.T) {
 		t.Errorf("retry list keeps %v; want it empty", r.data)
 	}
 }
+
+// Move carries an entry's count to the new path, and does nothing for a path
+// not on the list.
+func TestRetryList_Move(t *testing.T) {
+	r := emptyRetryList(t)
+	r.Fail("/tv/a.mkv")
+	r.Add("/tv/c.mkv")
+
+	if !r.Move("/tv/a.mkv", "/tv/b.mkv") {
+		t.Error("Move of a listed path reported false")
+	}
+	if r.Has("/tv/a.mkv") || r.Attempts("/tv/b.mkv") != 1 {
+		t.Errorf("after Move: %v; want b with 1 failed run", r.data)
+	}
+	if r.Move("/tv/x.mkv", "/tv/y.mkv") || r.Has("/tv/y.mkv") || r.Len() != 2 {
+		t.Errorf("Move of an unlisted path changed the list: %v", r.data)
+	}
+}
