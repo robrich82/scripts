@@ -187,14 +187,15 @@ func runTitledShow(t *testing.T, dir string, titles *TitleCache, stats *Stats) *
 	return runner
 }
 
-// --deband-only's multi-episode rename moves the title-cache entry, with the
-// new episode code, and saves it.
+// --deband-only's multi-episode rename moves the title-cache entry and saves
+// it. The title keeps its old episode code, as the MKV does: this mode doesn't
+// write titles, so the next normal run or --title-check sees the difference.
 func TestRunDebandOnly_RenameMovesTitleCacheEntry(t *testing.T) {
 	dir := showLibrary(t, "Banded", "Banded - S01E01E02E03.mkv")
 	oldPath := filepath.Join(dir, "Banded", "Banded - S01E01E02E03.mkv")
 	newPath := filepath.Join(dir, "Banded", "Banded - S01E01-E03.mkv")
-	titles := titleCacheWith(t, map[string]string{oldPath: "Banded - S01E01E02E03 - One + Two + Three"})
-	const want = "Banded - S01E01-E03 - One + Two + Three"
+	const want = "Banded - S01E01E02E03 - One + Two + Three"
+	titles := titleCacheWith(t, map[string]string{oldPath: want})
 	runner := &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", extractTagsXML: "<Tags></Tags>"}
 	manual := map[string]ManualEntry{"Banded": {DebandEpisodes: map[string]bool{"S01E01": true}}}
 	p := NewProcessor(Config{MediaDir: dir}, nil, manual, nil, runner, nil, noopTimer{}, emptyRetryList(t), nil, nil, nil, titles)
@@ -206,21 +207,52 @@ func TestRunDebandOnly_RenameMovesTitleCacheEntry(t *testing.T) {
 	}
 }
 
-// A --title-check rename moves the file's title-cache entry to the new name.
-func TestTitleCheck_RenameMovesTitleCacheEntry(t *testing.T) {
+// A --title-check rename drops the old title and caches the new one it sets.
+func TestTitleCheck_RenameCachesNewTitle(t *testing.T) {
+	got, newPath, out := runCachedRenameCheck(t, &fakeMKVRunner{avail: true, applyResult: "Done."})
+
+	if len(got) != 1 || got[newPath] != "Show - S01E02 - New Title" {
+		t.Errorf("title cache on disk = %v; want only the new title under %s:\n%s", got, newPath, out)
+	}
+}
+
+// A --title-check rename that doesn't set the title leaves no cached title for
+// the new name, so a normal run titles the file from its name rather than
+// writing the old title back.
+func TestTitleCheck_RenameWithoutTitleWriteDropsOldTitle(t *testing.T) {
+	got, _, out := runCachedRenameCheck(t, &fakeMKVRunner{avail: false})
+
+	if len(got) != 0 {
+		t.Errorf("title cache on disk = %v; want it empty:\n%s", got, out)
+	}
+}
+
+// runCachedRenameCheck runs --title-check over a file whose cached title is
+// out of date, answering yes to the rename, and returns the saved title cache,
+// the file's new path and the output.
+func runCachedRenameCheck(t *testing.T, mkv MKVRunner) (saved map[string]string, newPath, out string) {
+	t.Helper()
 	dir, oldPath, newPath := renameShow(t)
 	titles := titleCacheWith(t, map[string]string{oldPath: "Show - S01E02 - Old Title"})
 	tmdb := &fakeTMDB{seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 2, Name: "New Title"}}}}
 	tc := NewTitleChecker(Config{MediaDir: dir}, cacheWith(t, map[string]string{"Show": "999"}), nil, tmdb,
-		&scriptedPrompter{answers: []string{"y"}}, nil, titles, noopTimer{}, nil)
+		&scriptedPrompter{answers: []string{"y"}}, mkv, titles, noopTimer{}, nil)
 
-	out := captureOutput(t, tc.Run)
+	out = captureOutput(t, tc.Run)
 
-	got := savedTitles(t, titles)
-	if _, ok := got[oldPath]; ok || len(got) != 1 {
-		t.Errorf("title cache on disk = %v; want only %s:\n%s", got, newPath, out)
-	}
-	if _, ok := got[newPath]; !ok {
-		t.Errorf("title cache on disk = %v; want %s:\n%s", got, newPath, out)
+	return savedTitles(t, titles), newPath, out
+}
+
+func TestWithEpisodeCode(t *testing.T) {
+	for _, tc := range []struct{ title, stem, want string }{
+		{"Show - S01E01E02E03 - A + B + C", "Show - S01E01-E03", "Show - S01E01-E03 - A + B + C"},
+		{"Show - S01E01E02E03 - A + B + C", "Show - s01E01-E03", "Show - s01E01-E03 - A + B + C"},
+		{"Show - S01E01-E03 - A + B + C", "Show - S01E01-E03", "Show - S01E01-E03 - A + B + C"},
+		{"Custom title", "Show - S01E01-E03", "Custom title"},
+		{"Show - S01E02 - A", "Show - Special", "Show - S01E02 - A"},
+	} {
+		if got := withEpisodeCode(tc.title, tc.stem); got != tc.want {
+			t.Errorf("withEpisodeCode(%q, %q) = %q; want %q", tc.title, tc.stem, got, tc.want)
+		}
 	}
 }

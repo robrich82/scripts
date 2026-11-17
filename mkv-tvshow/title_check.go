@@ -288,7 +288,8 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 	if tc.retryList != nil && tc.retryList.Move(path, newPath) {
 		tc.moved = true
 	}
-	tc.titleCache.Move(path, newPath) // saved with the show
+	// Drop the old title: applyFullTitle caches the new one once it writes it.
+	tc.titleCache.Delete(path) // saved with the show
 	return newPath
 }
 
@@ -349,6 +350,18 @@ func buildFullMKVTitle(stem string, titles []string) string {
 		prefix = strings.ReplaceAll(prefix, rc.from, rc.to)
 	}
 	return prefix + " - " + strings.Join(titles, " "+multiEpTitleSep+" ")
+}
+
+// withEpisodeCode returns the cached full title with its episode code replaced
+// by stem's, so a title cached before a multi-episode rename (S01E01E02E03 →
+// S01E01-E03) matches the file. The title is unchanged if either has no code.
+func withEpisodeCode(title, stem string) string {
+	code := titleEpCodeRe.FindString(stem)
+	loc := titleEpCodeRe.FindStringIndex(title)
+	if code == "" || loc == nil {
+		return title
+	}
+	return title[:loc[0]] + code + title[loc[1]:]
 }
 
 // resolveEpisode applies manual overrides and mappings, mirroring the

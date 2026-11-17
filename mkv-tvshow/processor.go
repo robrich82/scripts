@@ -61,7 +61,7 @@ type Processor struct {
 	retryList  *RetryList
 	retryMoved bool // a rename moved a retry-list entry, so the list needs saving
 	titleCache *TitleCache
-	titleMoved bool // a rename moved a title-cache entry, so the cache needs saving
+	titleDirty bool // a rename or retitle changed the title cache, so it needs saving
 
 	// Rating pipeline — all optional (nil disables the feature).
 	ratingCache   *RatingCache
@@ -394,8 +394,9 @@ func (p *Processor) Run() Stats {
 			}
 
 			title := cleanMetadataTitle(file)
-			if cached, ok := p.titleCache.Get(filePath); ok {
-				title = cached
+			cached, isCached := p.titleCache.Get(filePath)
+			if isCached {
+				title = withEpisodeCode(cached, stem)
 			}
 			var deband bool
 			if entry, ok := p.manualData[showFolder]; ok {
@@ -405,6 +406,10 @@ func (p *Processor) Run() Stats {
 				)
 			}
 			if wrote, failed := p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating, deband); wrote {
+				if isCached && title != cached {
+					p.titleCache.Set(filePath, title)
+					p.titleDirty = true
+				}
 				p.trackRetry(filePath, file, stampDate == "", failed)
 				showTouched = true
 				stats.countTagged("Processed", file, failed)
@@ -421,7 +426,7 @@ func (p *Processor) Run() Stats {
 		stats.PlexErrors += p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, p.manualData[showFolder])
 		p.ratingSaver.save(showFolder)
 	}
-	for _, lost := range []bool{p.showSaver.finish(), p.ratingSaver.finish(), newRetrySaver(p.retryList).saveOnce(), p.saveMovedTitles()} {
+	for _, lost := range []bool{p.showSaver.finish(), p.ratingSaver.finish(), newRetrySaver(p.retryList).saveOnce(), p.saveChangedTitles()} {
 		if lost {
 			stats.LostSaves++
 		}
@@ -575,8 +580,7 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 
 	first := eNums[0][1]
 	last := eNums[len(eNums)-1][1]
-	newCode := fmt.Sprintf("E%s-E%s", first, last)
-	newFile := strings.Replace(file, m[2], newCode, 1)
+	newFile := strings.Replace(file, m[2], fmt.Sprintf("E%s-E%s", first, last), 1)
 	newPath := filepath.Join(dir, newFile)
 	if err := os.Rename(filepath.Join(dir, file), newPath); err != nil {
 		// If rename fails, continue with the original name.
@@ -585,11 +589,10 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 	if p.retryList != nil && p.retryList.Move(filepath.Join(dir, file), newPath) {
 		p.retryMoved = true
 	}
+	// The entry keeps the title the MKV has; Run rewrites its episode code
+	// when it writes the title.
 	if p.titleCache.Move(filepath.Join(dir, file), newPath) {
-		// The cached title carries the file's episode code (buildFullMKVTitle).
-		title, _ := p.titleCache.Get(newPath)
-		p.titleCache.Set(newPath, strings.Replace(title, m[0], m[1]+newCode, 1))
-		p.titleMoved = true
+		p.titleDirty = true
 	}
 	return newFile, newPath
 }
@@ -1021,7 +1024,7 @@ func (p *Processor) RunDebandOnly() Stats {
 	}
 
 	// Only a rename changes these, so untouched ones aren't rewritten.
-	for _, lost := range []bool{p.retryMoved && newRetrySaver(p.retryList).saveOnce(), p.saveMovedTitles()} {
+	for _, lost := range []bool{p.retryMoved && newRetrySaver(p.retryList).saveOnce(), p.saveChangedTitles()} {
 		if lost {
 			stats.LostSaves++
 		}
@@ -1029,10 +1032,10 @@ func (p *Processor) RunDebandOnly() Stats {
 	return stats
 }
 
-// saveMovedTitles saves the title cache when a rename moved an entry in it,
+// saveChangedTitles saves the title cache when a rename or retitle changed it,
 // and reports whether that save was lost.
-func (p *Processor) saveMovedTitles() (lost bool) {
-	return p.titleMoved && newTitleSaver(p.titleCache).saveOnce()
+func (p *Processor) saveChangedTitles() (lost bool) {
+	return p.titleDirty && newTitleSaver(p.titleCache).saveOnce()
 }
 
 // applyPlexRatings pushes cached ratings to Plex at episode, season, and show

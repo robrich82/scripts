@@ -80,6 +80,14 @@ func (tc *TitleCache) Move(from, to string) bool {
 	return true
 }
 
+// Delete removes filePath's title, if any.
+func (tc *TitleCache) Delete(filePath string) {
+	if tc == nil {
+		return
+	}
+	delete(tc.titles, pathKey(filePath))
+}
+
 // CleanStalePaths removes entries whose file paths no longer exist on disk.
 // Returns the number of entries removed.
 func (tc *TitleCache) CleanStalePaths() int {
