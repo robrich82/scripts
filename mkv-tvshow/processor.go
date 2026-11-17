@@ -61,6 +61,7 @@ type Processor struct {
 	retryList  *RetryList
 	retryMoved bool // a rename moved a retry-list entry, so the list needs saving
 	titleCache *TitleCache
+	titleMoved bool // a rename moved a title-cache entry, so the cache needs saving
 
 	// Rating pipeline — all optional (nil disables the feature).
 	ratingCache   *RatingCache
@@ -420,7 +421,7 @@ func (p *Processor) Run() Stats {
 		stats.PlexErrors += p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, p.manualData[showFolder])
 		p.ratingSaver.save(showFolder)
 	}
-	for _, lost := range []bool{p.showSaver.finish(), p.ratingSaver.finish(), newRetrySaver(p.retryList).saveOnce()} {
+	for _, lost := range []bool{p.showSaver.finish(), p.ratingSaver.finish(), newRetrySaver(p.retryList).saveOnce(), p.saveMovedTitles()} {
 		if lost {
 			stats.LostSaves++
 		}
@@ -582,6 +583,9 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 	}
 	if p.retryList != nil && p.retryList.Move(filepath.Join(dir, file), newPath) {
 		p.retryMoved = true
+	}
+	if p.titleCache.Move(filepath.Join(dir, file), newPath) {
+		p.titleMoved = true
 	}
 	return newFile, newPath
 }
@@ -1012,11 +1016,19 @@ func (p *Processor) RunDebandOnly() Stats {
 		}
 	}
 
-	// Only a rename changes the list, so an untouched one isn't rewritten.
-	if p.retryMoved && newRetrySaver(p.retryList).saveOnce() {
-		stats.LostSaves++
+	// Only a rename changes these, so untouched ones aren't rewritten.
+	for _, lost := range []bool{p.retryMoved && newRetrySaver(p.retryList).saveOnce(), p.saveMovedTitles()} {
+		if lost {
+			stats.LostSaves++
+		}
 	}
 	return stats
+}
+
+// saveMovedTitles saves the title cache when a rename moved an entry in it,
+// and reports whether that save was lost.
+func (p *Processor) saveMovedTitles() (lost bool) {
+	return p.titleMoved && newTitleSaver(p.titleCache).saveOnce()
 }
 
 // applyPlexRatings pushes cached ratings to Plex at episode, season, and show

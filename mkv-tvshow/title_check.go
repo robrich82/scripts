@@ -288,6 +288,7 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 	if tc.retryList != nil && tc.retryList.Move(path, newPath) {
 		tc.moved = true
 	}
+	tc.titleCache.Move(path, newPath) // saved with the show
 	return newPath
 }
 

@@ -837,7 +837,7 @@ compared individually against each corresponding TMDB episode and joined with
 If the new path would exceed Windows MAX_PATH (260 characters), the title is
 automatically truncated at a word boundary to fit.
 
-A renamed file keeps its place on the retry list (`pending_dates.json`), with its failed runs and the date of the first.
+A renamed file keeps its place on the retry list (`pending_dates.json`), with its failed runs and the date of the first, and its cached full title. So does a multi-episode file a normal or `--deband-only` run renames (`S01E01E02E03` → `S01E01-E03`).
 
 After checking (and optionally renaming) each episode, `--title-check` also sets
 the MKV `title` metadata to the **full, untruncated** TMDB title — MKV metadata

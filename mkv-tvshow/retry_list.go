@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"runtime"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -27,18 +25,6 @@ var retryNow = time.Now
 func retryToday() time.Time {
 	n := retryNow()
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.Local)
-}
-
-// foldPathCase is whether retry-list paths compare case-insensitively, as
-// they do on Windows; tests set it.
-var foldPathCase = runtime.GOOS == "windows"
-
-// pathKey is p in the form retry-list lookups compare.
-func pathKey(p string) string {
-	if foldPathCase {
-		return strings.ToLower(p)
-	}
-	return p
 }
 
 // RetryList is a persistent set of file paths to re-process on every run
