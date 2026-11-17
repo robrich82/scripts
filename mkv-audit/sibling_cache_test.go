@@ -206,7 +206,7 @@ func TestFetchOrigins_MovieIDSavedWithFiles(t *testing.T) {
 	writeSibling(t, cachePath, `{"movies":{"9":"M"},"tmdb_ids":{"Coco:2017":"9"},"files":{"C:\\coco.mkv":"9"}}`)
 
 	captureStdout(t, func() {
-		origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"})
+		origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"})
 		if origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr for the confirmed movie", origins)
 		}
@@ -236,7 +236,7 @@ func TestFetchOrigins_TwoMoviesGetTheirOwnIDs(t *testing.T) {
 	}
 
 	captureStdout(t, func() {
-		origins := fetchOrigins(append(amelie, coco...), root, "movie", tmdb, &fakePrompter{answer: "y"})
+		origins, _ := fetchOrigins(append(amelie, coco...), root, "movie", tmdb, &fakePrompter{answer: "y"})
 		if origins["Amelie (2001)"].OrigLang != "fr" || origins["Coco (2017)"].OrigLang != "es" {
 			t.Errorf("origins = %v; want Amelie fr and Coco es", origins)
 		}
@@ -327,7 +327,7 @@ func TestFetchOrigins_MovieFoundByMappedFile(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
 
 	captureStdout(t, func() {
-		origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t})
+		origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t})
 		if origins["Amelie.(2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr from the mapped file's ID", origins)
 		}
@@ -342,7 +342,7 @@ func TestFetchOrigins_FlatMovieLibrary(t *testing.T) {
 	path := filepath.Join(root, "Amelie (2001).mkv")
 
 	captureStdout(t, func() {
-		origins := fetchOrigins([]string{path}, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"})
+		origins, _ := fetchOrigins([]string{path}, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"})
 		if origins["Amelie (2001).mkv"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr for the flat movie", origins)
 		}
@@ -385,7 +385,7 @@ func TestFetchOrigins_CorruptSiblingCacheLeftAlone(t *testing.T) {
 			writeSibling(t, tc.cachePath(), tc.corrupt)
 
 			out := captureStdout(t, func() {
-				origins := fetchOrigins(paths, root, tc.libType, searchTMDB{}, &fakePrompter{answer: "y"})
+				origins, _ := fetchOrigins(paths, root, tc.libType, searchTMDB{}, &fakePrompter{answer: "y"})
 				for _, e := range tc.entries {
 					if origins[e].IsZero() {
 						t.Errorf("origins[%q] unset (%v); want the confirmed ID used for this run", e, origins)
@@ -489,7 +489,7 @@ func TestFetchOrigins_SaveFailureRetried(t *testing.T) {
 			t.Cleanup(func() { beforeFinalSiblingSave = old })
 
 			out := captureStdout(t, func() {
-				if origins := fetchOrigins(paths, root, "movie", tmdb, &fakePrompter{answer: "y"}); len(origins) != 2 {
+				if origins, _ := fetchOrigins(paths, root, "movie", tmdb, &fakePrompter{answer: "y"}); len(origins) != 2 {
 					t.Errorf("origins = %v; want both movies despite the failed save", origins)
 				}
 			})
@@ -578,7 +578,7 @@ func TestFetchOrigins_SaveFailureRetriedAnyPlatform(t *testing.T) {
 				t.Cleanup(func() { beforeFinalSiblingSave = old })
 
 				out := captureStdout(t, func() {
-					if origins := fetchOrigins(paths, root, lib.libType, tmdb, &fakePrompter{answer: "y"}); len(origins) != 2 {
+					if origins, _ := fetchOrigins(paths, root, lib.libType, tmdb, &fakePrompter{answer: "y"}); len(origins) != 2 {
 						t.Errorf("origins = %v; want both despite the failed save", origins)
 					}
 				})
@@ -622,7 +622,7 @@ func TestFetchOrigins_ShowPathAnySpelling(t *testing.T) {
 		tmdb := titleTMDB{langs: map[string]string{"77": "ja"}}
 
 		captureStdout(t, func() {
-			if origins := fetchOrigins(paths, root, "tv", tmdb, noPrompter{t}); origins["Show (2020)"].OrigLang != "ja" {
+			if origins, _ := fetchOrigins(paths, root, "tv", tmdb, noPrompter{t}); origins["Show (2020)"].OrigLang != "ja" {
 				t.Errorf("origins = %v; want ja from the cached ID", origins)
 			}
 		})
@@ -715,7 +715,7 @@ func TestFetchOrigins_ShowCacheHit(t *testing.T) {
 			tmdb := titleTMDB{langs: map[string]string{"77": "ja"}}
 
 			captureStdout(t, func() {
-				origins := fetchOrigins(paths, root, "tv", tmdb, noPrompter{t})
+				origins, _ := fetchOrigins(paths, root, "tv", tmdb, noPrompter{t})
 				if origins["Show (2020)"].OrigLang != "ja" {
 					t.Errorf("origins = %v; want ja from cached ID 77", origins)
 				}
@@ -835,7 +835,7 @@ func TestFetchOrigins_NoInputSkipsLookups(t *testing.T) {
 	p := &scriptPrompter{}
 
 	out := captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, p); len(origins) != 0 {
+		if origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, p); len(origins) != 0 {
 			t.Errorf("origins = %v; want none", origins)
 		}
 	})
@@ -885,7 +885,7 @@ func TestFetchOrigins_NoConfigDirWarnsOnce(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"}); len(origins) != 2 {
+		if origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"}); len(origins) != 2 {
 			t.Errorf("origins = %v; want both movies", origins)
 		}
 	})
@@ -960,7 +960,7 @@ func TestFetchOrigins_UnreadableCacheNotCalledCorrupt(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"}); len(origins) != 1 {
+		if origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, &fakePrompter{answer: "y"}); len(origins) != 1 {
 			t.Errorf("origins = %v; want the confirmed movie", origins)
 		}
 	})
@@ -983,7 +983,7 @@ func TestFetchOrigins_SameMovieKeyAskedOnce(t *testing.T) {
 	p := &scriptPrompter{answers: []string{"y", "y"}}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, p); len(origins) != 2 {
+		if origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, p); len(origins) != 2 {
 			t.Errorf("origins = %v; want both roots", origins)
 		}
 	})
@@ -1032,7 +1032,7 @@ func TestFetchOrigins_CollectionUsesMostMappedID(t *testing.T) {
 				langs: map[string]string{"24": "en", "42": "fr", "393": "ja", "999": "de", "1000": "it"}}
 
 			captureStdout(t, func() {
-				origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t})
+				origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t})
 				if got, want := origins["Kill Bill Collection"].OrigLang, tmdb.langs[tc.wantID]; got != want {
 					t.Errorf("origin = %q; want %q from ID %s", got, want, tc.wantID)
 				}
@@ -1054,7 +1054,7 @@ func TestFetchOrigins_TitleKeyHitMapsFiles(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr from the title key", origins)
 		}
 	})
@@ -1081,7 +1081,7 @@ func TestFetchOrigins_UnloadableMovieCacheNotUsed(t *testing.T) {
 	p := &scriptPrompter{answers: []string{"y"}}
 
 	out := captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", tmdb, p); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins(paths, root, "movie", tmdb, p); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr from the confirmed search result", origins)
 		}
 	})
@@ -1137,7 +1137,7 @@ func TestFetchOrigins_MovieFileMappingUsed(t *testing.T) {
 			tmdb := titleTMDB{langs: map[string]string{"1": "en", "5": "de", "194": "fr"}}
 
 			captureStdout(t, func() {
-				origins := fetchOrigins([]string{path}, root, "movie", tmdb, noPrompter{t})
+				origins, _ := fetchOrigins([]string{path}, root, "movie", tmdb, noPrompter{t})
 				if len(origins) != 1 {
 					t.Fatalf("origins = %v; want one", origins)
 				}
@@ -1166,7 +1166,7 @@ func TestFetchOrigins_MappedFileMatchesAnySpelling(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr from the mapped file", origins)
 		}
 	})
@@ -1202,7 +1202,7 @@ func TestFetchOrigins_TitleKeyNotMappedToSeveralFiles(t *testing.T) {
 			tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
 
 			captureStdout(t, func() {
-				if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+				if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 					t.Errorf("origins = %v; want fr from the title key", origins)
 				}
 			})
@@ -1243,7 +1243,7 @@ func TestFetchOrigins_RootFilesBeatExtras(t *testing.T) {
 			tmdb := titleTMDB{langs: map[string]string{"5": "en", "194": "fr"}}
 
 			captureStdout(t, func() {
-				origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t})
+				origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t})
 				if got, want := origins["Amelie (2001)"].OrigLang, tmdb.langs[tc.wantID]; got != want {
 					t.Errorf("origin = %q; want %q from ID %s", got, want, tc.wantID)
 				}
@@ -1263,31 +1263,171 @@ func TestFetchOrigins_GoneFileMappingIgnored(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"5": "en", "194": "fr"}}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr from the file that exists", origins)
 		}
 	})
 }
 
-// A folder whose movies are only in subfolders, mapped to different IDs, may
-// be a grouping folder (A-M/<movie>) rather than a collection, so it is asked
-// about rather than given one of their IDs.
+// A folder whose movies are only in subfolders named without a year, mapped
+// to different IDs, may be a grouping folder (A-M/<movie>) rather than a
+// collection, so it is asked about rather than given one of their IDs.
 func TestFetchOrigins_GroupingFolderAsked(t *testing.T) {
 	root, _ := siblingLibrary(t, "A-M")
-	amelie := addEntry(t, root, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")
-	coco := addEntry(t, root, filepath.Join("A-M", "Coco (2017)"), "c.mkv")
+	amelie := addEntry(t, root, filepath.Join("A-M", "Amelie"), "a.mkv")
+	coco := addEntry(t, root, filepath.Join("A-M", "Coco"), "c.mkv")
 	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {amelie[0]: "194", coco[0]: "9"}}))
 	tmdb := titleTMDB{langs: map[string]string{"9": "es", "194": "fr"}}
 	p := &scriptPrompter{answers: []string{""}}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins(append(amelie, coco...), root, "movie", tmdb, p); len(origins) != 0 {
+		if origins, _ := fetchOrigins(append(amelie, coco...), root, "movie", tmdb, p); len(origins) != 0 {
 			t.Errorf("origins = %v; want none, the question was skipped", origins)
 		}
 	})
 	if len(p.asked) != 1 {
 		t.Errorf("asked %d times; want once", len(p.asked))
 	}
+}
+
+// Each movie folder under a grouping folder, nested or not, is searched and
+// asked about on its own and saved with its own files; with accept-all each
+// takes its own top hit.
+func TestFetchOrigins_GroupingFolderMoviesGetOwnOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		group     [2]string // the grouping folders holding Amelie and Coco
+		answers   []string
+		wantAsked int
+	}{
+		{"asked about each", [2]string{"A-M", "A-M"}, []string{"y", "y"}, 2},
+		{"accept all", [2]string{"A-M", "A-M"}, []string{"a"}, 1},
+		{"nested", [2]string{filepath.Join("A-M", "A"), filepath.Join("A-M", "C")}, []string{"y", "y"}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setConfigDir(t, t.TempDir())
+			root := t.TempDir()
+			amelieDir, cocoDir := filepath.Join(tc.group[0], "Amelie (2001)"), filepath.Join(tc.group[1], "Coco (2017)")
+			amelie := addEntry(t, root, amelieDir, "a.mkv")
+			coco := addEntry(t, root, cocoDir, "c.mkv")
+			tmdb := titleTMDB{ids: map[string]string{"Amelie": "42", "Coco": "9"}, langs: map[string]string{"42": "fr", "9": "es"}}
+			p := &scriptPrompter{answers: tc.answers}
+
+			captureStdout(t, func() {
+				origins, roots := fetchOrigins(append(amelie, coco...), root, "movie", tmdb, p)
+				if origins[amelieDir].OrigLang != "fr" || origins[cocoDir].OrigLang != "es" || len(origins) != 2 {
+					t.Errorf("origins = %v; want %s fr and %s es", origins, amelieDir, cocoDir)
+				}
+				if roots[amelie[0]] != amelieDir || roots[coco[0]] != cocoDir {
+					t.Errorf("roots = %v; want each file's movie folder", roots)
+				}
+			})
+
+			if len(p.asked) != tc.wantAsked {
+				t.Errorf("asked %d times; want %d:\n%s", len(p.asked), tc.wantAsked, strings.Join(p.asked, "\n"))
+			}
+			ids, files := readMovieSections(t)
+			if ids["Amelie:2001"] != "42" || ids["Coco:2017"] != "9" || len(ids) != 2 {
+				t.Errorf("tmdb_ids = %v; want Amelie:2001 → 42 and Coco:2017 → 9", ids)
+			}
+			if files[amelie[0]] != "42" || files[coco[0]] != "9" || len(files) != 2 {
+				t.Errorf("files = %v; want each movie's file → its own ID", files)
+			}
+		})
+	}
+}
+
+// A movie under a grouping folder that mkv-movie has processed keeps its own
+// ID; it isn't used for the movie beside it, which is asked about and saved.
+func TestFetchOrigins_GroupingFolderOneMovieMapped(t *testing.T) {
+	root, _ := siblingLibrary(t, "A-M")
+	amelie := addEntry(t, root, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")
+	coco := addEntry(t, root, filepath.Join("A-M", "Coco (2017)"), "c.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {amelie[0]: "194"}}))
+	tmdb := titleTMDB{ids: map[string]string{"Coco": "9"}, langs: map[string]string{"9": "es", "194": "fr"}}
+	p := &scriptPrompter{answers: []string{"y"}}
+
+	captureStdout(t, func() {
+		origins, _ := fetchOrigins(append(amelie, coco...), root, "movie", tmdb, p)
+		if origins[filepath.Join("A-M", "Amelie (2001)")].OrigLang != "fr" || origins[filepath.Join("A-M", "Coco (2017)")].OrigLang != "es" {
+			t.Errorf("origins = %v; want Amelie fr from its mapping and Coco es from the answer", origins)
+		}
+	})
+
+	if len(p.asked) != 1 || !strings.Contains(p.asked[0], "Coco") {
+		t.Errorf("asked %q; want one question, about Coco", p.asked)
+	}
+	ids, files := readMovieSections(t)
+	if ids["Coco:2017"] != "9" || len(ids) != 1 || files[amelie[0]] != "194" || files[coco[0]] != "9" || len(files) != 2 {
+		t.Errorf("tmdb_ids = %v, files = %v; want Coco saved with its file and Amelie's mapping kept", ids, files)
+	}
+}
+
+// A movie folder under a grouping folder follows the rules of any movie
+// folder: one split across discs is saved with both discs' files, and a flat
+// collection is used for the run only.
+func TestFetchOrigins_GroupingFolderMovieFolderRules(t *testing.T) {
+	root, _ := siblingLibrary(t, "A-M")
+	discs := addEntry(t, root, filepath.Join("A-M", "Amelie (2001)", "Disc1"), "a.mkv")
+	discs = append(discs, addEntry(t, root, filepath.Join("A-M", "Amelie (2001)", "Disc2"), "b.mkv")...)
+	collection := addEntry(t, root, filepath.Join("A-M", "Kill Bill Collection"), "v1.mkv", "v2.mkv")
+	tmdb := titleTMDB{ids: map[string]string{"Amelie": "42", "Kill Bill Collection": "24"}, langs: map[string]string{"42": "fr", "24": "en"}}
+
+	out := captureStdout(t, func() {
+		origins, _ := fetchOrigins(append(discs, collection...), root, "movie", tmdb, &scriptPrompter{answers: []string{"y", "y"}})
+		if origins[filepath.Join("A-M", "Amelie (2001)")].OrigLang != "fr" || origins[filepath.Join("A-M", "Kill Bill Collection")].OrigLang != "en" {
+			t.Errorf("origins = %v; want Amelie fr and the collection en", origins)
+		}
+	})
+
+	if want := filepath.Join("A-M", "Kill Bill Collection") + ": id 24 used for this run only"; !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	ids, files := readMovieSections(t)
+	if !maps.Equal(ids, map[string]string{"Amelie:2001": "42"}) || !maps.Equal(files, map[string]string{discs[0]: "42", discs[1]: "42"}) {
+		t.Errorf("tmdb_ids = %v, files = %v; want only Amelie saved, with both discs", ids, files)
+	}
+}
+
+// contentRoots goes below the first folder only for a movie library's
+// grouping folders.
+func TestContentRoots(t *testing.T) {
+	root := t.TempDir()
+	mk := func(rel string) string {
+		makeMKVFile(t, mkdir(t, filepath.Join(root, filepath.Dir(rel))), filepath.Base(rel))
+		return filepath.Join(root, rel)
+	}
+	group := []string{mk("A-M/Amelie (2001)/a.mkv"), mk("A-M/Coco (2017)/c.mkv")}
+	loose := []string{mk("Misc/loose.mkv"), mk("Misc/Amelie (2001)/a.mkv"), mk("Misc/Coco (2017)/c.mkv")}
+	flat := mk("Brave (2012).mkv")
+	outside := filepath.Join(t.TempDir(), "x.mkv")
+	files := slices.Concat(group, loose, []string{flat, outside})
+
+	for _, tc := range []struct {
+		libType string
+		want    []string // per file, "" for none
+	}{
+		{"movie", []string{filepath.Join("A-M", "Amelie (2001)"), filepath.Join("A-M", "Coco (2017)"), "Misc", "Misc", "Misc", "Brave (2012).mkv", ""}},
+		{"tv", []string{"A-M", "A-M", "Misc", "Misc", "Misc", "Brave (2012).mkv", ""}},
+	} {
+		t.Run(tc.libType, func(t *testing.T) {
+			roots := contentRoots(files, root, tc.libType)
+			for i, f := range files {
+				if roots[f] != tc.want[i] {
+					t.Errorf("root of %s = %q; want %q", f, roots[f], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// mkdir makes dir and its parents, and returns it.
+func mkdir(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // An ID TMDB no longer has falls back to the next: the next most mapped, then
@@ -1311,7 +1451,7 @@ func TestFetchOrigins_MissingIDFallsBack(t *testing.T) {
 			tmdb := titleTMDB{langs: map[string]string{"194": "fr"}} // no 5
 
 			out := captureStdout(t, func() {
-				if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+				if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 					t.Errorf("origins = %v; want fr from ID 194", origins)
 				}
 			})
@@ -1334,7 +1474,7 @@ func TestFetchOrigins_EmptyMappingNotRewritten(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr from the title key", origins)
 		}
 	})
@@ -1392,9 +1532,9 @@ func TestFetchOrigins_AnswerForSeveralMoviesNotSaved(t *testing.T) {
 		wantSaved bool
 	}{
 		{"mapped files disagree", func(t *testing.T, root string) []string {
-			p := addEntry(t, root, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")
-			p = append(p, addEntry(t, root, filepath.Join("A-M", "Brave (2012)"), "b.mkv")...)
-			return append(p, addEntry(t, root, filepath.Join("A-M", "Coco (2017)"), "c.mkv")...)
+			p := addEntry(t, root, filepath.Join("A-M", "Amelie"), "a.mkv")
+			p = append(p, addEntry(t, root, filepath.Join("A-M", "Brave"), "b.mkv")...)
+			return append(p, addEntry(t, root, filepath.Join("A-M", "Coco"), "c.mkv")...)
 		}, func(p []string) string {
 			return `{"files":{` + strings.Join([]string{jsonPair(p[0], "194"), jsonPair(p[2], "9")}, ",") + `}}`
 		}, false},
@@ -1406,8 +1546,12 @@ func TestFetchOrigins_AnswerForSeveralMoviesNotSaved(t *testing.T) {
 			return `{"files":{` + strings.Join([]string{jsonPair(p[1], "194"), jsonPair(p[2], "9")}, ",") + `}}`
 		}, false},
 		{"unprocessed movie folders", func(t *testing.T, root string) []string {
-			p := addEntry(t, root, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")
-			return append(p, addEntry(t, root, filepath.Join("A-M", "Brave (2012)"), "b.mkv")...)
+			p := addEntry(t, root, filepath.Join("A-M", "Amelie"), "a.mkv")
+			return append(p, addEntry(t, root, filepath.Join("A-M", "Brave"), "b.mkv")...)
+		}, func([]string) string { return `{"movies":{"9":"M"}}` }, false},
+		{"discs", func(t *testing.T, root string) []string {
+			p := addEntry(t, root, filepath.Join("A-M", "Disc1"), "a.mkv")
+			return append(p, addEntry(t, root, filepath.Join("A-M", "Disc2"), "b.mkv")...)
 		}, func([]string) string { return `{"movies":{"9":"M"}}` }, false},
 		{"movie with extras", func(t *testing.T, root string) []string {
 			p := addEntry(t, root, "A-M", "movie.mkv")
@@ -1422,7 +1566,7 @@ func TestFetchOrigins_AnswerForSeveralMoviesNotSaved(t *testing.T) {
 			before, _ := os.ReadFile(movieRatingCachePath())
 
 			out := captureStdout(t, func() {
-				if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &scriptPrompter{answers: []string{"y"}}); origins["A-M"].OrigLang != "fr" {
+				if origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, &scriptPrompter{answers: []string{"y"}}); origins["A-M"].OrigLang != "fr" {
 					t.Errorf("origins = %v; want fr from the confirmed answer", origins)
 				}
 			})
@@ -1458,7 +1602,7 @@ func TestFetchOrigins_BackfillKeepsTypedID(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}, onOrigin: func(id string) { looked = append(looked, id) }}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr", origins)
 		}
 	})
@@ -1482,7 +1626,7 @@ func TestFetchOrigins_TMDBErrorDoesNotFallBack(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"5": "", "194": "fr"}, onOrigin: func(id string) { looked = append(looked, id) }}
 
 	out := captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); len(origins) != 0 {
+		if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); len(origins) != 0 {
 			t.Errorf("origins = %v; want none after the error", origins)
 		}
 	})
@@ -1505,7 +1649,7 @@ func TestFetchOrigins_AllIDsMissing(t *testing.T) {
 	before, _ := os.ReadFile(movieRatingCachePath())
 
 	out := captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", titleTMDB{}, noPrompter{t}); len(origins) != 0 {
+		if origins, _ := fetchOrigins(paths, root, "movie", titleTMDB{}, noPrompter{t}); len(origins) != 0 {
 			t.Errorf("origins = %v; want none", origins)
 		}
 	})
@@ -1532,7 +1676,7 @@ func TestFetchOrigins_MultiDiscMovieSaved(t *testing.T) {
 		t.Errorf("tmdb_ids = %v, files = %v; want the answer saved for both discs", ids, files)
 	}
 	captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("run 2 origins = %v; want fr without asking", origins)
 		}
 	})
@@ -1557,7 +1701,7 @@ func TestFetchOrigins_FlatCollectionFilesNotMapped(t *testing.T) {
 			before, _ := os.ReadFile(movieRatingCachePath())
 
 			out := captureStdout(t, func() {
-				if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &scriptPrompter{answers: []string{"y"}}); origins[tc.entry].OrigLang != "fr" {
+				if origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, &scriptPrompter{answers: []string{"y"}}); origins[tc.entry].OrigLang != "fr" {
 					t.Errorf("origins = %v; want fr from the confirmed answer", origins)
 				}
 			})
@@ -1575,7 +1719,7 @@ func TestFetchOrigins_FlatCollectionFilesNotMapped(t *testing.T) {
 			}
 			saved, _ := os.ReadFile(movieRatingCachePath())
 			captureStdout(t, func() {
-				if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, noPrompter{t}); origins[tc.entry].OrigLang != "fr" {
+				if origins, _ := fetchOrigins(paths, root, "movie", searchTMDB{}, noPrompter{t}); origins[tc.entry].OrigLang != "fr" {
 					t.Errorf("run 2 origins = %v; want fr from the title key without asking", origins)
 				}
 			})
@@ -1593,7 +1737,7 @@ func TestFetchOrigins_SingleNestedIDUsed(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins(paths, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr from the subfolder files' ID", origins)
 		}
 	})
@@ -1610,7 +1754,7 @@ func TestFetchOrigins_OfflineDriveMappingCounts(t *testing.T) {
 	tmdb := titleTMDB{langs: map[string]string{"194": "fr"}}
 
 	captureStdout(t, func() {
-		if origins := fetchOrigins([]string{path}, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
+		if origins, _ := fetchOrigins([]string{path}, root, "movie", tmdb, noPrompter{t}); origins["Amelie (2001)"].OrigLang != "fr" {
 			t.Errorf("origins = %v; want fr from the offline file's ID", origins)
 		}
 	})

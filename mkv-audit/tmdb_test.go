@@ -60,7 +60,7 @@ func TestFetchOrigins_HTTPNotFoundFallsBack(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		if origins := fetchOrigins(paths, root, "movie", c, noPrompter{t}); origins["Amelie (2001)"] != (OriginInfo{OrigLang: "fr", OriginCountry: "FR"}) {
+		if origins, _ := fetchOrigins(paths, root, "movie", c, noPrompter{t}); origins["Amelie (2001)"] != (OriginInfo{OrigLang: "fr", OriginCountry: "FR"}) {
 			t.Errorf("origins = %v; want fr-FR from ID 194", origins)
 		}
 	})
