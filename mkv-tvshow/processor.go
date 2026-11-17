@@ -577,6 +577,9 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 		// If rename fails, continue with the original name.
 		return file, filepath.Join(dir, file)
 	}
+	if p.retryList != nil {
+		p.retryList.Move(filepath.Join(dir, file), newPath)
+	}
 	return newFile, newPath
 }
 

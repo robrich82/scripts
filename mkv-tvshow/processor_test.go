@@ -283,6 +283,28 @@ func TestNormalizeFilename_TwoEpisodes_NoRename(t *testing.T) {
 	}
 }
 
+// A renamed file keeps its retry-list entry, failed-run count included.
+func TestNormalizeFilename_RenameMovesRetryEntry(t *testing.T) {
+	dir := t.TempDir()
+	name := "Show - S01E01E02E03.mkv"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	retry := newRetryList(filepath.Join(t.TempDir(), "pending_dates.json"))
+	retry.Add(filepath.Join(dir, name))
+	retry.Fail(filepath.Join(dir, name))
+
+	p := &Processor{retryList: retry}
+	_, newPath := p.normalizeFilename(dir, name)
+
+	if retry.Has(filepath.Join(dir, name)) {
+		t.Error("the old path is still on the retry list")
+	}
+	if !retry.Has(newPath) || retry.Attempts(newPath) != 1 {
+		t.Errorf("new path listed = %v with %d failed runs; want listed with 1", retry.Has(newPath), retry.Attempts(newPath))
+	}
+}
+
 func TestNormalizeFilename_ThreeEpisodes_Renamed(t *testing.T) {
 	dir := t.TempDir()
 	name := "Show - S01E01E02E03.mkv"
