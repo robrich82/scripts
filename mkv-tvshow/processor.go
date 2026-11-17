@@ -297,15 +297,17 @@ func (p *Processor) Run() Stats {
 
 						rating := p.resolveEpisodeRating(showID, showName, filePath, posterSeason, 0)
 						deband := entry.resolveDeband(fmt.Sprintf("S%02d", posterSeason), "")
+						// Without a date or an episode reference, no date will ever come.
+						awaitingDate := stampDate == "" && epNum > 0
 						if wrote, failed := p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating, deband); wrote {
-							p.trackRetry(filePath, file, stampDate, failed)
+							p.trackRetry(filePath, file, awaitingDate, failed)
 							showTouched = true
 							extrasProcessed = true
 							stats.countTagged("Processed (extra)", file, failed)
 						} else {
 							fmt.Printf("  [X] Failed (extra): %s\n", file)
 							stats.Failed++
-							p.trackTagFailure(filePath, file, stampDate)
+							p.trackTagFailure(filePath, file, awaitingDate)
 						}
 						time.Sleep(50 * time.Millisecond)
 						continue
@@ -401,13 +403,13 @@ func (p *Processor) Run() Stats {
 				)
 			}
 			if wrote, failed := p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating, deband); wrote {
-				p.trackRetry(filePath, file, stampDate, failed)
+				p.trackRetry(filePath, file, stampDate == "", failed)
 				showTouched = true
 				stats.countTagged("Processed", file, failed)
 			} else {
 				fmt.Printf("  [X] Failed: %s\n", file)
 				stats.Failed++
-				p.trackTagFailure(filePath, file, stampDate)
+				p.trackTagFailure(filePath, file, stampDate == "")
 			}
 
 			time.Sleep(50 * time.Millisecond)
@@ -1196,14 +1198,14 @@ func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, sea
 	return sr, nil
 }
 
-// trackRetry keeps a file on the retry list until it has a real air date and
-// no step failed, so a later run finishes it even once it falls before the
+// trackRetry keeps a file on the retry list while it is awaiting an air date
+// or a step failed, so a later run finishes it even once it falls before the
 // cutoff. A file that fails a step on maxRetryAttempts runs in a row is
 // dropped, so a step that always fails doesn't rewrite it on every run. One
 // still waiting for an air date is never dropped.
-func (p *Processor) trackRetry(filePath, file, stampDate string, failed []string) {
+func (p *Processor) trackRetry(filePath, file string, awaitingDate bool, failed []string) {
 	switch {
-	case stampDate == "":
+	case awaitingDate:
 		p.retryList.Keep(filePath)
 	case len(failed) > 0:
 		if p.retryList.Fail(filePath) {
@@ -1223,11 +1225,11 @@ func (p *Processor) trackRetry(filePath, file, stampDate string, failed []string
 // Missing mkvpropedit fails every file alike, so the list is left as it was:
 // the run doesn't count, and a file not on it isn't added (under --all that
 // would put the whole library on it).
-func (p *Processor) trackTagFailure(filePath, file, stampDate string) {
+func (p *Processor) trackTagFailure(filePath, file string, awaitingDate bool) {
 	if !p.mkv.Available() {
 		return
 	}
-	p.trackRetry(filePath, file, stampDate, []string{"tags"})
+	p.trackRetry(filePath, file, awaitingDate, []string{"tags"})
 }
 
 // failTMDBLookup reports a failed TMDB season lookup for file and leaves it

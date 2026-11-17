@@ -568,3 +568,46 @@ func TestRetryList_CorruptArrayErrorNamesArray(t *testing.T) {
 		t.Errorf("err = %v; want it about the array's string entries", err)
 	}
 }
+
+// A manual extra with no date and no episode never gets a date, so once it is
+// tagged with no failed step it leaves the retry list; one with a failed step
+// counts the failure like any other file. One whose episode has no air date
+// yet keeps waiting for it.
+func TestRun_UndatedExtraRetry(t *testing.T) {
+	ok := func() *fakeMKVRunner {
+		return &fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterPath: "p.jpg"}
+	}
+	for _, tc := range []struct {
+		name      string
+		entry     ExtraEntry
+		tmdb      *fakeTMDB
+		runner    *fakeMKVRunner
+		wantOn    bool
+		wantFails int
+	}{
+		{"no date source, done", ExtraEntry{Season: 1}, &fakeTMDB{}, ok(), false, 0},
+		{"no date source or season, done", ExtraEntry{}, &fakeTMDB{}, ok(), false, 0},
+		{"no date source, poster failed", ExtraEntry{Season: 1}, &fakeTMDB{seasonResult: SeasonResult{PosterPath: "/p.jpg"}},
+			&fakeMKVRunner{avail: true, applyResult: "Done.", tagsPath: "t.xml", posterErr: errors.New("HTTP 503")}, true, 1},
+		{"no date source, tags failed", ExtraEntry{}, &fakeTMDB{}, &fakeMKVRunner{avail: true, applyRC: 2, tagsPath: "t.xml"}, true, 1},
+		{"episode without an air date", ExtraEntry{Episode: "S01E03"},
+			&fakeTMDB{seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 3}}}}, ok(), true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := showLibrary(t, "My Show", "My Show - Drama CD.mkv")
+			file := filepath.Join(dir, "My Show", "My Show - Drama CD.mkv")
+			manual := map[string]ManualEntry{"My Show": {Extras: map[string]ExtraEntry{"My Show - Drama CD": tc.entry}}}
+			retry := emptyRetryList(t)
+			retry.Add(file)
+			p := NewProcessor(Config{MediaDir: dir, ProcessAll: true}, cacheWith(t, map[string]string{"My Show": "999"}),
+				manual, tc.tmdb, tc.runner, &scriptedPrompter{}, &captureFileTimer{}, retry, emptyRatingCache(t), nil, nil, nil)
+
+			captureStdout(t, func() { p.Run() })
+
+			got := onDiskRetry(t, retry)
+			if got.Has(file) != tc.wantOn || got.Attempts(file) != tc.wantFails {
+				t.Errorf("on list = %v, attempts = %d; want %v, %d", got.Has(file), got.Attempts(file), tc.wantOn, tc.wantFails)
+			}
+		})
+	}
+}
