@@ -175,7 +175,7 @@ func (r *RetryList) Fail(path string) (gaveUp bool, runs, days int) {
 	e.path = path
 	e.fails++
 	today := retryToday()
-	if e.since.IsZero() {
+	if e.since.IsZero() || e.since.After(today) { // a later date means the clock was ahead
 		e.since = today
 	}
 	if e.fails >= maxRetryAttempts && !today.Before(e.since.AddDate(0, 0, maxRetryDays)) {

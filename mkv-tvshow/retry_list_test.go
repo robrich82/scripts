@@ -287,6 +287,27 @@ func TestRetryList_BadSinceFailsLoad(t *testing.T) {
 	}
 }
 
+// A first-failure date later than today (the clock was ahead) is taken as
+// today, so the cap still comes maxRetryDays later.
+func TestRetryList_FutureSinceTakesToday(t *testing.T) {
+	advance := setRetryClock(t)
+	path := filepath.Join(t.TempDir(), "pending_dates.json")
+	if err := os.WriteFile(path, []byte(`{"/tv/a.mkv": {"fails": 4, "since": "2027-06-01"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRetryList(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gaveUp, _, _ := r.Fail("/tv/a.mkv"); gaveUp {
+		t.Fatal("gave up on the day the date was corrected")
+	}
+	advance(maxRetryDays)
+	if gaveUp, runs, days := r.Fail("/tv/a.mkv"); !gaveUp || days != maxRetryDays {
+		t.Errorf("Fail = %v, %d, %d; want true after %d days", gaveUp, runs, days, maxRetryDays)
+	}
+}
+
 // Move keeps the date of the first failed run.
 func TestRetryList_MoveKeepsSince(t *testing.T) {
 	advance := setRetryClock(t)

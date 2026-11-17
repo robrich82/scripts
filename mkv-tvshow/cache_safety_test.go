@@ -851,6 +851,7 @@ func TestMain_Clean_UnloadableCacheExits(t *testing.T) {
 		{"empty show cache", "show_cache.json", []byte{}, true},
 		{"show cache of the wrong type", "show_cache.json", []byte(`["a"]`), true},
 		{"rating cache of the wrong type", "rating_cache.json", []byte(`{"shows": []}`), true},
+		{"retry list with a bad date", "pending_dates.json", []byte(`{"/tv/a.mkv": {"fails": 1, "since": "18/11/2026"}}`), true},
 		{"unreadable rating cache", "rating_cache.json", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -187,9 +187,10 @@ func exitOnCacheLoadError(path string, err error) {
 	hint := accessHint(err, false)
 	var syntaxErr *json.SyntaxError
 	var typeErr *json.UnmarshalTypeError
+	var dateErr *time.ParseError // a bad date in pending_dates.json
 	// show_cache.json is read with a json.Decoder, which reports an empty or
 	// truncated file as EOF rather than a syntax error.
-	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) || errors.As(err, &dateErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		hint = "It is corrupt: restore it from a backup if you have one, or delete it to start over."
 		if loses := cacheLoses[filepath.Base(path)]; loses != "" {
 			hint += "\nDeleting it loses " + loses + "."
