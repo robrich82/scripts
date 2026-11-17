@@ -95,7 +95,7 @@ func newTestProcessor(t *testing.T, dir string, cfg Config, cache *ShowCache, tm
 
 func emptyRetryList(t *testing.T) *RetryList {
 	t.Helper()
-	return &RetryList{path: filepath.Join(t.TempDir(), "pending_dates.json"), data: make(map[string]int)}
+	return newRetryList(filepath.Join(t.TempDir(), "pending_dates.json"))
 }
 
 func emptyRatingCache(t *testing.T) *RatingCache {

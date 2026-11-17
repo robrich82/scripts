@@ -175,7 +175,7 @@ func TestProcessorRun_RetryListSaveRetried(t *testing.T) {
 	}{{"recovers", true}, {"fails again", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := filepath.Join(t.TempDir(), "missing")
-			retry := &RetryList{path: filepath.Join(cfg, "pending_dates.json"), data: map[string]int{}}
+			retry := newRetryList(filepath.Join(cfg, "pending_dates.json"))
 			setBeforeFinalSave(t, func() {
 				if tc.recovers {
 					if err := os.Mkdir(cfg, 0o755); err != nil {
