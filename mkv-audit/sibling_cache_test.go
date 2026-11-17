@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -195,10 +196,12 @@ func assertNoTempFiles(t *testing.T, dir string) {
 }
 
 // A confirmed movie ID goes into mkv-movie's tmdb_ids with a files entry for
-// each of the movie's .mkv files, so mkv-movie --clean keeps it; mkv-movie's
-// other keys are kept as they were.
+// each of the movie's .mkv files, extras in subfolders included, so
+// mkv-movie --clean keeps it; mkv-movie's other keys are kept as they were.
 func TestFetchOrigins_MovieIDSavedWithFiles(t *testing.T) {
-	root, paths := siblingLibrary(t, "Amelie (2001)", "Amelie (2001).mkv", "Amelie (2001) - extras.mkv", "Amelie (2001).eng.mka")
+	root, paths := siblingLibrary(t, "Amelie (2001)", "Amelie (2001).mkv")
+	paths = append(paths, addEntry(t, root, filepath.Join("Amelie (2001)", "Extras"), "Trailer.mkv")...)
+	paths = append(paths, addEntry(t, root, "Amelie (2001)", "Amelie (2001).eng.mka")...)
 	cachePath := movieRatingCachePath()
 	writeSibling(t, cachePath, `{"movies":{"9":"M"},"tmdb_ids":{"Coco:2017":"9"},"files":{"C:\\coco.mkv":"9"}}`)
 
@@ -1533,6 +1536,52 @@ func TestFetchOrigins_MultiDiscMovieSaved(t *testing.T) {
 			t.Errorf("run 2 origins = %v; want fr without asking", origins)
 		}
 	})
+}
+
+// Several unmapped .mkv files directly in a folder may be different movies,
+// so none is mapped to the answer. Without a year in its name the answer is
+// for this run only; with one, the title key is saved and the next run uses
+// it without asking, still mapping no file.
+func TestFetchOrigins_FlatCollectionFilesNotMapped(t *testing.T) {
+	for _, tc := range []struct {
+		entry, wantOut string
+		wantIDs        map[string]string
+	}{
+		{"Kill Bill Collection", "used for this run only", nil},
+		{"Amelie (2001)", "not for its files", map[string]string{"Amelie:2001": "42"}},
+	} {
+		t.Run(tc.entry, func(t *testing.T) {
+			root, paths := siblingLibrary(t, tc.entry, "a.mkv", "b.mkv")
+			paths = append(paths, addEntry(t, root, filepath.Join(tc.entry, "Extras"), "trailer.mkv")...)
+			writeSibling(t, movieRatingCachePath(), `{"movies":{"9":"M"}}`)
+			before, _ := os.ReadFile(movieRatingCachePath())
+
+			out := captureStdout(t, func() {
+				if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, &scriptPrompter{answers: []string{"y"}}); origins[tc.entry].OrigLang != "fr" {
+					t.Errorf("origins = %v; want fr from the confirmed answer", origins)
+				}
+			})
+			if !strings.Contains(out, tc.wantOut) {
+				t.Errorf("output lacks %q:\n%s", tc.wantOut, out)
+			}
+
+			if tc.wantIDs == nil {
+				assertCacheUnchanged(t, before)
+				return
+			}
+			ids, files := readMovieSections(t)
+			if !maps.Equal(ids, tc.wantIDs) || len(files) != 0 {
+				t.Errorf("tmdb_ids = %v, files = %v; want only %v and no file mapped", ids, files, tc.wantIDs)
+			}
+			saved, _ := os.ReadFile(movieRatingCachePath())
+			captureStdout(t, func() {
+				if origins := fetchOrigins(paths, root, "movie", searchTMDB{}, noPrompter{t}); origins[tc.entry].OrigLang != "fr" {
+					t.Errorf("run 2 origins = %v; want fr from the title key without asking", origins)
+				}
+			})
+			assertCacheUnchanged(t, saved)
+		})
+	}
 }
 
 // Files only in subfolders that agree on one ID give that ID without asking.

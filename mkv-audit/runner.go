@@ -261,11 +261,17 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		case !cached && libType == "tv":
 			sibling.rememberTV(dir, root, id)
 		// A root whose files mkv-movie maps to IDs that didn't settle it, or
-		// that holds movie folders, may be several movies: the answer is for
-		// this run only, not saved under its name or onto its files. One whose
-		// name gives a year is one movie, even split across subfolders (discs).
-		case !cached && (sibling.rootMapped(root) || year == "" && groupsMovies(root)):
+		// that holds movie folders or several .mkv files, may be several
+		// movies: the answer is for this run only, not saved under its name or
+		// onto its files. One whose name gives a year is one movie, even split
+		// across subfolders (discs).
+		case !cached && (sibling.rootMapped(root) || year == "" && (groupsMovies(root) || severalDirectMKV(root))):
 			fmt.Printf("[TMDB]   %s: id %s used for this run only, not saved: the folder may hold several movies\n", dir, id)
+		// Several .mkv files beside each other may be different movies, so
+		// only the title key is saved; mkv-movie maps each file itself.
+		case !cached && severalDirectMKV(root):
+			fmt.Printf("[TMDB]   %s: id %s saved for the folder's title, not for its files: they may be different movies\n", dir, id)
+			sibling.rememberMovie(dir, title, year, id, nil, false)
 		case !cached:
 			sibling.rememberMovie(dir, title, year, id, dirFiles[dir], false)
 		// A title key alone (as older mkv-audit saved) is pruned by
