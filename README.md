@@ -302,7 +302,8 @@ tried. Confirmed IDs that TMDB finds are saved back to that cache, with a movie'
 files mapped to its ID; a movie found by title and year only has its file mapped too,
 when its folder holds a single `.mkv`. A grouping folder, whose name gives no year and
 which holds no `.mkv` directly but a folder named with a year (`A-M/<movie>`) or another
-grouping folder, isn't a movie: each movie folder under it is looked up on its own. A
+grouping folder, isn't a movie: each folder under it is looked up on its own, and one
+named without a year (`Extras`, a disc) only for that run. A
 folder that may hold several movies (its subfolder files map to different movies, or its
 name gives no year and it holds more than one `.mkv`, directly or all in subfolders
 named without a year) is, when no

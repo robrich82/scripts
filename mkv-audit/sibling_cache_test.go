@@ -1775,3 +1775,32 @@ func TestPathGone(t *testing.T) {
 		}
 	}
 }
+
+// A folder named without a year beside the movies under a grouping folder
+// (Extras, a disc) is looked up for the run only: nothing is saved for it.
+func TestFetchOrigins_GroupingFolderNoYearSubfolderNotSaved(t *testing.T) {
+	root, _ := siblingLibrary(t, "Kill Bill Collection")
+	vol1Dir := filepath.Join("Kill Bill Collection", "Kill Bill Vol 1 (2003)")
+	extrasDir := filepath.Join("Kill Bill Collection", "Extras")
+	vol1 := addEntry(t, root, vol1Dir, "a.mkv")
+	extras := addEntry(t, root, extrasDir, "making-of.mkv")
+	tmdb := titleTMDB{
+		ids:   map[string]string{"Kill Bill Vol 1": "24", "Extras": "999"},
+		langs: map[string]string{"24": "en", "999": "ja"},
+	}
+
+	captureStdout(t, func() {
+		origins, _ := fetchOrigins(append(vol1, extras...), root, "movie", tmdb, &scriptPrompter{answers: []string{"a"}})
+		if origins[vol1Dir].OrigLang != "en" || origins[extrasDir].OrigLang != "ja" {
+			t.Errorf("origins = %v; want each folder's answer for the run", origins)
+		}
+	})
+
+	ids, files := readMovieSections(t)
+	if len(ids) != 1 || ids["Kill Bill Vol 1:2003"] != "24" {
+		t.Errorf("tmdb_ids = %v; want only Kill Bill Vol 1:2003 → 24", ids)
+	}
+	if len(files) != 1 || files[vol1[0]] != "24" {
+		t.Errorf("files = %v; want only the movie's file → 24", files)
+	}
+}

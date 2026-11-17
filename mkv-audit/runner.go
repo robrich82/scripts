@@ -314,8 +314,9 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		// side, on discs, or in movie folders named without a year), may be
 		// several movies: the answer is for this run only, not saved under its
 		// name or onto its files. One whose name gives a year is one movie,
-		// even split across subfolders.
-		case !cached && (sibling.rootMapped(root) || year == "" && (groupsMovies(root) || severalDirectMKV(root))):
+		// even split across subfolders. A folder named without a year under a
+		// grouping folder (Extras, Disc1) may not be a movie at all.
+		case !cached && (sibling.rootMapped(root) || year == "" && (groupsMovies(root) || severalDirectMKV(root) || strings.ContainsRune(dir, filepath.Separator))):
 			fmt.Printf("[TMDB]   %s: id %s used for this run only, not saved: the folder may hold several movies\n", dir, id)
 		// Several .mkv files beside each other may be different movies, so
 		// only the title key is saved; mkv-movie maps each file itself.
