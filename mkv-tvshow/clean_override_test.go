@@ -70,6 +70,42 @@ func TestMain_Clean_SeasonOverrideIDs(t *testing.T) {
 	}
 }
 
+// A show folder gone from one library while one of the same name remains in
+// another keeps its override IDs: manual_data.json can't tell them apart.
+func TestMain_Clean_SameNameInTwoLibrariesKeepsOverrideIDs(t *testing.T) {
+	cfgHome := t.TempDir()
+	cfg := filepath.Join(cfgHome, "mkv-tvshow")
+	if err := os.MkdirAll(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(t.TempDir(), "Show B")
+	if err := os.Mkdir(kept, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shows, _ := LoadCache(filepath.Join(cfg, "show_cache.json"))
+	shows.Set(kept, "600")
+	shows.Set(filepath.Join(t.TempDir(), "Show B"), "500") // gone
+	mustSave(t, shows.Save())
+	writeManualData(t, cfg, `{"Show B": {"overrides": {"S02": {"id": "550", "map_season": 1}}}}`)
+	ratings, _ := LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
+	for _, id := range []string{"500", "550", "600"} {
+		ratings.SetShowRating(id, RatingPG)
+	}
+	mustSave(t, ratings.Save())
+
+	out, err := runMain(t, t.TempDir(), cfgHome, "--clean")
+
+	if err != nil {
+		t.Fatalf("--clean = %v:\n%s", err, out)
+	}
+	ratings, _ = LoadRatingCache(filepath.Join(cfg, "rating_cache.json"))
+	for id, want := range map[string]bool{"500": false, "550": true, "600": true} {
+		if _, ok := ratings.GetShowRating(id); ok != want {
+			t.Errorf("rating for show %s kept = %v; want %v", id, ok, want)
+		}
+	}
+}
+
 // With show_cache.json empty, --all-ids still keeps every show ID, even with
 // override IDs known from manual_data.json.
 func TestMain_Clean_AllIDsEmptyShowCacheWithOverrides(t *testing.T) {
