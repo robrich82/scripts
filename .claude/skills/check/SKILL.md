@@ -3,7 +3,7 @@ name: check
 description: Run the full test and lint suite (`mise run vet` + `mise run vet-linux` + `mise run test`) across all modules. Use this skill before committing, after making code changes, or any time you want to verify the repo is clean — never run go vet or go test directly.
 ---
 
-Run the full test and lint suite across all modules. Run the commands from the Bash tool (Git Bash): the mise tasks need its `sh`, which PowerShell lacks.
+Run the full test and lint suite across all modules.
 
 ## Steps
 

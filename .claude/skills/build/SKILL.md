@@ -13,7 +13,7 @@ Build the tool(s) affected by recent changes with `mise run build`.
 
 1. Check which tool directories contain recent changes: `git diff --name-only HEAD`.
 2. Extract the top-level directory name from each changed path (e.g. `mkv-music/audio_timestamps.go` → `mkv-music`).
-3. Run `mise run build <dir> [<dir>...]` with those names, from the Bash tool (Git Bash; the tasks need its `sh`). If you're unsure which modules changed, run `mise run build` with no names to build them all. Never invoke `go build` directly.
+3. Run `mise run build <dir> [<dir>...]` with those names. If you're unsure which modules changed, run `mise run build` with no names to build them all. Never invoke `go build` directly.
 4. Report the result. If the build fails, show the error output and stop.
 
 If $ARGUMENTS is provided, treat it as the tool name(s) to build (e.g. `mkv-audit` → `mise run build mkv-audit`).

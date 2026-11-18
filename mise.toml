@@ -9,53 +9,83 @@ ffmpeg = "9.0.2" # tests only: builds fixtures for the real-binary tests
 golangci-lint = "2.15.0"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
 
+# Module tasks take module directory names (`mise run test mkv-movie`) and default to every
+# top-level directory with a go.mod. Each starts with the same line so a failing command stops it.
 [task_config]
-# Git's sh: Windows' default is cmd, and PowerShell's `bash` is WSL's. -e stops at the first failure.
-shell = "sh -ec"
+# Runs the same from PowerShell, Git Bash and CI; Windows' default is cmd.
+shell = "pwsh -NoProfile -Command"
 
 [tasks.build]
 description = "Build each module to dist/<module>.exe"
 usage = 'arg "[module]..." help="Modules to build; all by default"'
-run = 'for m in ${usage_module:-$(dirname */go.mod)}; do m=${m%/}; echo "# $m"; (cd "$m" && go build -o "../dist/$m.exe" .); done'
+run = '''
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+  $m = $m.Trim(".\/'".ToCharArray()); "# $m"
+  Push-Location $m; try { go build -o "../dist/$m.exe" . } finally { Pop-Location }
+}
+'''
 
 [tasks.test]
 description = "go test each module"
 usage = 'arg "[module]..." help="Modules to test; all by default"'
-run = 'for m in ${usage_module:-$(dirname */go.mod)}; do m=${m%/}; echo "# $m"; (cd "$m" && go test ./...); done'
+run = '''
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+  $m = $m.Trim(".\/'".ToCharArray()); "# $m"
+  Push-Location $m; try { go test ./... } finally { Pop-Location }
+}
+'''
 
 [tasks.vet]
 description = "go vet, go mod tidy -diff, golangci-lint run and fmt --diff for each module"
 usage = 'arg "[module]..." help="Modules to vet; all by default"'
 run = '''
-for m in ${usage_module:-$(dirname */go.mod)}; do
-  m=${m%/}; echo "# $m"
-  (cd "$m" && go vet ./... && go mod tidy -diff && golangci-lint run ./... && golangci-lint fmt --diff ./...)
-done
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+  $m = $m.Trim(".\/'".ToCharArray()); "# $m"
+  Push-Location $m
+  try { go vet ./...; go mod tidy -diff; golangci-lint run ./...; golangci-lint fmt --diff ./... } finally { Pop-Location }
+}
 '''
 
 # No fmt: it ignores build tags, so vet's run already covers the stubs.
 [tasks.vet-linux]
 description = "Type-check and lint each module's non-Windows stubs"
 usage = 'arg "[module]..." help="Modules to vet; all by default"'
-run = 'for m in ${usage_module:-$(dirname */go.mod)}; do m=${m%/}; echo "# $m"; (cd "$m" && GOOS=linux go vet ./... && GOOS=linux golangci-lint run ./...); done'
+run = '''
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+$env:GOOS = 'linux'
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+  $m = $m.Trim(".\/'".ToCharArray()); "# $m"
+  Push-Location $m; try { go vet ./...; golangci-lint run ./... } finally { Pop-Location }
+}
+'''
 
 [tasks.vuln]
 description = "govulncheck each module (needs network)"
 usage = 'arg "[module]..." help="Modules to scan; all by default"'
-run = 'for m in ${usage_module:-$(dirname */go.mod)}; do m=${m%/}; echo "# $m"; (cd "$m" && govulncheck ./...); done'
+run = '''
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+  $m = $m.Trim(".\/'".ToCharArray()); "# $m"
+  Push-Location $m; try { govulncheck ./... } finally { Pop-Location }
+}
+'''
 
 [tasks.clean]
 description = "Delete dist/"
-run = "rm -rf dist"
+run = "if (Test-Path dist) { Remove-Item -Recurse -Force dist }"
 
 # Plex has no download URL for the spec; it's embedded in the Redoc page as __redoc_state.
 # jq -e fails on no match, so a page layout change errors instead of emptying openapi.json.
 [tasks.openapi]
-description = "Refresh openapi.json from the Plex docs page (needs curl and network)"
+description = "Refresh openapi.json from the Plex docs page (needs network)"
 run = '''
-curl -fsSL https://developer.plex.tv/pms/ \
-  | sed -n 's/^[[:space:]]*const __redoc_state = \(.*\);[[:space:]]*$/\1/p' \
-  | jq -en 'input | .spec.data | select(.openapi and (.paths | length) > 0)' > openapi.json.tmp \
-  || { rm -f openapi.json.tmp; echo "openapi: no spec found on developer.plex.tv/pms/" >&2; exit 1; }
-mv openapi.json.tmp openapi.json
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+$page = (Invoke-WebRequest -UseBasicParsing https://developer.plex.tv/pms/).Content
+$state = [regex]::Match($page, '(?m)^\s*const __redoc_state = (.*);\s*$').Groups[1].Value
+try { $state | jq -en 'input | .spec.data | select(.openapi and (.paths | length) > 0)' > openapi.json.tmp }
+catch { Remove-Item -ErrorAction Ignore openapi.json.tmp; throw 'openapi: no spec found on developer.plex.tv/pms/' }
+Move-Item -Force openapi.json.tmp openapi.json
 '''

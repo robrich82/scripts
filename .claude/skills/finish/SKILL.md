@@ -3,7 +3,7 @@ name: finish
 description: Full done-with-a-feature pipeline: vet, build affected tool(s), test, port and README checks, then commit. Use this skill whenever a feature or fix is ready to wrap up — it handles the vet/build/test/commit sequence so nothing gets skipped.
 ---
 
-Run the complete end-of-feature pipeline for this repo. Run the `mise run` commands from the Bash tool (Git Bash): the tasks need its `sh`, which PowerShell lacks.
+Run the complete end-of-feature pipeline for this repo.
 
 ## Steps
 
