@@ -80,9 +80,9 @@ jobs:
           path: ${{ runner.temp }}/mise-cache/downloads-cas
           key: mise-downloads-${{ runner.os }}-${{ hashFiles('mise.lock') }}
 
-      # Linters at the versions mise.lock pins (the action adds --locked). Go stays
-      # with setup-go (go.mod's version, build cache); without MISE_DISABLE_TOOLS
-      # mise refuses to build govulncheck until its own Go is installed.
+      # Linters at the versions mise.lock pins. Go stays with setup-go (go.mod's
+      # version, build cache); without MISE_DISABLE_TOOLS mise refuses to build
+      # govulncheck until its own Go is installed.
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         env:
           MISE_DISABLE_TOOLS: go
@@ -91,8 +91,13 @@ jobs:
           version: 2026.11.9
           cache: false
           install_args: >-
+            --locked
             golangci-lint
             go:golang.org/x/vuln/cmd/govulncheck
+
+      # The install above checks only the tools it installs.
+      - name: mise.lock covers mise.toml
+        run: mise install --locked --dry-run
 
       - name: go mod tidy
         run: go mod tidy -diff
