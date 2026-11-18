@@ -62,10 +62,13 @@ jobs:
         shell: bash
     env:
       MODULE: ${{ matrix.module }}
-      # Go comes from setup-go (go.mod's version, build cache); without this mise
-      # won't build govulncheck. The tasks need only what mise-action installs.
+      # Go comes from setup-go (go.mod's version, build cache); without this mise's go:
+      # backend won't build govulncheck until mise's own Go is installed.
+      # The tasks need only what mise-action installs.
       MISE_DISABLE_TOOLS: go
       MISE_TASK_RUN_AUTO_INSTALL: "false"
+      # Covers the actions' own pwsh too, not just the mise tasks'.
+      POWERSHELL_TELEMETRY_OPTOUT: "1"
     steps:
       # Runner defaults to CRLF checkouts, which gofmt flags on every file.
       - run: git config --global core.autocrlf false
