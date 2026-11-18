@@ -23,7 +23,7 @@ jobs:
         with:
           ref: main
 
-      # Just mise: the runner's curl and jq do, and mise.lock has only Windows builds.
+      # Install mise only: the runner's curl and jq suffice, and mise.lock has only Windows builds.
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
           version: 2026.11.9

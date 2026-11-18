@@ -7,7 +7,7 @@ verdict=$(jq -jf "$filter")
 case "$verdict" in
   ok) ;;
   block)
-    echo 'Use mise run build (e.g. mise run build mkv-audit) instead of go build. See CLAUDE.md.' >&2
+    echo 'Use mise run build (e.g. mise run build mkv-audit) from Git Bash instead of go build. See CLAUDE.md.' >&2
     exit 2
     ;;
   *)

@@ -62,7 +62,8 @@ jobs:
         shell: bash
     env:
       MODULE: ${{ matrix.module }}
-      # Go comes from setup-go, and the tasks need only the tools mise-action installs.
+      # Go comes from setup-go (go.mod's version, build cache); without this mise
+      # won't build govulncheck. The tasks need only what mise-action installs.
       MISE_DISABLE_TOOLS: go
       MISE_TASK_RUN_AUTO_INSTALL: "false"
     steps:
@@ -83,9 +84,7 @@ jobs:
           path: ${{ runner.temp }}/mise-cache/downloads-cas
           key: mise-downloads-${{ runner.os }}-${{ hashFiles('mise.lock') }}
 
-      # Linters at the versions mise.lock pins. Go stays with setup-go (go.mod's
-      # version, build cache); without MISE_DISABLE_TOOLS mise refuses to build
-      # govulncheck until its own Go is installed.
+      # Linters at the versions mise.lock pins.
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         env:
           MISE_CACHE_DIR: ${{ runner.temp }}/mise-cache
@@ -97,13 +96,12 @@ jobs:
             golangci-lint
             go:golang.org/x/vuln/cmd/govulncheck
 
-      # The install above checks only the tools it installs.
+      # The install above checks only the tools it installs; re-enable go so this covers every pin.
       - name: mise.lock covers mise.toml
         run: mise install --locked --dry-run
         env:
           MISE_DISABLE_TOOLS: ""
 
-      # vet also runs go mod tidy -diff and golangci-lint run and fmt --diff.
       - name: vet
         run: mise run vet "$MODULE"
 

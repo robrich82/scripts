@@ -16,8 +16,8 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 ## Requirements
 
 - Go, jq, golangci-lint, govulncheck and ffmpeg (tests only), pinned in `mise.toml`: run `mise install`.
-- Git Bash: the `mise run` tasks below use its `sh`.
   - A linter `go install`ed into `go env GOBIN` shadows the pinned one; delete it there.
+- Git Bash: the `mise run` tasks below use its `sh`.
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`, `mkvextract`) — required by mkv-audit, mkv-movie, mkv-tvshow
 - [ExifTool](https://exiftool.org/) (`exiftool` on PATH) — used by mkv-music's audio timestamp sync
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)

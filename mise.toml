@@ -16,32 +16,33 @@ shell = "sh -ec"
 [tasks.build]
 description = "Build each module to dist/<module>.exe"
 usage = 'arg "[module]..." help="Modules to build; all by default"'
-run = 'for m in ${usage_module:-$(dirname */go.mod)}; do echo "# $m"; (cd "$m" && go build -o "../dist/$m.exe" .); done'
+run = 'for m in ${usage_module:-$(dirname */go.mod)}; do m=${m%/}; echo "# $m"; (cd "$m" && go build -o "../dist/$m.exe" .); done'
 
 [tasks.test]
 description = "go test each module"
 usage = 'arg "[module]..." help="Modules to test; all by default"'
-run = 'for m in ${usage_module:-$(dirname */go.mod)}; do echo "# $m"; (cd "$m" && go test ./...); done'
+run = 'for m in ${usage_module:-$(dirname */go.mod)}; do m=${m%/}; echo "# $m"; (cd "$m" && go test ./...); done'
 
 [tasks.vet]
 description = "go vet, go mod tidy -diff, golangci-lint run and fmt --diff for each module"
 usage = 'arg "[module]..." help="Modules to vet; all by default"'
 run = '''
 for m in ${usage_module:-$(dirname */go.mod)}; do
-  echo "# $m"
+  m=${m%/}; echo "# $m"
   (cd "$m" && go vet ./... && go mod tidy -diff && golangci-lint run ./... && golangci-lint fmt --diff ./...)
 done
 '''
 
+# No fmt: it ignores build tags, so vet's run already covers the stubs.
 [tasks.vet-linux]
 description = "Type-check and lint each module's non-Windows stubs"
 usage = 'arg "[module]..." help="Modules to vet; all by default"'
-run = 'for m in ${usage_module:-$(dirname */go.mod)}; do echo "# $m"; (cd "$m" && GOOS=linux go vet ./... && GOOS=linux golangci-lint run ./...); done'
+run = 'for m in ${usage_module:-$(dirname */go.mod)}; do m=${m%/}; echo "# $m"; (cd "$m" && GOOS=linux go vet ./... && GOOS=linux golangci-lint run ./...); done'
 
 [tasks.vuln]
 description = "govulncheck each module (needs network)"
 usage = 'arg "[module]..." help="Modules to scan; all by default"'
-run = 'for m in ${usage_module:-$(dirname */go.mod)}; do echo "# $m"; (cd "$m" && govulncheck ./...); done'
+run = 'for m in ${usage_module:-$(dirname */go.mod)}; do m=${m%/}; echo "# $m"; (cd "$m" && govulncheck ./...); done'
 
 [tasks.clean]
 description = "Delete dist/"
