@@ -70,16 +70,17 @@ func (c *ShowCache) AllEntries() map[string]string {
 // (see pathGone: a folder on an offline drive is kept).
 // Legacy entries keyed by a bare folder name are kept: nothing records which
 // library they belong to, so they can't be checked.
-// Returns the TMDB IDs that were removed so callers can purge dependent caches.
-func (c *ShowCache) CleanStaleFolders() []string {
-	var removedIDs []string
+// Returns the removed entries (folder → TMDB ID) so callers can purge
+// dependent caches.
+func (c *ShowCache) CleanStaleFolders() map[string]string {
+	removed := make(map[string]string)
 	for folder, id := range c.data {
 		if filepath.IsAbs(folder) && pathGone(folder) {
-			removedIDs = append(removedIDs, id)
+			removed[folder] = id
 			delete(c.data, folder)
 		}
 	}
-	return removedIDs
+	return removed
 }
 
 // FindByQuery returns all (tmdbID, folderKey) pairs matching query.

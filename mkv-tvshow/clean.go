@@ -8,7 +8,8 @@ import (
 
 // runClean removes cache entries for shows and files that no longer exist.
 // Ratings and ignores are removed only for the shows whose folders it removes
-// from show_cache.json, or with allIDs for every show ID show_cache.json lacks.
+// from show_cache.json and their manual_data season override IDs, or with
+// allIDs for every show ID that neither show_cache.json nor an override has.
 func runClean(allIDs bool) {
 	cfgDir, err := configDir()
 	if err != nil {
@@ -40,19 +41,45 @@ func runClean(allIDs bool) {
 	if err != nil {
 		exitOnCacheLoadError(path("show_cache.json"), err)
 	}
-	hadShows := len(showCache.AllEntries()) > 0
-	removedIDs := showCache.CleanStaleFolders()
-	knownIDs := make(map[string]bool)
-	for _, id := range showCache.AllEntries() {
-		knownIDs[id] = true
+	// A manual_data.json season override keeps its ratings and ignores under
+	// its own show ID.
+	manualData, err := LoadManualData(path("manual_data.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\nNothing was removed.\n", err)
+		os.Exit(1)
 	}
-	// The shows whose folders are gone. A show missing from show_cache.json
-	// for another reason (a rebuilt cache, a manual_data season override's
-	// ID) keeps its ratings and ignores.
+	hadShows := len(showCache.AllEntries()) > 0
+	removed := showCache.CleanStaleFolders()
+	knownIDs := make(map[string]bool)
+	kept := make(map[string]bool) // folder names still in show_cache.json
+	for folder, id := range showCache.AllEntries() {
+		knownIDs[id] = true
+		kept[filepath.Base(folder)] = true
+	}
+	removedNames := make(map[string]bool)
+	for folder := range removed {
+		if name := filepath.Base(folder); !kept[name] {
+			removedNames[name] = true
+		}
+	}
+	// Override IDs stay known unless their show's folder is the one removed.
+	for name, entry := range manualData {
+		if removedNames[name] {
+			continue
+		}
+		for _, id := range overrideIDs(entry) {
+			knownIDs[id] = true
+		}
+	}
+	// The shows whose folders are gone, with their season override IDs. A
+	// show missing from show_cache.json for another reason (a rebuilt cache)
+	// keeps its ratings and ignores.
 	gone := make(map[string]bool)
-	for _, id := range removedIDs {
-		if !knownIDs[id] { // another folder still uses it
-			gone[id] = true
+	for folder, id := range removed {
+		for _, id := range append([]string{id}, overrideIDs(manualData[filepath.Base(folder)])...) {
+			if !knownIDs[id] { // another show still uses it
+				gone[id] = true
+			}
 		}
 	}
 
@@ -60,7 +87,7 @@ func runClean(allIDs bool) {
 	// removes none.
 	var stale func(showID string) bool
 	switch {
-	case allIDs && len(knownIDs) == 0:
+	case allIDs && len(kept) == 0:
 		// Every show ID would look stale, so only the gone shows' are removed.
 		if hadShows {
 			fmt.Println("Every show folder in show_cache.json is gone, so --all-ids removes only those shows' IDs from rating_cache.json and missing_ignore.json.")
@@ -134,7 +161,7 @@ func runClean(allIDs bool) {
 	// show_cache.json goes last: while it still lists the gone folders, a
 	// rerun finds the same shows and redoes a show ID removal that failed to
 	// save. The file-path caches don't depend on it.
-	if n := len(removedIDs); n > 0 {
+	if n := len(removed); n > 0 {
 		switch {
 		case idsFailed:
 			fmt.Fprintf(os.Stderr, "show_cache.json was left unchanged, so running the same --clean again redoes the removals that failed.\n")
@@ -153,6 +180,17 @@ func runClean(allIDs bool) {
 	if failed {
 		os.Exit(1)
 	}
+}
+
+// overrideIDs returns the show IDs entry's season overrides point at.
+func overrideIDs(entry ManualEntry) []string {
+	var ids []string
+	for _, o := range entry.Overrides {
+		if o.ID != "" {
+			ids = append(ids, o.ID)
+		}
+	}
+	return ids
 }
 
 func es(n int) string {
