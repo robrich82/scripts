@@ -153,7 +153,14 @@ func within(path, dir string) bool {
 		return false
 	}
 	rel, err := filepath.Rel(absDir, absPath)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return err == nil && !relOutside(rel)
+}
+
+// relOutside reports whether rel, a filepath.Rel result, leaves its base
+// directory. A name that only starts with "..", such as "...And Justice for
+// All (1979)", stays inside.
+func relOutside(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // writeStateJSON writes v as indented JSON to name in stateDir, creating the

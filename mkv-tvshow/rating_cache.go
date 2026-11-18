@@ -155,7 +155,7 @@ func (c *RatingCache) ResetAppliedForFolder(folderPath string) []string {
 	var paths []string
 	for path := range c.data.Applied {
 		rel, err := filepath.Rel(folderPath, path)
-		if err == nil && !strings.HasPrefix(rel, "..") {
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			delete(c.data.Applied, path)
 			paths = append(paths, path)
 		}

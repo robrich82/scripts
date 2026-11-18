@@ -357,3 +357,60 @@ func TestResolveIETFMap_NFDPath(t *testing.T) {
 		t.Errorf("NFC config path should match NFD filesystem path; got eng=%q", m["eng"])
 	}
 }
+
+// A folder whose name starts with ".." is inside the library, not above it.
+func TestContentRootDir_NameStartingWithDots(t *testing.T) {
+	got := contentRootDir(
+		filepath.FromSlash("/media/Movies/...And Justice for All (1979)/movie.mkv"),
+		filepath.FromSlash("/media/Movies"),
+	)
+	if want := "...And Justice for All (1979)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestDetectLibrary_FolderStartingWithDots(t *testing.T) {
+	cfg := &GlobalConfig{Libraries: []Library{{Name: "Movies", Path: "/media/Movies"}}}
+	if lib := detectLibrary("/media/Movies/..tick..tick..BOOM! (2021)", cfg); lib == nil || lib.Name != "Movies" {
+		t.Errorf("got %+v, want the Movies library", lib)
+	}
+	if lib := detectLibrary("/media/Other", cfg); lib != nil {
+		t.Errorf("a sibling of the library matched: %+v", lib)
+	}
+}
+
+func TestRelOutside(t *testing.T) {
+	sep := string(filepath.Separator)
+	for rel, want := range map[string]bool{
+		"..":                   true,
+		".." + sep + "x":       true,
+		".":                    false,
+		"...And Justice":       false,
+		"..x" + sep + "file":   false,
+		"a" + sep + ".." + "b": false,
+	} {
+		if got := relOutside(rel); got != want {
+			t.Errorf("relOutside(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
+
+// A movie folder whose name starts with ".." gets its TMDB origin, and its ID
+// is saved against its file.
+func TestFetchOrigins_FolderNameStartingWithDots(t *testing.T) {
+	const name = "...And Justice for All (1979)"
+	root, paths := siblingLibrary(t, name, name+".mkv")
+	tmdb := titleTMDB{
+		ids:   map[string]string{"...And Justice for All": "11"},
+		langs: map[string]string{"11": "en"},
+	}
+	captureStdout(t, func() {
+		origins := fetchOrigins(paths, root, "movie", tmdb, &fakePrompter{answer: "y"})
+		if origins[name].OrigLang != "en" {
+			t.Errorf("origins = %v; want en for %s", origins, name)
+		}
+	})
+	if _, files := readMovieSections(t); files[paths[0]] != "11" {
+		t.Errorf("files = %v; want %s → 11", files, paths[0])
+	}
+}

@@ -104,8 +104,7 @@ func detectLibrary(cwd string, cfg *GlobalConfig) *Library {
 		if err != nil {
 			continue
 		}
-		// rel starting with ".." means cwd is not under libPath.
-		if strings.HasPrefix(rel, "..") {
+		if relOutside(rel) {
 			continue
 		}
 		if best == nil || len(cfg.Libraries[i].Path) > len(best.Path) {
@@ -268,7 +267,7 @@ func resolveUndLang(filePath, root string, lib *Library) string {
 // TMDB search key. Returns "" when filePath is not under libraryRoot.
 func contentRootDir(filePath, libraryRoot string) string {
 	rel, err := filepath.Rel(filepath.Clean(libraryRoot), filepath.Clean(filePath))
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || relOutside(rel) {
 		return ""
 	}
 	parts := strings.SplitN(filepath.ToSlash(rel), "/", 2)
