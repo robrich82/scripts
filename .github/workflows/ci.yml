@@ -60,11 +60,14 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: ${{ matrix.module }}
+    env:
+      MODULE: ${{ matrix.module }}
+      # Go comes from setup-go, and the tasks need only the tools mise-action installs.
+      MISE_DISABLE_TOOLS: go
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
     steps:
       # Runner defaults to CRLF checkouts, which gofmt flags on every file.
       - run: git config --global core.autocrlf false
-        working-directory: .
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -85,7 +88,6 @@ jobs:
       # govulncheck until its own Go is installed.
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         env:
-          MISE_DISABLE_TOOLS: go
           MISE_CACHE_DIR: ${{ runner.temp }}/mise-cache
         with:
           version: 2026.11.9
@@ -98,30 +100,20 @@ jobs:
       # The install above checks only the tools it installs.
       - name: mise.lock covers mise.toml
         run: mise install --locked --dry-run
+        env:
+          MISE_DISABLE_TOOLS: ""
 
-      - name: go mod tidy
-        run: go mod tidy -diff
+      # vet also runs go mod tidy -diff and golangci-lint run and fmt --diff.
+      - name: vet
+        run: mise run vet "$MODULE"
 
-      - name: go vet
-        run: go vet ./...
+      - name: vet (non-Windows stubs)
+        run: mise run vet-linux "$MODULE"
 
-      - name: go vet (non-Windows stubs)
-        run: GOOS=linux go vet ./...
-
-      - name: golangci-lint
-        run: golangci-lint run ./...
-
-      - name: golangci-lint (non-Windows stubs)
-        run: GOOS=linux golangci-lint run ./...
-
-      # fmt ignores build tags, so one run covers both builds.
-      - name: golangci-lint fmt
-        run: golangci-lint fmt --diff ./...
-
-      - name: go test
-        run: go test ./...
+      - name: test
+        run: mise run test "$MODULE"
 
       # A new advisory shouldn't block unrelated merges; the weekly run still goes red.
       - name: govulncheck
-        run: govulncheck ./...
+        run: mise run vuln "$MODULE"
         continue-on-error: ${{ github.event_name != 'schedule' }}

@@ -7,7 +7,7 @@ argument-hint: <name> <one-line purpose>
 
 Arguments: `$ARGUMENTS`. The first word is the new tool's name — written `<name>` below — and the rest is its one-line purpose. If either is missing, ask for it before starting.
 
-The Makefile and CI find modules by their `go.mod`, so none of them need editing. Everything below does.
+The mise tasks and CI find modules by their `go.mod`, so none of them need editing. Everything below does.
 
 ## 1. Module
 
@@ -20,7 +20,6 @@ The Makefile and CI find modules by their `go.mod`, so none of them need editing
 - **README.md**:
   - Add a row to the *Tools* table, in alphabetical order, linking `#<name>`.
   - Add a `## <name>` section in alphabetical position, before *Project Structure*. Match the other sections: what it does, a *Usage* block, a *Flags* table, and config files if it has any.
-  - Add `make <name>` to the list in *Building*.
   - Add the directory to the *Project Structure* tree.
   - List any new external command or env var under *Requirements*.
 - **CLAUDE.md**: update the tool count in *Architecture* ("Six independent tools"), and add any new env var to the *Environment* line.

@@ -2,10 +2,6 @@
 
 lockfile_version = 4
 
-[conda-packages.windows-x64."_openmp_mutex-4.5-20_gnu"]
-url = "https://conda.anaconda.org/conda-forge/win-64/_openmp_mutex-4.5-20_gnu.conda"
-checksum = "sha256:8a1cee28bd0ee7451ada1cd50b64720e57e17ff994fc62dd8329bef570d382e4"
-
 [conda-packages.windows-x64."aom-3.15.3-pl5321h06fc181_0"]
 url = "https://conda.anaconda.org/conda-forge/win-64/aom-3.15.3-pl5321h06fc181_0.conda"
 checksum = "sha256:302f726d93ad4c113a8f7b8d72b5d1bcf1ad3ff10950ee6161b99787025458da"
@@ -126,17 +122,9 @@ checksum = "sha256:d794d7fddb6eea50e18a62fa27ab3819f40d51bad00b90cf4ca591fb0d400
 url = "https://conda.anaconda.org/conda-forge/win-64/libfreetype6-2.14.3-hdbac1cb_2.conda"
 checksum = "sha256:cbc650854003e434d4ff6c7b1a2667e38a4242ad8a391a1c5ff89721624065ce"
 
-[conda-packages.windows-x64."libgcc-16.2.0-h110b43a_7"]
-url = "https://conda.anaconda.org/conda-forge/win-64/libgcc-16.2.0-h110b43a_7.conda"
-checksum = "sha256:59feb6d16cba13a70f22dae70a44670eb2cc45e652e9a34a014814c2ca871132"
-
 [conda-packages.windows-x64."libglib-2.90.1-h8c856d3_3"]
 url = "https://conda.anaconda.org/conda-forge/win-64/libglib-2.90.1-h8c856d3_3.conda"
 checksum = "sha256:fc62a1106d8b72559bbb2bb68e56f3637869ee19ad934d058c24e7e3d5d08e23"
-
-[conda-packages.windows-x64."libgomp-16.2.0-h8ee18e1_7"]
-url = "https://conda.anaconda.org/conda-forge/win-64/libgomp-16.2.0-h8ee18e1_7.conda"
-checksum = "sha256:4b8a747f047d069ccd2a6cf2f4fdbc6b0c0e4dcd840998d1fe607b8c234e707b"
 
 [conda-packages.windows-x64."libharfbuzz-15.0.0-h03b5201_0"]
 url = "https://conda.anaconda.org/conda-forge/win-64/libharfbuzz-15.0.0-h03b5201_0.conda"
@@ -225,10 +213,6 @@ checksum = "sha256:4b094443126c5fc38d200eb0ea335b67e64d966d7aa737bb3141217a787b0
 [conda-packages.windows-x64."libwebp-base-1.6.0-h4d5522a_1"]
 url = "https://conda.anaconda.org/conda-forge/win-64/libwebp-base-1.6.0-h4d5522a_1.conda"
 checksum = "sha256:4470d98d3178b0d45492eed4808afe421d2e7808352b8d06c2dc29166b75d94d"
-
-[conda-packages.windows-x64."libwinpthread-12.0.0.r688.g6b2176247.1-h57928b3_0"]
-url = "https://conda.anaconda.org/conda-forge/win-64/libwinpthread-12.0.0.r688.g6b2176247.1-h57928b3_0.conda"
-checksum = "sha256:bab5558663cb0e964988b859abd69d0f2380b6ea9f140495ab543e51af13635d"
 
 [conda-packages.windows-x64."libxml2-16-2.15.4-h3cfd58e_1"]
 url = "https://conda.anaconda.org/conda-forge/win-64/libxml2-16-2.15.4-h3cfd58e_1.conda"
@@ -460,22 +444,3 @@ checksum = "sha256:a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c
 url = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe"
 url_api = "https://api.github.com/repos/jqlang/jq/releases/assets/453012788"
 provenance = "github-attestations"
-
-[[tools.make]]
-version = "4.4.1"
-backend = "conda:make"
-specifiers = ["4.4.1"]
-
-[tools.make.options]
-channel = "conda-forge"
-
-[tools.make."platforms.windows-x64"]
-checksum = "sha256:81086f78db91dc8a740ff144857facf859b9cb46bf8169fb268db87257937501"
-url = "https://conda.anaconda.org/conda-forge/win-64/make-4.4.1-h29ce079_4.conda"
-conda_deps = [
-    "libwinpthread-12.0.0.r688.g6b2176247.1-h57928b3_0",
-    "libgcc-16.2.0-h110b43a_7",
-    "ucrt-10.0.26100.0-h57928b3_0",
-    "_openmp_mutex-4.5-20_gnu",
-    "libgomp-16.2.0-h8ee18e1_7",
-]

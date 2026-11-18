@@ -34,7 +34,7 @@
       "overridePackageName": "golang.org/x/vuln"
     },
     {
-      "description": "mise installs conda tools (make, ffmpeg) from conda-forge, but Renovate looks them up with no channel and gets a 404.",
+      "description": "mise installs conda tools (ffmpeg) from conda-forge, but Renovate looks them up with no channel and gets a 404.",
       "matchManagers": ["mise"],
       "matchDatasources": ["conda"],
       "registryUrls": ["https://api.anaconda.org/package/conda-forge/"]

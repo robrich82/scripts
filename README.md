@@ -15,7 +15,8 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 
 ## Requirements
 
-- Go, GNU Make, jq, golangci-lint, govulncheck and ffmpeg (tests only), pinned in `mise.toml`: run `mise install`.
+- Go, jq, golangci-lint, govulncheck and ffmpeg (tests only), pinned in `mise.toml`: run `mise install`.
+- Git Bash: the `mise run` tasks below use its `sh`.
   - A linter `go install`ed into `go env GOBIN` shadows the pinned one; delete it there.
 - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`, `mkvextract`) — required by mkv-audit, mkv-movie, mkv-tvshow
 - [ExifTool](https://exiftool.org/) (`exiftool` on PATH) — used by mkv-music's audio timestamp sync
@@ -26,31 +27,26 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 Build all tools to the `dist/` directory:
 
 ```sh
-make all
+mise run build
 ```
 
-Build a specific tool:
+Build specific tools by directory name:
 
 ```sh
-make cbz-fix
-make mkv-audit
-make mkv-movie
-make mkv-music
-make mkv-tvshow
-make sw-update
+mise run build mkv-audit mkv-movie
 ```
 
-Run all tests:
+Run all tests (or name modules, as for `build`):
 
 ```sh
-make test
+mise run test
 ```
 
 Scan all modules for known vulnerabilities in their dependencies with
 [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) (needs network access):
 
 ```sh
-make vuln
+mise run vuln
 ```
 
 ---
@@ -1086,7 +1082,7 @@ string match.
 
 ```
 .
-├── Makefile
+├── mise.toml           # Tool versions and build/test/lint tasks
 ├── dist/               # Built executables (git-ignored)
 ├── cbz-fix/
 ├── mkv-audit/
