@@ -1,3 +1,14 @@
+# The mise that wrote mise.lock and that CI pins; older releases may not read the lockfile.
+min_version = "2026.11.9"
+
+[settings]
+# CI and local runs are both Windows; `mise lock` (and Renovate's run of it) locks only this.
+lockfile_platforms = ["windows-x64"]
+
+[env]
+# Fail instead of silently downloading a newer Go when a go.mod's go line is ahead of [tools].
+GOTOOLCHAIN = "local"
+
 [tools]
 go = "1.27.4"
 jq = "1.8.2"
