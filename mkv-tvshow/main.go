@@ -91,11 +91,21 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
 			os.Exit(1)
 		}
+		// A multi-episode rename moves the file's retry-list and title-cache entries.
+		debandRetryList, err := LoadRetryList(filepath.Join(cfgDir, "pending_dates.json"))
+		if err != nil {
+			exitOnCacheLoadError(filepath.Join(cfgDir, "pending_dates.json"), err)
+		}
+		debandTitleCache, err := LoadTitleCache(filepath.Join(cfgDir, "title_cache.json"))
+		if err != nil {
+			exitOnCacheLoadError(filepath.Join(cfgDir, "title_cache.json"), err)
+		}
 		cfg := Config{MediaDir: mediaDir}
-		processor := NewProcessor(cfg, nil, debandManualData, nil, mkv, nil, timer, nil, nil, nil, nil, nil)
+		processor := NewProcessor(cfg, nil, debandManualData, nil, mkv, nil, timer, debandRetryList, nil, nil, nil, debandTitleCache)
 		fmt.Printf("Updating DEBAND tags in %s...\n", mediaDir)
 		stats := processor.RunDebandOnly()
 		fmt.Printf("\nDone. Updated: %d  Failed: %d\n", stats.Success, stats.Failed)
+		exitIfSavesLost(stats.LostSaves)
 		return
 	}
 
@@ -191,8 +201,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error loading manual_data.json: %v\n", err)
 			os.Exit(1)
 		}
+		retryList, err := LoadRetryList(filepath.Join(cfgDir, "pending_dates.json"))
+		if err != nil {
+			exitOnCacheLoadError(filepath.Join(cfgDir, "pending_dates.json"), err)
+		}
 		cfg := Config{MediaDir: mediaDir}
-		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter, mkv, titleCache, timer)
+		checker := NewTitleChecker(cfg, cache, titleManualData, tmdb, prompter, mkv, titleCache, timer, retryList)
 		fmt.Printf("Checking episode titles in %s...\n", mediaDir)
 		checker.Run()
 		exitIfSavesLost(checker.LostSaves)

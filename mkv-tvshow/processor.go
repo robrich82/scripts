@@ -59,7 +59,9 @@ type Processor struct {
 	prompter   Prompter
 	timer      FileTimer
 	retryList  *RetryList
+	retryMoved bool // a rename moved a retry-list entry, so the list needs saving
 	titleCache *TitleCache
+	titleDirty bool // a rename or retitle changed the title cache, so it needs saving
 
 	// Rating pipeline — all optional (nil disables the feature).
 	ratingCache   *RatingCache
@@ -297,15 +299,17 @@ func (p *Processor) Run() Stats {
 
 						rating := p.resolveEpisodeRating(showID, showName, filePath, posterSeason, 0)
 						deband := entry.resolveDeband(fmt.Sprintf("S%02d", posterSeason), "")
+						// Without a date or an episode reference, no date will ever come.
+						awaitingDate := stampDate == "" && epNum > 0
 						if wrote, failed := p.applyMKV(filePath, title, summary, showID, relDate, stampDate, posterURL, rating, deband); wrote {
-							p.trackRetry(filePath, file, stampDate, failed)
+							p.trackRetry(filePath, file, awaitingDate, failed)
 							showTouched = true
 							extrasProcessed = true
 							stats.countTagged("Processed (extra)", file, failed)
 						} else {
 							fmt.Printf("  [X] Failed (extra): %s\n", file)
 							stats.Failed++
-							p.trackTagFailure(filePath, file, stampDate)
+							p.trackTagFailure(filePath, file, awaitingDate)
 						}
 						time.Sleep(50 * time.Millisecond)
 						continue
@@ -390,8 +394,9 @@ func (p *Processor) Run() Stats {
 			}
 
 			title := cleanMetadataTitle(file)
-			if cached, ok := p.titleCache.Get(filePath); ok {
-				title = cached
+			cached, isCached := p.titleCache.Get(filePath)
+			if isCached {
+				title = withEpisodeCode(cached, stem)
 			}
 			var deband bool
 			if entry, ok := p.manualData[showFolder]; ok {
@@ -401,13 +406,17 @@ func (p *Processor) Run() Stats {
 				)
 			}
 			if wrote, failed := p.applyMKV(filePath, title, summary, currID, relDate, stampDate, posterURL, rating, deband); wrote {
-				p.trackRetry(filePath, file, stampDate, failed)
+				if isCached && title != cached {
+					p.titleCache.Set(filePath, title)
+					p.titleDirty = true
+				}
+				p.trackRetry(filePath, file, stampDate == "", failed)
 				showTouched = true
 				stats.countTagged("Processed", file, failed)
 			} else {
 				fmt.Printf("  [X] Failed: %s\n", file)
 				stats.Failed++
-				p.trackTagFailure(filePath, file, stampDate)
+				p.trackTagFailure(filePath, file, stampDate == "")
 			}
 
 			time.Sleep(50 * time.Millisecond)
@@ -417,7 +426,7 @@ func (p *Processor) Run() Stats {
 		stats.PlexErrors += p.applyPlexRatings(showID, seasonEffectiveID, showName, showFolder, showTouched, p.manualData[showFolder])
 		p.ratingSaver.save(showFolder)
 	}
-	for _, lost := range []bool{p.showSaver.finish(), p.ratingSaver.finish(), newRetrySaver(p.retryList).saveOnce()} {
+	for _, lost := range []bool{p.showSaver.finish(), p.ratingSaver.finish(), newRetrySaver(p.retryList).saveOnce(), p.saveChangedTitles()} {
 		if lost {
 			stats.LostSaves++
 		}
@@ -576,6 +585,14 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 	if err := os.Rename(filepath.Join(dir, file), newPath); err != nil {
 		// If rename fails, continue with the original name.
 		return file, filepath.Join(dir, file)
+	}
+	if p.retryList != nil && p.retryList.Move(filepath.Join(dir, file), newPath) {
+		p.retryMoved = true
+	}
+	// The entry keeps the title the MKV has; Run rewrites its episode code
+	// when it writes the title.
+	if p.titleCache.Move(filepath.Join(dir, file), newPath) {
+		p.titleDirty = true
 	}
 	return newFile, newPath
 }
@@ -1006,7 +1023,19 @@ func (p *Processor) RunDebandOnly() Stats {
 		}
 	}
 
+	// Only a rename changes these, so untouched ones aren't rewritten.
+	for _, lost := range []bool{p.retryMoved && newRetrySaver(p.retryList).saveOnce(), p.saveChangedTitles()} {
+		if lost {
+			stats.LostSaves++
+		}
+	}
 	return stats
+}
+
+// saveChangedTitles saves the title cache when a rename or retitle changed it,
+// and reports whether that save was lost.
+func (p *Processor) saveChangedTitles() (lost bool) {
+	return p.titleDirty && newTitleSaver(p.titleCache).saveOnce()
 }
 
 // applyPlexRatings pushes cached ratings to Plex at episode, season, and show
@@ -1193,23 +1222,23 @@ func (p *Processor) seasonData(cache map[string]SeasonResult, showID string, sea
 	return sr, nil
 }
 
-// trackRetry keeps a file on the retry list until it has a real air date and
-// no step failed, so a later run finishes it even once it falls before the
-// cutoff. A file that fails a step on maxRetryAttempts runs in a row is
-// dropped, so a step that always fails doesn't rewrite it on every run. One
-// still waiting for an air date is never dropped.
-func (p *Processor) trackRetry(filePath, file, stampDate string, failed []string) {
+// trackRetry keeps a file on the retry list while it is awaiting an air date
+// or a step failed, so a later run finishes it even once it falls before the
+// cutoff. A file that keeps failing a step is dropped once RetryList.Fail
+// gives up on it, so a step that always fails doesn't rewrite it on every run.
+// One still waiting for an air date is never dropped.
+func (p *Processor) trackRetry(filePath, file string, awaitingDate bool, failed []string) {
 	switch {
-	case stampDate == "":
+	case awaitingDate:
 		p.retryList.Keep(filePath)
 	case len(failed) > 0:
-		if p.retryList.Fail(filePath) {
+		if gaveUp, runs, days := p.retryList.Fail(filePath); gaveUp {
 			hint := "" // under --all it is processed on every run anyway
 			if !p.cfg.CutoffDate.IsZero() {
 				hint = "; run with --all to try again"
 			}
-			fmt.Printf("  [!] Not retrying %s after %d runs in a row failed (failed: %s)%s.\n",
-				file, maxRetryAttempts, strings.Join(failed, ", "), hint)
+			fmt.Printf("  [!] Not retrying %s after %d runs in a row failed over %d days (failed: %s)%s.\n",
+				file, runs, days, strings.Join(failed, ", "), hint)
 		}
 	default:
 		p.retryList.Remove(filePath)
@@ -1220,11 +1249,11 @@ func (p *Processor) trackRetry(filePath, file, stampDate string, failed []string
 // Missing mkvpropedit fails every file alike, so the list is left as it was:
 // the run doesn't count, and a file not on it isn't added (under --all that
 // would put the whole library on it).
-func (p *Processor) trackTagFailure(filePath, file, stampDate string) {
+func (p *Processor) trackTagFailure(filePath, file string, awaitingDate bool) {
 	if !p.mkv.Available() {
 		return
 	}
-	p.trackRetry(filePath, file, stampDate, []string{"tags"})
+	p.trackRetry(filePath, file, awaitingDate, []string{"tags"})
 }
 
 // failTMDBLookup reports a failed TMDB season lookup for file and leaves it

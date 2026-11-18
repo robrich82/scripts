@@ -165,7 +165,7 @@ func TestTitleCheck_SeasonLookupFails_Reported(t *testing.T) {
 			dir := t.TempDir()
 			writeEpisode(t, dir, "Err Show - S01E01 - Pilot.mkv")
 			checker := NewTitleChecker(Config{MediaDir: dir}, cacheWith(t, map[string]string{"Err Show": "999"}), nil,
-				tmdbStub(t, http.StatusOK, stubShowOK, tc.status, tc.body), &assertNoAskPrompter{t: t}, nil, newNullTitleCache(t), noopTimer{})
+				tmdbStub(t, http.StatusOK, stubShowOK, tc.status, tc.body), &assertNoAskPrompter{t: t}, nil, newNullTitleCache(t), noopTimer{}, nil)
 
 			out := captureStdout(t, checker.Run)
 

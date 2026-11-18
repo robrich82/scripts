@@ -175,7 +175,7 @@ func TestProcessorRun_RetryListSaveRetried(t *testing.T) {
 	}{{"recovers", true}, {"fails again", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := filepath.Join(t.TempDir(), "missing")
-			retry := &RetryList{path: filepath.Join(cfg, "pending_dates.json"), data: map[string]int{}}
+			retry := newRetryList(filepath.Join(cfg, "pending_dates.json"))
 			setBeforeFinalSave(t, func() {
 				if tc.recovers {
 					if err := os.Mkdir(cfg, 0o755); err != nil {
@@ -218,7 +218,7 @@ func TestTitleCheck_TitleCacheSaveFailure(t *testing.T) {
 	}
 	tmdb := &fakeTMDB{seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 2, Name: "Episode 2"}}}}
 	checker := NewTitleChecker(Config{MediaDir: dir}, cacheWith(t, map[string]string{"Show": "999"}), nil, tmdb,
-		&assertNoAskPrompter{t: t}, nil, titles, noopTimer{})
+		&assertNoAskPrompter{t: t}, nil, titles, noopTimer{}, nil)
 
 	out := captureOutput(t, checker.Run)
 
@@ -238,7 +238,7 @@ func TestTitleCheck_TitleCacheSaveFailure(t *testing.T) {
 // --title-check runs without a title cache, which it documents as allowed.
 func TestTitleCheck_NilTitleCache(t *testing.T) {
 	checker := NewTitleChecker(Config{MediaDir: t.TempDir()}, cacheWith(t, map[string]string{}), nil, &fakeTMDB{},
-		&assertNoAskPrompter{t: t}, nil, nil, noopTimer{})
+		&assertNoAskPrompter{t: t}, nil, nil, noopTimer{}, nil)
 	captureOutput(t, checker.Run)
 	if checker.LostSaves != 0 {
 		t.Errorf("LostSaves = %d; want 0", checker.LostSaves)
@@ -851,6 +851,7 @@ func TestMain_Clean_UnloadableCacheExits(t *testing.T) {
 		{"empty show cache", "show_cache.json", []byte{}, true},
 		{"show cache of the wrong type", "show_cache.json", []byte(`["a"]`), true},
 		{"rating cache of the wrong type", "rating_cache.json", []byte(`{"shows": []}`), true},
+		{"retry list with a bad date", "pending_dates.json", []byte(`{"/tv/a.mkv": {"fails": 1, "since": "18/11/2026"}}`), true},
 		{"unreadable rating cache", "rating_cache.json", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
