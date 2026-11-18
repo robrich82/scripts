@@ -405,7 +405,7 @@ func TestFetchOrigins_FolderNameStartingWithDots(t *testing.T) {
 		langs: map[string]string{"11": "en"},
 	}
 	captureStdout(t, func() {
-		origins := fetchOrigins(paths, root, "movie", tmdb, &fakePrompter{answer: "y"})
+		origins, _ := fetchOrigins(paths, root, "movie", tmdb, &fakePrompter{answer: "y"})
 		if origins[name].OrigLang != "en" {
 			t.Errorf("origins = %v; want en for %s", origins, name)
 		}
