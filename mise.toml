@@ -1,6 +1,7 @@
 [env]
 # Error instead of downloading a newer Go when a go.mod's go line is ahead of the Go in use.
 GOTOOLCHAIN = "local"
+POWERSHELL_TELEMETRY_OPTOUT = "1"
 
 [tools]
 go = "1.27.4"
@@ -10,7 +11,7 @@ golangci-lint = "2.15.0"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
 
 # Module tasks take module directory names (`mise run test mkv-movie`) and default to every
-# top-level directory with a go.mod. Each starts with the same line so a failing command stops it.
+# top-level directory with a go.mod. Each starts with the same line: stop on any failing command, which needs PowerShell 7.4+.
 [task_config]
 # Runs the same from PowerShell, Git Bash and CI; Windows' default is cmd.
 shell = "pwsh -NoProfile -Command"
@@ -19,8 +20,8 @@ shell = "pwsh -NoProfile -Command"
 description = "Build each module to dist/<module>.exe"
 usage = 'arg "[module]..." help="Modules to build; all by default"'
 run = '''
-$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
-foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; if ($PSVersionTable.PSVersion -lt '7.4') { throw 'needs PowerShell 7.4+' }
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { $_.Name -notlike '.*' -and (Test-Path "$_/go.mod") }).Name })) {
   $m = $m.Trim(".\/'".ToCharArray()); "# $m"
   Push-Location $m; try { go build -o "../dist/$m.exe" . } finally { Pop-Location }
 }
@@ -30,8 +31,8 @@ foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get
 description = "go test each module"
 usage = 'arg "[module]..." help="Modules to test; all by default"'
 run = '''
-$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
-foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; if ($PSVersionTable.PSVersion -lt '7.4') { throw 'needs PowerShell 7.4+' }
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { $_.Name -notlike '.*' -and (Test-Path "$_/go.mod") }).Name })) {
   $m = $m.Trim(".\/'".ToCharArray()); "# $m"
   Push-Location $m; try { go test ./... } finally { Pop-Location }
 }
@@ -41,8 +42,8 @@ foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get
 description = "go vet, go mod tidy -diff, golangci-lint run and fmt --diff for each module"
 usage = 'arg "[module]..." help="Modules to vet; all by default"'
 run = '''
-$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
-foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; if ($PSVersionTable.PSVersion -lt '7.4') { throw 'needs PowerShell 7.4+' }
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { $_.Name -notlike '.*' -and (Test-Path "$_/go.mod") }).Name })) {
   $m = $m.Trim(".\/'".ToCharArray()); "# $m"
   Push-Location $m
   try { go vet ./...; go mod tidy -diff; golangci-lint run ./...; golangci-lint fmt --diff ./... } finally { Pop-Location }
@@ -54,9 +55,9 @@ foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get
 description = "Type-check and lint each module's non-Windows stubs"
 usage = 'arg "[module]..." help="Modules to vet; all by default"'
 run = '''
-$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; if ($PSVersionTable.PSVersion -lt '7.4') { throw 'needs PowerShell 7.4+' }
 $env:GOOS = 'linux'
-foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { $_.Name -notlike '.*' -and (Test-Path "$_/go.mod") }).Name })) {
   $m = $m.Trim(".\/'".ToCharArray()); "# $m"
   Push-Location $m; try { go vet ./...; golangci-lint run ./... } finally { Pop-Location }
 }
@@ -66,8 +67,8 @@ foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get
 description = "govulncheck each module (needs network)"
 usage = 'arg "[module]..." help="Modules to scan; all by default"'
 run = '''
-$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
-foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { Test-Path "$_/go.mod" }).Name })) {
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; if ($PSVersionTable.PSVersion -lt '7.4') { throw 'needs PowerShell 7.4+' }
+foreach ($m in $(if ($env:usage_module) { -split $env:usage_module } else { (Get-ChildItem -Directory | Where-Object { $_.Name -notlike '.*' -and (Test-Path "$_/go.mod") }).Name })) {
   $m = $m.Trim(".\/'".ToCharArray()); "# $m"
   Push-Location $m; try { govulncheck ./... } finally { Pop-Location }
 }
@@ -82,7 +83,8 @@ run = "if (Test-Path dist) { Remove-Item -Recurse -Force dist }"
 [tasks.openapi]
 description = "Refresh openapi.json from the Plex docs page (needs network)"
 run = '''
-$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; if ($PSVersionTable.PSVersion -lt '7.4') { throw 'needs PowerShell 7.4+' }
+$ProgressPreference = 'SilentlyContinue'
 $page = (Invoke-WebRequest -UseBasicParsing https://developer.plex.tv/pms/).Content
 $state = [regex]::Match($page, '(?m)^\s*const __redoc_state = (.*);\s*$').Groups[1].Value
 try { $state | jq -en 'input | .spec.data | select(.openapi and (.paths | length) > 0)' > openapi.json.tmp }
