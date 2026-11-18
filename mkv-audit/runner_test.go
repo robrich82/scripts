@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -350,5 +351,48 @@ func TestRunAll_TrimKeepsOnlyAudioTrackAndWarns(t *testing.T) {
 	}
 	if !strings.Contains(out, "[WARN]   ep.mkv: no audio track is the original language jpn") || !strings.Contains(out, "(audio: eng)") {
 		t.Errorf("missing mismatch warning:\n%s", out)
+	}
+}
+
+// pathEditor records each file's edits; Apply runs concurrently.
+type pathEditor struct {
+	mu    sync.Mutex
+	edits map[string][]string
+}
+
+func (e *pathEditor) Apply(filePath string, edits []string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.edits[filePath] = append(e.edits[filePath], edits...)
+	return nil
+}
+
+// Each movie under a grouping folder is tagged with its own original
+// language, not one shared by the folder.
+func TestRunAll_GroupingFolderMoviesUseOwnOrigins(t *testing.T) {
+	root, amelie := siblingLibrary(t, filepath.Join("A-M", "Amelie (2001)"), "a.mkv")
+	coco := addEntry(t, root, filepath.Join("A-M", "Coco (2017)"), "c.mkv")
+	writeSibling(t, movieRatingCachePath(), mustJSON(t, map[string]map[string]string{"files": {amelie[0]: "194", coco[0]: "9"}}))
+	tmdb := titleTMDB{langs: map[string]string{"194": "fr", "9": "ja"}}
+	info := &MKVInfo{Tracks: []Track{
+		{ID: 0, Type: "audio", Properties: TrackProperties{Language: "fre", LanguageIETF: "fr", CodecID: "A_AC3", AudioChannels: 2, DefaultTrack: true}},
+		{ID: 1, Type: "audio", Properties: TrackProperties{Language: "jpn", LanguageIETF: "ja", CodecID: "A_AC3", AudioChannels: 2}},
+	}}
+	editor := &pathEditor{edits: map[string][]string{}}
+
+	out := captureStdout(t, func() {
+		RunAll(root, t.TempDir(), &Library{Path: root, Type: "movie"}, &fakeIdentifier{info: info}, editor, &fakePrompter{answer: "n"}, tmdb, nil, nil, time.Time{})
+	})
+
+	for _, tc := range []struct {
+		file, want, notWant string
+	}{
+		{amelie[0], "--edit track:1 --set flag-original=1", "--edit track:2 --set flag-original=1"},
+		{coco[0], "--edit track:2 --set flag-original=1", "--edit track:1 --set flag-original=1"},
+	} {
+		got := strings.Join(editor.edits[tc.file], " ")
+		if !strings.Contains(got, tc.want) || strings.Contains(got, tc.notWant) {
+			t.Errorf("%s edits = %q; want %q and not %q\n%s", tc.file, got, tc.want, tc.notWant, out)
+		}
 	}
 }

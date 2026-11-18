@@ -176,31 +176,80 @@ func writeStateJSON(stateDir, name string, v any) error {
 	return atomicWriteFile(filepath.Join(stateDir, name), data)
 }
 
-// fetchOrigins pre-computes OriginInfo for every unique content-root directory
-// in filesToScan. Results are keyed by the content-root directory name
-// (first path component relative to libraryRoot). TMDB calls are sequential to
-// respect rate limits. Entries that produce no match are absent from the map.
+// contentRoots maps each file under libraryRoot to its content root, relative
+// to libraryRoot: the first folder under it, or the file itself in a flat
+// library. In a movie library a folder of movie folders (A-M/<movie>) isn't
+// one: each movie folder under it is, through nested grouping folders too.
+func contentRoots(files []string, libraryRoot, libType string) map[string]string {
+	roots := make(map[string]string, len(files))
+	grouping := map[string]bool{} // folder → groupsMovieFolders, checked once
+	for _, path := range files {
+		if contentRootDir(path, libraryRoot) == "" {
+			continue
+		}
+		rel, _ := filepath.Rel(filepath.Clean(libraryRoot), filepath.Clean(path))
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		root := parts[0]
+		for i := 1; i < len(parts)-1 && libType == "movie" && groupsMovieFolders(libraryRoot, root, grouping); i++ {
+			root = filepath.Join(root, parts[i])
+		}
+		roots[path] = root
+	}
+	return roots
+}
+
+// groupsMovieFolders reports whether the folder rel under libraryRoot holds
+// movie folders: its name gives no year, no .mkv sits directly in it, and a
+// subfolder is a movie by name (it gives a year) or holds movie folders
+// itself. So a movie split into Disc1 and Disc2 isn't one, nor is a folder
+// that can't be read.
+func groupsMovieFolders(libraryRoot, rel string, memo map[string]bool) bool {
+	if g, ok := memo[rel]; ok {
+		return g
+	}
+	g := false
+	if _, year := dirTitleYear(filepath.Base(rel)); year == "" {
+		entries, err := os.ReadDir(filepath.Join(libraryRoot, rel))
+		g = err == nil &&
+			!slices.ContainsFunc(entries, func(e os.DirEntry) bool { return !e.IsDir() && isMKV(e.Name()) }) &&
+			slices.ContainsFunc(entries, func(e os.DirEntry) bool {
+				if !e.IsDir() {
+					return false
+				}
+				_, year := dirTitleYear(e.Name())
+				return year != "" || groupsMovieFolders(libraryRoot, filepath.Join(rel, e.Name()), memo)
+			})
+	}
+	memo[rel] = g
+	return g
+}
+
+// fetchOrigins pre-computes OriginInfo for every unique content root in
+// filesToScan (see contentRoots), returning it keyed by content root along
+// with each file's content root. TMDB calls are sequential to respect rate
+// limits. Entries that produce no match are absent from the map.
 //
 // When the sibling cache (mkv-tvshow's or mkv-movie's) has no ID for a
 // directory, fetchOrigins searches TMDB interactively: the top result is shown
 // and the user is prompted to accept it, enter a manual TMDB ID, or skip. An
 // ID whose origin TMDB returns is saved back to the sibling cache so future
 // runs (and mkv-tvshow / mkv-movie) can skip the search step.
-func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOriginClient, prompter Prompter) map[string]OriginInfo {
-	origins := make(map[string]OriginInfo)
+func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOriginClient, prompter Prompter) (origins map[string]OriginInfo, roots map[string]string) {
+	origins = make(map[string]OriginInfo)
 	if tmdb == nil || libraryRoot == "" || (libType != "tv" && libType != "movie") {
-		return origins
+		return origins, nil
 	}
 
 	sibling := loadSiblingCaches(libType)
 	defer sibling.finish()
 	var autoAll, skipAll bool
 
+	roots = contentRoots(filesToScan, libraryRoot, libType)
 	var dirs []string
-	dirFiles := map[string][]string{} // content-root dir → its files
+	dirFiles := map[string][]string{} // content root → its files
 	for _, path := range filesToScan {
-		dir := contentRootDir(path, libraryRoot)
-		if dir == "" {
+		dir, ok := roots[path]
+		if !ok {
 			continue
 		}
 		if _, seen := dirFiles[dir]; !seen {
@@ -209,7 +258,7 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		dirFiles[dir] = append(dirFiles[dir], path)
 	}
 	for _, dir := range dirs {
-		title, year := dirTitleYear(dir)
+		title, year := dirTitleYear(filepath.Base(dir))
 		if title == "" {
 			continue
 		}
@@ -268,11 +317,19 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 		case !cached && libType == "tv":
 			sibling.rememberTV(dir, root, id)
 		// A root whose files mkv-movie maps to IDs that didn't settle it, or
-		// that holds movie folders, may be several movies: the answer is for
-		// this run only, not saved under its name or onto its files. One whose
-		// name gives a year is one movie, even split across subfolders (discs).
-		case !cached && (sibling.rootMapped(root) || year == "" && groupsMovies(root)):
+		// whose name gives no year and that holds several .mkv files (side by
+		// side, on discs, or in movie folders named without a year), may be
+		// several movies: the answer is for this run only, not saved under its
+		// name or onto its files. One whose name gives a year is one movie,
+		// even split across subfolders. A folder named without a year under a
+		// grouping folder (Extras, Disc1) may not be a movie at all.
+		case !cached && (sibling.rootMapped(root) || year == "" && (groupsMovies(root) || severalDirectMKV(root) || strings.ContainsRune(dir, filepath.Separator))):
 			fmt.Printf("[TMDB]   %s: id %s used for this run only, not saved: the folder may hold several movies\n", dir, id)
+		// Several .mkv files beside each other may be different movies, so
+		// only the title key is saved; mkv-movie maps each file itself.
+		case !cached && severalDirectMKV(root):
+			fmt.Printf("[TMDB]   %s: id %s saved for the folder's title, not for its files: they may be different movies\n", dir, id)
+			sibling.rememberMovie(dir, title, year, id, nil, false)
 		case !cached:
 			sibling.rememberMovie(dir, title, year, id, dirFiles[dir], false)
 		// A title key alone (as older mkv-audit saved) is pruned by
@@ -283,7 +340,7 @@ func fetchOrigins(filesToScan []string, libraryRoot, libType string, tmdb TMDBOr
 			sibling.rememberMovie(dir, title, year, sibling.titleKeyID(title, year), dirFiles[dir], true)
 		}
 	}
-	return origins
+	return origins, roots
 }
 
 // resolveTMDBID searches TMDB for dir and prompts the user to confirm the top
@@ -532,7 +589,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 		libRoot = lib.Path
 		libType = lib.Type
 	}
-	origins := fetchOrigins(filesToScan, libRoot, libType, tmdb, prompter)
+	origins, roots := fetchOrigins(filesToScan, libRoot, libType, tmdb, prompter)
 
 	// Per-title audio language preferences from mkv-tvshow / mkv-movie, so trim
 	// keeps the audio each Plex account actually watches.
@@ -558,7 +615,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 				for _, t := range info.Tracks {
 					if t.Type == "audio" {
 						if normalizeLanguage(t.Properties.Language) == "und" {
-							origin := origins[contentRootDir(p, libRoot)]
+							origin := origins[roots[p]]
 							resolved := resolveIETFMap(p, libRoot, lib, origin)
 							mu.Lock()
 							undCandidates = append(undCandidates, undAudioCandidate{
@@ -641,7 +698,7 @@ func RunAll(root, stateDir string, lib *Library, ident MKVIdentifier, editor MKV
 			var localMismatches []langMismatchCandidate
 
 			// Resolve per-file IETF map and original language.
-			origin := origins[contentRootDir(p, libRoot)]
+			origin := origins[roots[p]]
 			ietfMap := resolveIETFMap(p, libRoot, lib, origin)
 			originLang := resolveOriginLang(p, libRoot, lib, origin)
 

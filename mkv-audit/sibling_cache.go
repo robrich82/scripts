@@ -506,6 +506,14 @@ func soleMKV(root string) bool {
 	return ok && total == 1
 }
 
+// severalDirectMKV reports whether root holds more than one .mkv file
+// directly, as a flat collection does. One that can't be read in full is
+// taken to.
+func severalDirectMKV(root string) bool {
+	direct, _, ok := countMKV(root)
+	return !ok || direct > 1
+}
+
 // groupsMovies reports whether root looks like a folder of movie folders: its
 // .mkv files are all in subfolders, and there is more than one. One that
 // can't be read in full is taken to.

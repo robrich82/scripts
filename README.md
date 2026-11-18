@@ -300,11 +300,17 @@ without asking, the title-and-year ID if it is one of them, and otherwise the ID
 them map to (the lowest on a tie). When TMDB has no movie with an ID, the next one is
 tried. Confirmed IDs that TMDB finds are saved back to that cache, with a movie's `.mkv`
 files mapped to its ID; a movie found by title and year only has its file mapped too,
-when its folder holds a single `.mkv`. A folder that may hold several movies (its
-subfolder files map to different movies, or its name gives no year and it holds more
-than one `.mkv`, all in subfolders, as `A-M/<movie>` does) is, when no title-and-year ID
-is cached for it, searched and asked about, and the answer is used for that run only,
-not saved. A cache that can't be loaded is left untouched, with a
+when its folder holds a single `.mkv`. A grouping folder, whose name gives no year and
+which holds no `.mkv` directly but a folder named with a year (`A-M/<movie>`) or another
+grouping folder, isn't a movie: each folder under it is looked up on its own, and one
+named without a year (`Extras`, a disc) only for that run. A
+folder that may hold several movies (its subfolder files map to different movies, or its
+name gives no year and it holds more than one `.mkv`, directly or all in subfolders
+named without a year) is, when no
+title-and-year ID is cached for it, searched and asked about, and the answer is used for
+that run only, not saved. One whose name gives a year but that holds more than one
+unmapped `.mkv` directly has the answer saved under its title and year only, with no
+file mapped. A cache that can't be loaded is left untouched, with a
 warning, and the IDs confirmed that run are not saved to it.
 
 **`und_lang`** (optional, on library or override) — last-resort fallback language for
