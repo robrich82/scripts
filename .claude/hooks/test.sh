@@ -9,7 +9,7 @@ check() { # check <block|ok> <Bash|PowerShell> <command>
   rc=$?
   case "$1:$rc" in
     ok:0) ;;
-    block:2) case "$err" in *'Use make'*) ;; *) fail "$2 blocked for the wrong reason: $3 ($err)" ;; esac ;;
+    block:2) case "$err" in *'Use mise run build'*) ;; *) fail "$2 blocked for the wrong reason: $3 ($err)" ;; esac ;;
     *) fail "$2 want $1 got rc $rc: $3" ;;
   esac
 }
@@ -53,7 +53,8 @@ echo "fix"; go build
 BLOCKED
 
 while IFS= read -r c; do check ok Bash "$c"; done <<'ALLOWED'
-make all
+mise run build
+mise run build mkv-audit
 go test ./...
 go vet ./...
 go test -run build ./...

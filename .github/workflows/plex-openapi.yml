@@ -23,7 +23,16 @@ jobs:
         with:
           ref: main
 
-      - run: make openapi
+      # Install mise only: the runner's pwsh and jq suffice, and mise.lock has only Windows builds.
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.11.9
+          install: false
+          cache: false
+
+      - run: mise run openapi
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
 
       # Skips when main already has this spec, or an open PR does. Checks the PR, not just
       # the branch, so a push whose PR create failed or was closed gets a PR next run.
@@ -53,5 +62,5 @@ jobs:
             gh pr edit "$BRANCH" --title "$title"
           else
             gh pr create --base main --head "$BRANCH" --title "$title" \
-              --body "Weekly \`make openapi\` refresh from https://developer.plex.tv/pms/."
+              --body "Weekly \`mise run openapi\` refresh from https://developer.plex.tv/pms/."
           fi

@@ -6,25 +6,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All code in this project should be written in Go where possible.
 
 ## Git Commits
-After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `make vet` or `make vet-linux` before committing.
+After making any code changes, always create a git commit. Use a concise, conventional-commits-style message that reflects the change, with no `Co-Authored-By` trailer. Fix any issues reported by `mise run vet` or `mise run vet-linux` before committing.
 
 ## README
 When adding a new tool, changing a tool's commands/flags/config, or adding new functionality, update README.md to reflect the change. `/finish` runs the `readme-drift-checker` agent to catch what was missed.
 
 ## Build, Test & Lint
-Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `make`.
-In a worktree, run `make` and these skills from the worktree directory, and give `twin-port-checker` the worktree path. From the main checkout they build, test and diff `main` instead.
+Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `mise run build`.
+In a worktree, run `mise run` and these skills from the worktree directory, and give `twin-port-checker` the worktree path. From the main checkout they build, test and diff `main` instead.
 
-- `make all` / `make <tool>` — build to `dist/<tool>.exe`. The make target always equals the module directory name.
-- `make vet` — `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters and formatter are configured in `.golangci.yml` and pinned in `mise.toml`; `mise install` provides them. Suppress a finding with `//nolint:<linter> // reason`, not staticcheck's `//lint:ignore`.
-- `make vet-linux` — `GOOS=linux go vet ./...` and `GOOS=linux golangci-lint run ./...` per module, to type-check and lint the non-Windows stubs.
-- `make test` — `go test ./...` per module.
-- `make vuln` — `govulncheck` per module (needs network).
-- `make clean` — delete `dist/`.
-- `make openapi` — refresh `openapi.json` from the Plex docs page (needs `curl`, `jq` and network).
-- Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `make test` before committing.
+The tasks are in `mise.toml` and run under `pwsh`, from PowerShell or Git Bash alike. Every task but `clean` and `openapi` takes module directory names and defaults to all of them.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml`, `mise.lock` or `.golangci.yml` change). Each job runs the equivalent of `make vet`, `make vet-linux` and `make test`, plus govulncheck, which only fails the weekly run.
+- `mise run build [module...]` — build to `dist/<module>.exe`.
+- `mise run vet [module...]` — `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters and formatter are configured in `.golangci.yml` and pinned in `mise.toml`; `mise install` provides them. Suppress a finding with `//nolint:<linter> // reason`, not staticcheck's `//lint:ignore`.
+- `mise run vet-linux [module...]` — `GOOS=linux go vet ./...` and `GOOS=linux golangci-lint run ./...` per module, to type-check and lint the non-Windows stubs.
+- `mise run test [module...]` — `go test ./...` per module.
+- `mise run vuln [module...]` — `govulncheck` per module (needs network).
+- `mise run clean` — delete `dist/`.
+- `mise run openapi` — refresh `openapi.json` from the Plex docs page (needs network).
+- Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `mise run test` before committing.
+
+CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml`, `mise.lock` or `.golangci.yml` change). Each job runs `mise run vet`, `vet-linux`, `test` and `vuln` for its module; `vuln` only fails the weekly run.
 
 Hooks in `.claude/settings.json`, in sessions started at the repo root:
 - Run `gofmt -w` on every edited `.go` file.
@@ -40,7 +42,7 @@ Six independent tools, each its own Go module (`package main`) with its own `go.
 
 - **mkv-movie and mkv-tvshow duplicate a lot of code** (`rating.go`, `rating_cache.go`, `classification.go`, `set_rating.go`, `reset_rating.go`, `plex*.go` multi-account logic, `filetime*.go`, `appdir.go`). The copies have drifted; a bug fix in one usually needs porting to the other.
 - **Other code is shared across tools, not just the twins**: `--clean` pruning, offline-drive detection and walk/stat error handling recur, and bugs in them have been fixed one tool at a time. Run the `twin-port-checker` agent after changing any tool; it checks both the twins and these shared shapes.
-- The Makefile finds modules by their `go.mod`, so a new tool needs no Makefile change. `/new-tool <name> <purpose>` scaffolds the module and covers the README, this file and the `configs/` junction.
+- The mise tasks find modules by their `go.mod`, so a new tool needs no task change. `/new-tool <name> <purpose>` scaffolds the module and covers the README, this file and the `configs/` junction.
 
 Common shape of each tool:
 
@@ -54,4 +56,4 @@ Cross-tool coupling: mkv-audit's track trimming reads `manual_data.json` from `%
 Environment: `TMDB_API_KEY` (mkv-movie, mkv-tvshow; optional for mkv-audit), `PLEX_URL`, `PLEX_TOKEN` (optional Plex integration in mkv-movie, mkv-tvshow, mkv-music), `PLEX_ALT_TOKEN`, `PLEX_ALT2_TOKEN` (mkv-movie/mkv-tvshow: only per-account stream/language prefs use these), `GITHUB_PERSONAL_ACCESS_TOKEN` (sw-update rate limit).
 
 ## Plex API
-The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it through the `plex-api` skill when working with Plex API endpoints, request/response shapes, or authentication. `.github/workflows/plex-openapi.yml` runs `make openapi` weekly and opens a PR when the spec changes.
+The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it through the `plex-api` skill when working with Plex API endpoints, request/response shapes, or authentication. `.github/workflows/plex-openapi.yml` runs `mise run openapi` weekly and opens a PR when the spec changes.
