@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Every module on a schedule, a ci.yml, mise.toml or .golangci.yml change, or
+      # Every module on a schedule, a ci.yml, mise.toml, mise.lock or .golangci.yml change, or
       # an unknown base (new branch, force push); otherwise only modules with
       # changed files.
       - id: pick
@@ -39,7 +39,7 @@ jobs:
             picked=$all
           else
             files=$(git diff --name-only "$BASE...$HEAD")
-            if grep -qxE '\.github/workflows/ci\.yml|mise\.toml|\.golangci\.yml' <<<"$files"; then
+            if grep -qxE '\.github/workflows/ci\.yml|mise\.(toml|lock)|\.golangci\.yml' <<<"$files"; then
               picked=$all
             else
               picked=$(for m in $all; do grep -q "^$m/" <<<"$files" && echo "$m"; done || true)
@@ -73,17 +73,31 @@ jobs:
           go-version-file: ${{ matrix.module }}/go.mod
           cache-dependency-path: ${{ matrix.module }}/go.*
 
-      # Linters at the versions mise.toml pins. Go stays with setup-go (go.mod's
+      # Caches only downloads, which mise checks against mise.lock's checksums. The
+      # action's own cache restores installed tools without checking them.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mise-cache/downloads-cas
+          key: mise-downloads-${{ runner.os }}-${{ hashFiles('mise.lock') }}
+
+      # Linters at the versions mise.lock pins. Go stays with setup-go (go.mod's
       # version, build cache); without MISE_DISABLE_TOOLS mise refuses to build
       # govulncheck until its own Go is installed.
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         env:
           MISE_DISABLE_TOOLS: go
+          MISE_CACHE_DIR: ${{ runner.temp }}/mise-cache
         with:
           version: 2026.11.9
+          cache: false
           install_args: >-
+            --locked
             golangci-lint
             go:golang.org/x/vuln/cmd/govulncheck
+
+      # The install above checks only the tools it installs.
+      - name: mise.lock covers mise.toml
+        run: mise install --locked --dry-run
 
       - name: go mod tidy
         run: go mod tidy -diff

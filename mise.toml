@@ -1,3 +1,7 @@
+[env]
+# Error instead of downloading a newer Go when a go.mod's go line is ahead of the Go in use.
+GOTOOLCHAIN = "local"
+
 [tools]
 go = "1.27.4"
 jq = "1.8.2"
