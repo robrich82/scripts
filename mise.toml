@@ -8,7 +8,7 @@ go = "1.27.4"
 jq = "1.8.2"
 ffmpeg = "9.0.2" # tests only: builds fixtures for the real-binary tests
 golangci-lint = "2.15.0"
-"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "v1.10.0"
 
 # Module tasks take module directory names (`mise run test mkv-movie`) and default to every
 # top-level directory with a go.mod.
