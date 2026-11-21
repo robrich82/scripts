@@ -223,6 +223,7 @@ twin '' "$tmp/mkv-movie/new.go"
 if command -v cygpath >/dev/null 2>&1; then
   twin mkv-tvshow/a.go "$(cygpath -w "$tmp/mkv-movie/a.go")"
   twin mkv-tvshow/a.go "$(cygpath -w "$tmp/MKV-Movie/a.go")"
+  twin mkv-tvshow/a.go "$(cygpath -w "$tmp/mkv-movie")\\x\\..\\a.go"
 fi
 for input in 'not json' '{}'; do
   out=$(printf '%s' "$input" | sh "$dir/twin-reminder.sh" 2>&1)
