@@ -202,14 +202,15 @@ tmp=$(mktemp -d)
 mkdir -p "$tmp/mkv-movie" "$tmp/mkv-tvshow" "$tmp/mkv-audit"
 touch "$tmp/mkv-movie/a.go" "$tmp/mkv-tvshow/a.go" "$tmp/mkv-movie/only.go" "$tmp/mkv-audit/a.go" \
   "$tmp/mkv-movie/go.mod" "$tmp/mkv-tvshow/go.mod"
-twin() { # twin <expected twin, or empty for no output> <file_path>
+twin() { # twin <expected twin under $tmp, or empty for no output> <file_path>
   out=$(jq -n --arg f "$2" '{tool_input: {file_path: $f}}' | sh "$dir/twin-reminder.sh" 2>&1)
   rc=$?
   [ "$rc" = 0 ] || fail "twin-reminder rc $rc for $2"
   if [ -z "$1" ]; then
     [ -z "$out" ] || fail "twin-reminder want no output for $2, got: $out"
   else
-    printf '%s' "$out" | jq -e --arg t "$1" '.hookSpecificOutput | .hookEventName == "PostToolUse" and (.additionalContext | startswith($t + " "))' \
+    want="$tmp/$1"; command -v cygpath >/dev/null 2>&1 && want=$(cygpath -w "$want")
+    printf '%s' "$out" | jq -e --arg t "$want" '.hookSpecificOutput | .hookEventName == "PostToolUse" and (.additionalContext | startswith($t + " "))' \
       >/dev/null || fail "twin-reminder want $1 for $2, got: $out"
   fi
 }
