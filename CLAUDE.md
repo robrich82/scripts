@@ -13,7 +13,7 @@ When adding a new tool, changing a tool's commands/flags/config, or adding new f
 
 ## Build, Test & Lint
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `mise run build`.
-In a worktree, run `mise run` and these skills from the worktree directory, and give `twin-port-checker` the worktree path. From the main checkout they build, test and diff `main` instead.
+In a worktree, run `mise run` and these skills from the worktree directory, and give `twin-port-checker` and `security-guard-checker` the worktree path. From the main checkout they build, test and diff `main` instead.
 
 The tasks are in `mise.toml` and run under `pwsh`, from PowerShell or Git Bash alike. Every task but `clean` and `openapi` takes module directory names and defaults to all of them.
 
