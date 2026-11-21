@@ -604,8 +604,10 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--all-ids` | false | With `--clean`, also remove ratings and ignores for every show ID not in `show_cache.json` or a `manual_data.json` season override (other than a removed show's). Ignored when `show_cache.json` is empty or missing; when every show folder in it is gone, only those shows' IDs are removed |
 | `--reset-rating <query>` | — | Clear the cached NZ rating for a show and reset the applied state on all its files so the next run re-fetches and re-applies it. `query` is a folder name substring or TMDB ID |
 | `--set-rating <RATING>` | — | Set `RATING` as the NZ rating for **every** show in the current directory, overriding any cached value, then exit (see below) |
+| `--clear-history <show>` | — | Delete a show's Plex watch history, then exit (see below). Repeat for more shows |
+| `--account <name>` | token owner | With `--clear-history`, the Plex server account whose history to clear |
 
-`--clean`, `--reset-rating`, `--set-rating`, `--deband-only`, `--missing`, `--language-only`, `--title-check` and `--ratings-only` each run on their own: setting two of them exits with an error before anything runs.
+`--clean`, `--reset-rating`, `--set-rating`, `--clear-history`, `--deband-only`, `--missing`, `--language-only`, `--title-check` and `--ratings-only` each run on their own: setting two of them exits with an error before anything runs.
 
 #### Output
 
@@ -652,6 +654,23 @@ applied state on their files. No TMDB, Plex, or network calls are made: the next
 `mkv-tvshow --ratings-only --all` writes the new `LAW_RATING` tags and pushes the
 rating to Plex.
 
+### Clearing watch history (`--clear-history`)
+
+Deletes every episode of a show from a Plex server account's watch history,
+including shows no longer in the library:
+
+```sh
+mkv-tvshow --clear-history "Bluey (2018)" --clear-history "Chicago Fire"
+```
+
+Needs `PLEX_URL` and `PLEX_TOKEN`. It clears the token owner's history (found
+through plex.tv), or `--account <name>`'s. History entries don't record a
+show's year, so a show matches by title alone unless its title ends in a year,
+which must then match the one given. The matching entries are listed per show
+and nothing is deleted until you confirm. Before deleting, the entries are
+written to `history-cleared-<UTC time>.json` in the config folder, since Plex
+can't restore them.
+
 ### Missing episode check (`--missing`)
 
 Run from the media directory to find episodes that have aired on TMDB but are
@@ -684,7 +703,7 @@ runs. You can ignore a single episode, a whole season, or the entire show.
 - TMDB API (requires `TMDB_API_KEY` environment variable)
 - `mkvpropedit` — applies metadata edits
 - `mkvextract` — reads the existing tags so writing new ones keeps the rest; an episode whose tags it can't read isn't updated (part of MKVToolNix)
-- `PLEX_URL` / `PLEX_TOKEN` — optional (required for `--language-only`); used to push NZ ratings and set per-show audio language in Plex
+- `PLEX_URL` / `PLEX_TOKEN` — optional (required for `--language-only` and `--clear-history`); used to push NZ ratings, set per-show audio language and clear watch history in Plex
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; the audio language is set for these accounts too
 
 When Plex is configured, after processing each show the tool:
