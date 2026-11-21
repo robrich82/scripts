@@ -195,6 +195,11 @@ readcheck 2 "$root/OpenAPI.JSON"
 if command -v cygpath >/dev/null 2>&1; then readcheck 2 "$(cygpath -w "$root")\openapi.json"; fi
 readcheck 0 "$root/openapi.json.bak"
 readcheck 0 "$root/README.md"
+readcheck 2 "$root/tmdb-openapi.json"
+readcheck 2 "$root/TMDB-OpenAPI.json"
+if command -v cygpath >/dev/null 2>&1; then readcheck 2 "$(cygpath -w "$root")\tmdb-openapi.json"; fi
+readcheck 0 "$root/tmdb-openapi.json.tmp"
+readcheck 0 "$root/mkv-movie/tmdb-openapi.json"
 printf 'not json' | sh "$dir/block-openapi-read.sh" 2>/dev/null || fail 'block-openapi-read refused unreadable input'
 
 # twin-reminder: names the twin of a .go file both twins have, and says nothing otherwise.
@@ -244,6 +249,14 @@ for s in gofmt-on-edit.sh twin-reminder.sh; do
 done
 tmp=$(mktemp -d)
 readcheck 0 "$tmp/openapi.json"
+readcheck 0 "$tmp/tmdb-openapi.json"
+# Each spec is gated on its own skill being there: a checkout with only plex-api reads tmdb-openapi.json.
+mkdir -p "$tmp/.claude/skills/plex-api"
+readcheck 2 "$tmp/openapi.json"
+readcheck 0 "$tmp/tmdb-openapi.json"
+mkdir -p "$tmp/.claude/skills/tmdb-api"
+err=$(jq -n --arg f "$tmp/tmdb-openapi.json" '{tool_input: {file_path: $f}}' | sh "$dir/block-openapi-read.sh" 2>&1)
+case "$err" in *'tmdb-api skill'*) ;; *) fail "block-openapi-read named the wrong skill: $err" ;; esac
 rm -rf "$tmp"
 
 # backup-config: copies a module's live config aside, via the real path or a junction.

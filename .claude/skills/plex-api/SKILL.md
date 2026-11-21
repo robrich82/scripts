@@ -10,3 +10,5 @@ Run from the repo root. These are the Git Bash forms; in PowerShell, drop `MSYS_
 
 - Search: `MSYS_NO_PATHCONV=1 jq -r --arg re '<regex>' -f .claude/skills/plex-api/search.jq openapi.json` lists matching operations. The regex is case-insensitive.
 - Detail: `MSYS_NO_PATHCONV=1 jq --arg route '<path>' -f .claude/skills/plex-api/detail.jq openapi.json` prints one path's operations and every component they reference.
+
+The tmdb-api skill uses these filters too, so keep them free of Plex specifics.

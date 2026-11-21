@@ -3,3 +3,5 @@
 configs/
 dist/
 *.exe
+/tmdb-openapi.json
+/tmdb-openapi.json.*.tmp
