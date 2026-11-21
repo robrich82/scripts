@@ -198,6 +198,12 @@ func TestPlanHistory_TitleMatch(t *testing.T) {
 		{"Ｓｈｏｗ ２", "Show 2", true},
 		{"Fargo 2", "Fargo 3", false},
 		{"1883", "1923", false},
+		// Numbers that aren't decimal digits still tell sequels apart.
+		{"Rocky", "Rocky Ⅱ", false},
+		{"Show", "Show ②", false},
+		{"Show", "Show²", false},
+		{"とある魔術の禁書目録", "とある魔術の禁書目録Ⅱ", false},
+		{"とある魔術の禁書目録Ⅱ", "とある魔術の禁書目録Ⅱ", true},
 		// Vowel signs are marks, not letters, and tell these titles apart.
 		{"काल", "कल", false},
 		// Titles alike only in their ASCII, which the Plex lookup's

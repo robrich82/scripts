@@ -673,8 +673,8 @@ case, spaces and punctuation. The matching entries are listed per show (two
 shows with one title are listed apart) and nothing is deleted until you
 confirm. Before deleting, the entries are written to
 `history-cleared-<UTC time>.json` in the config folder, since Plex can't
-restore them. Its `complete` stays `false` until every delete has been tried,
-and any not deleted are listed under `failed`.
+restore them. Its `complete` stays `false` until the run finishes, and
+`failed` lists the entries whose delete failed or wasn't tried.
 
 ### Missing episode check (`--missing`)
 

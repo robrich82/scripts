@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -54,9 +55,9 @@ func splitTitleYear(s string) (string, int) {
 }
 
 // historyTitleKey folds a show title for comparison: lower case, with the
-// letters, digits and marks (Thai and Indic vowel signs) of every script
-// kept and punctuation, spaces and symbols dropped. titleMatcher keeps only ASCII, which is too loose here:
-// whatever matches gets deleted.
+// letters, numbers (Ⅱ and ② too) and marks (Thai and Indic vowel signs) of
+// every script kept and punctuation, spaces and symbols dropped. titleMatcher
+// keeps only ASCII, which is too loose here: whatever matches gets deleted.
 func historyTitleKey(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {
@@ -64,7 +65,7 @@ func historyTitleKey(s string) string {
 			r -= 'ａ' - 'a' // full-width Latin: ＢＬＥＡＣＨ is BLEACH
 		}
 		// Spacing modifiers stand in for apostrophes: Hawaiʻi is Hawai'i.
-		if (unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r)) && (r < 0x2B0 || r > 0x2FF) {
+		if (unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r)) && (r < 0x2B0 || r > 0x2FF) {
 			b.WriteRune(r)
 		}
 	}
@@ -102,8 +103,8 @@ type historyRecord struct {
 	AccountID int            `json:"accountID"`
 	Targets   []string       `json:"targets"`
 	Server    []historyEntry `json:"server"`
-	// Complete is false until every delete has been tried, so a record left
-	// false is from an interrupted run and some of Server may remain.
+	// Complete is false until the run finishes, so a record left false is
+	// from an interrupted run and some of Server may remain.
 	Complete bool `json:"complete"`
 	// Failed lists the entries not deleted: those whose delete failed, and
 	// those not tried after the run stopped.
@@ -124,11 +125,11 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 	}
 	acct, err := resolveHistoryAccount(d.server, d.owner, account)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w; nothing was deleted", err)
 	}
 	entries, err := d.server.WatchHistory(acct.ID)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w; nothing was deleted", err)
 	}
 	for _, e := range entries {
 		// Deletes are irreversible, so don't rely on the server's filter alone.
@@ -385,10 +386,24 @@ func writeNewHistoryRecord(path string, record historyRecord) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if _, err := os.Stat(path); err == nil {
+	// Claim the name first: a check and a later rename could replace a record
+	// another run wrote in between.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if errors.Is(err, fs.ErrExist) {
 		return errors.New("an earlier record has this name")
 	}
-	return writeRecordFile(path, record)
+	if err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return err
+	}
+	if err := writeRecordFile(path, record); err != nil {
+		os.Remove(path) // the empty claim, not a record
+		return err
+	}
+	return nil
 }
 
 func writeRecordFile(path string, record historyRecord) error {
