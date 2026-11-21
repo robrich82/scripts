@@ -15,9 +15,9 @@ When adding a new tool, changing a tool's commands/flags/config, or adding new f
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `mise run build`.
 In a worktree, run `mise run` and these skills from the worktree directory, and give `twin-port-checker` and `security-guard-checker` the worktree path. From the main checkout they build, test and diff `main` instead.
 
-The tasks are in `mise.toml` and run under `pwsh`, from PowerShell or Git Bash alike. Every task but `clean`, `openapi` and `tmdb-openapi` takes module directory names and defaults to all of them.
+The tasks are declared in `mise.toml`, each as a pair of scripts in `tasks/`: `<name>.sh` runs under `sh` on macOS and Linux, and `<name>.ps1` under `pwsh` on Windows, whatever shell `mise run` is typed in. Make every change to both. Every task but `clean`, `openapi` and `tmdb-openapi` takes module directory names and defaults to all of them.
 
-- `mise run build [module...]` — build to `dist/<module>.exe`.
+- `mise run build [module...]` — build to `dist/<module>` (`dist/<module>.exe` on Windows).
 - `mise run vet [module...]` — `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters and formatter are configured in `.golangci.yml` and pinned in `mise.toml`; `mise install` provides them. Suppress a finding with `//nolint:<linter> // reason`, not staticcheck's `//lint:ignore`.
 - `mise run vet-linux [module...]` — `GOOS=linux go vet ./...` and `GOOS=linux golangci-lint run ./...` per module, to type-check and lint the non-Windows stubs.
 - `mise run test [module...]` — `go test ./...` per module.
@@ -27,7 +27,7 @@ The tasks are in `mise.toml` and run under `pwsh`, from PowerShell or Git Bash a
 - `mise run tmdb-openapi` — fetch the gitignored `tmdb-openapi.json` for the `tmdb-api` skill (needs network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `mise run test` before committing.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml`, `mise.lock` or `.golangci.yml` change). Each job runs `mise run vet`, `vet-linux`, `test` and `vuln` for its module; `vuln` only fails the weekly run.
+CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml`, `mise.lock`, `tasks/` or `.golangci.yml` change). Each job runs `mise run vet`, `vet-linux`, `test` and `vuln` for its module; `vuln` only fails the weekly run.
 
 Hooks in `.claude/settings.json`, in sessions started at the repo root:
 - Run `gofmt -w` on every edited `.go` file.
