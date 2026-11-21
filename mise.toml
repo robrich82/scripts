@@ -111,10 +111,12 @@ $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $tru
 $ProgressPreference = 'SilentlyContinue'
 $url = 'https://developer.themoviedb.org/openapi/tmdb-api.json'
 $raw = New-TemporaryFile
+$out = Join-Path $PWD "tmdb-openapi.json.$PID.tmp" # per process, so parallel runs don't share it
 try {
   Invoke-WebRequest -UseBasicParsing $url -OutFile $raw
-  jq -e 'del(.. | .example?, .examples?) | select(.openapi and (.paths | length) > 0)' $raw > tmdb-openapi.json.tmp
-} catch { Remove-Item -ErrorAction Ignore tmdb-openapi.json.tmp; throw "tmdb-openapi: no spec at $url ($_)" }
+  jq -e 'del(.. | .example?, .examples?) | select(.openapi and (.paths | length) > 0)' $raw > $out
+} catch { Remove-Item -ErrorAction Ignore $out; throw "tmdb-openapi: no spec at $url ($_)" }
 finally { Remove-Item -ErrorAction Ignore $raw }
-Move-Item -Force tmdb-openapi.json.tmp tmdb-openapi.json
+# One-step replace, so a failed move keeps the old spec. Last, as pwsh -Command exits with its status.
+[IO.File]::Move($out, (Join-Path $PWD tmdb-openapi.json), $true)
 '''

@@ -4,7 +4,7 @@ description: Look up TMDB API endpoints by path, summary or operation ID in a lo
 user-invocable: false
 ---
 
-`tmdb-openapi.json` is gitignored and fetched on demand, without TMDB's examples. Run these from the repo root, or the worktree's root in a worktree. They are Git Bash forms; without `MSYS_NO_PATHCONV=1`, Git Bash rewrites the `/3/…` paths into Windows paths.
+`tmdb-openapi.json` is gitignored and fetched on demand, without TMDB's examples. Run these with the Bash tool, not PowerShell, from the repo root or the worktree's root in a worktree. Without `MSYS_NO_PATHCONV=1`, Git Bash rewrites the `/3/…` paths into Windows paths.
 
 1. Fetch the spec if it's missing or more than 30 days old (needs network):
    `[ -n "$(find tmdb-openapi.json -mtime -30 2>/dev/null)" ] || mise run tmdb-openapi`

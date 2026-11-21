@@ -211,6 +211,13 @@ done
 tmp=$(mktemp -d)
 readcheck 0 "$tmp/openapi.json"
 readcheck 0 "$tmp/tmdb-openapi.json"
+# Each spec is gated on its own skill being there: a checkout with only plex-api reads tmdb-openapi.json.
+mkdir -p "$tmp/.claude/skills/plex-api"
+readcheck 2 "$tmp/openapi.json"
+readcheck 0 "$tmp/tmdb-openapi.json"
+mkdir -p "$tmp/.claude/skills/tmdb-api"
+err=$(jq -n --arg f "$tmp/tmdb-openapi.json" '{tool_input: {file_path: $f}}' | sh "$dir/block-openapi-read.sh" 2>&1)
+case "$err" in *'tmdb-api skill'*) ;; *) fail "block-openapi-read named the wrong skill: $err" ;; esac
 rm -rf "$tmp"
 
 # backup-config: copies a module's live config aside, via the real path or a junction.

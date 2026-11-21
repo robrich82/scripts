@@ -12,5 +12,5 @@ case "$path" in
 esac
 command -v cygpath >/dev/null 2>&1 && path=$(cygpath -u "$path")
 [ -d "$(dirname "$path")/.claude/skills/$skill" ] || exit 0
-echo "$name is too large to read. Use the $skill skill: its jq filters query the spec." >&2
+echo "$name is too large to read. Use the $skill skill to query it with jq." >&2
 exit 2
