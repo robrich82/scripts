@@ -31,6 +31,7 @@ type historyEntry struct {
 	Type             string `json:"type"`
 	Title            string `json:"title"`
 	GrandparentTitle string `json:"grandparentTitle,omitempty"`
+	GrandparentKey   string `json:"grandparentKey,omitempty"`
 	ParentIndex      int    `json:"parentIndex,omitempty"`
 	Index            int    `json:"index,omitempty"`
 	ViewedAt         int64  `json:"viewedAt"`
@@ -41,14 +42,12 @@ const historyPageSize = 500
 
 const historyKeyPrefix = "/status/sessions/history/"
 
-// historyID returns the numeric id in a history key, or false for anything
-// else: the key comes from the server, and a DELETE goes to it.
-func historyID(historyKey string) (string, bool) {
+// validHistoryKey reports whether historyKey is a history entry's path and
+// nothing else: the key comes from the server, and a DELETE goes to it.
+func validHistoryKey(historyKey string) bool {
 	id, ok := strings.CutPrefix(historyKey, historyKeyPrefix)
-	if _, err := strconv.ParseUint(id, 10, 64); !ok || err != nil {
-		return "", false
-	}
-	return id, true
+	_, err := strconv.ParseUint(id, 10, 64)
+	return ok && err == nil
 }
 
 // Accounts implements HistoryClient.
@@ -69,8 +68,9 @@ func (c *httpPlexClient) Accounts() ([]plexAccount, error) {
 	return body.MediaContainer.Account, nil
 }
 
-// WatchHistory implements HistoryClient, a page at a time. It stops at a
-// short page, or once it has totalSize entries, if the server sent that.
+// WatchHistory implements HistoryClient, a page at a time. It stops at an
+// empty page, or once it has totalSize entries if the server sent that: a
+// page can be short of the size asked for with more to come.
 func (c *httpPlexClient) WatchHistory(accountID int) ([]historyEntry, error) {
 	var all []historyEntry
 	seen := make(map[string]bool)
@@ -83,7 +83,7 @@ func (c *httpPlexClient) WatchHistory(accountID int) ([]historyEntry, error) {
 		}
 		added := 0
 		for _, e := range page {
-			if _, ok := historyID(e.HistoryKey); !ok {
+			if !validHistoryKey(e.HistoryKey) {
 				return nil, fmt.Errorf("plex: watch history entry %q has no valid historyKey (%q)", e.Title, e.HistoryKey)
 			}
 			// A play logged while paging shifts later pages by one.
@@ -93,8 +93,19 @@ func (c *httpPlexClient) WatchHistory(accountID int) ([]historyEntry, error) {
 				added++
 			}
 		}
+		if len(page) == 0 {
+			return all, nil
+		}
+		if added == 0 {
+			// Repeats that fill the page, or fall short of totalSize: the
+			// server is ignoring the offset.
+			if len(page) >= historyPageSize || (total > 0 && start+len(page) < total) {
+				return nil, fmt.Errorf("plex: the server sent the same watch history again at offset %d, so it can't be read in full", start)
+			}
+			return all, nil // the tail, shifted by plays logged while paging
+		}
 		start += len(page)
-		if len(page) < historyPageSize || added == 0 || (total > 0 && start >= total) {
+		if total > 0 && start >= total {
 			return all, nil
 		}
 	}
@@ -120,11 +131,10 @@ func (c *httpPlexClient) historyPage(path string) ([]historyEntry, int, error) {
 
 // DeleteHistory implements HistoryClient.
 func (c *httpPlexClient) DeleteHistory(historyKey string) error {
-	id, ok := historyID(historyKey)
-	if !ok {
+	if !validHistoryKey(historyKey) {
 		return fmt.Errorf("plex: %q is not a watch history key", historyKey)
 	}
-	resp, err := c.plexRequest(http.MethodDelete, historyKeyPrefix+id)
+	resp, err := c.plexRequest(http.MethodDelete, historyKey)
 	if err != nil {
 		return fmt.Errorf("plex: delete watch history: %w", err)
 	}

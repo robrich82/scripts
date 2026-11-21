@@ -41,6 +41,7 @@ var recordTime = time.Date(2026, 11, 22, 9, 30, 0, 0, time.UTC)
 
 type clearHistoryRun struct {
 	pms          *fakePMS
+	ownerName    string // the PLEX_TOKEN owner's plex.tv username
 	plexTVStatus int
 	plexTVHits   int
 	prompter     *scriptedPrompter
@@ -70,6 +71,7 @@ func newClearHistoryRun(t *testing.T, answers ...string) *clearHistoryRun {
 				episode(10, 1, "Bluey (1992)", "Pilot"),
 			},
 		},
+		ownerName:    "QuienNZ",
 		plexTVStatus: http.StatusOK,
 		prompter:     &scriptedPrompter{answers: answers},
 		recordDir:    filepath.Join(t.TempDir(), "mkv-tvshow"),
@@ -80,7 +82,7 @@ func (r *clearHistoryRun) run(t *testing.T, account string, shows ...string) err
 	t.Helper()
 	return clearHistory(shows, account, clearHistoryDeps{
 		server:    newHTTPPlexClient(r.pms.serve().URL, secretToken),
-		owner:     newPlexTVClient(fakePlexTV(t, "QuienNZ", r.plexTVStatus, &r.plexTVHits).URL, secretToken),
+		owner:     newPlexTVClient(fakePlexTV(t, r.ownerName, r.plexTVStatus, &r.plexTVHits).URL, secretToken),
 		prompt:    r.prompter,
 		recordDir: r.recordDir,
 		out:       &r.out,
@@ -145,6 +147,8 @@ func TestSplitTitleYear(t *testing.T) {
 		"1883 (2021)":         {"1883", 2021},
 		"Show (Extended)":     {"Show (Extended)", 0},
 		"Show (2018) (US)":    {"Show (2018) (US)", 0},
+		"進撃の巨人（2013）":         {"進撃の巨人", 2013},
+		"Bluey (0000)":        {"Bluey (0000)", 0},
 		"進撃の巨人\u3000(2013)":   {"進撃の巨人", 2013},
 	} {
 		title, year := splitTitleYear(in)
@@ -154,7 +158,25 @@ func TestSplitTitleYear(t *testing.T) {
 	}
 }
 
-func TestHistoryTarget_MatchesShow(t *testing.T) {
+// planTitles is the history titles target matches among shows.
+func planTitles(t *testing.T, target string, shows ...string) []string {
+	t.Helper()
+	targets, err := parseHistoryTargets([]string{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []historyEntry
+	for i, show := range shows {
+		entries = append(entries, episode(i, 1, show, "Ep"))
+	}
+	var titles []string
+	for _, e := range planHistory(entries, targets).matched {
+		titles = append(titles, e.GrandparentTitle)
+	}
+	return titles
+}
+
+func TestPlanHistory_TitleMatch(t *testing.T) {
 	for _, tc := range []struct {
 		target, show string
 		want         bool
@@ -162,25 +184,46 @@ func TestHistoryTarget_MatchesShow(t *testing.T) {
 		{"Bluey (2018)", "Bluey (2018)", true},
 		{"Bluey (2018)", "Bluey", true},
 		{"Bluey", "Bluey (2018)", true},
+		{"bluey", "BLUEY", true},
 		{"Bluey (2018)", "Bluey (1992)", false},
+		{"Bluey (0000)", "Bluey (1976)", false},
 		{"Bluey", "Bluey Minisodes", false},
 		{"NCIS: Hawaiʻi (2021)", "NCIS: Hawai'i", true},
 		{"NCIS", "NCIS: Los Angeles", false},
+		{"Doctor Who (2005) Specials", "Doctor Who (2005) Specials", true},
 		{"進撃の巨人", "進撃の巨人", true},
+		{"進撃の巨人", "進撃の巨人（2013）", true},
 		{"【推しの子】", "【推しの子】", true},
+		{"ＢＬＥＡＣＨ", "BLEACH", true},
+		// Titles alike only in their ASCII, which the Plex lookup's
+		// titleMatcher would match.
+		{"Bleach", "BLEACH 千年血戦篇", false},
+		{"Re:ゼロから始める異世界生活", "Re:ステージ！ドリームデイズ♪", false},
+		{"進撃の巨人（2013）", "鬼滅の刃（2013）", false},
+		{"Love Live! サンシャイン!!", "Love Live! スーパースター!!", false},
 	} {
-		targets, err := parseHistoryTargets([]string{tc.target})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := targets[0].matchesShow(tc.show); got != tc.want {
+		got := len(planTitles(t, tc.target, tc.show)) == 1
+		if got != tc.want {
 			t.Errorf("%q matches %q = %v; want %v", tc.target, tc.show, got, tc.want)
 		}
 	}
 }
 
+// With the target's year in the history, a year-less title is another show.
+func TestPlanHistory_YearlessTitleIsAnotherShowWhenTheYearIsThere(t *testing.T) {
+	if got := planTitles(t, "Doctor Who (2005)", "Doctor Who (2005)", "Doctor Who"); !slices.Equal(got, []string{"Doctor Who (2005)"}) {
+		t.Errorf("matched %v; want only Doctor Who (2005)", got)
+	}
+	if got := planTitles(t, "Doctor Who (2005)", "Doctor Who (1963)", "Doctor Who"); !slices.Equal(got, []string{"Doctor Who"}) {
+		t.Errorf("matched %v; want only the year-less Doctor Who", got)
+	}
+	if got := planTitles(t, "Doctor Who", "Doctor Who (2005)", "Doctor Who"); len(got) != 2 {
+		t.Errorf("matched %v; want both", got)
+	}
+}
+
 func TestParseHistoryTargets_RejectsBlank(t *testing.T) {
-	for _, s := range []string{"", "  ", "(2018)"} {
+	for _, s := range []string{"", "  ", "(2018)", "【】", "!!"} {
 		if _, err := parseHistoryTargets([]string{s}); err == nil {
 			t.Errorf("parseHistoryTargets(%q) succeeded; want an error", s)
 		}
@@ -230,11 +273,14 @@ func TestClearHistory_Confirmed_DeletesOnlyMatches(t *testing.T) {
 	if got := keysOf(recs[0].Server); !slices.Equal(got, want) {
 		t.Errorf("record lists %v; want %v", got, want)
 	}
-	if recs[0].Account != "QuienNZ" || !slices.Equal(recs[0].Targets, []string{"Bluey (2018)", "NCIS: Hawai'i (2021)", "Chicago Fire (2012)"}) {
-		t.Errorf("record account %q, targets %v", recs[0].Account, recs[0].Targets)
+	if recs[0].Account != "QuienNZ" || recs[0].AccountID != 1 || !slices.Equal(recs[0].Targets, []string{"Bluey (2018)", "NCIS: Hawai'i (2021)", "Chicago Fire (2012)"}) {
+		t.Errorf("record account %q (%d), targets %v", recs[0].Account, recs[0].AccountID, recs[0].Targets)
 	}
-	if recs[0].Failed != nil {
-		t.Errorf("record failed = %v; want none", recs[0].Failed)
+	if !recs[0].Complete || recs[0].Failed != nil {
+		t.Errorf("record complete %v, failed %v; want complete with none failed", recs[0].Complete, recs[0].Failed)
+	}
+	if len(r.prompter.asked) != 1 || !strings.Contains(r.prompter.asked[0], "Delete these 3 history entries for QuienNZ (account 1)?") {
+		t.Errorf("asked %q", r.prompter.asked)
 	}
 	out := r.out.String()
 	for _, s := range []string{
@@ -300,7 +346,7 @@ func TestClearHistory_AccountNameCase(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(r.pms.deleted) != 0 {
-		t.Errorf("deleted %v from account 9, which has no history; Stephanie's was used", r.pms.deleted)
+		t.Errorf("deleted %v; want none, from account 9 (\"stephanie\" exactly), which has no history", r.pms.deleted)
 	}
 
 	r = newClearHistoryRun(t)
@@ -309,6 +355,64 @@ func TestClearHistory_AccountNameCase(t *testing.T) {
 		t.Errorf("err = %v; want an ambiguity error", err)
 	}
 	r.assertUntouched(t)
+}
+
+// Two accounts with the very same name can't be told apart by it.
+func TestClearHistory_DuplicateAccountName(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	r.pms.accounts = append(r.pms.accounts, plexAccount{ID: 9, Name: "Stephanie"})
+	err := r.run(t, "Stephanie", "Bluey")
+	if err == nil || !strings.Contains(err.Error(), "ids 5, 9") {
+		t.Errorf("err = %v; want one naming both ids", err)
+	}
+	if len(r.pms.pageStarts) != 0 {
+		t.Error("fetched history for an ambiguous account")
+	}
+	r.assertUntouched(t)
+}
+
+// A plex.tv reply without a username must not pick the unnamed account.
+func TestClearHistory_OwnerWithoutUsername(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	r.ownerName = ""
+	if err := r.run(t, "", "Bluey"); err == nil || !strings.Contains(err.Error(), "no username") {
+		t.Errorf("err = %v; want a missing-username error", err)
+	}
+	if len(r.pms.pageStarts) != 0 {
+		t.Error("fetched history without an owner")
+	}
+	r.assertUntouched(t)
+}
+
+func TestClearHistory_NoNamedAccounts(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	r.pms.accounts = []plexAccount{{ID: 0, Name: ""}}
+	if err := r.run(t, "", "Bluey"); err == nil || !strings.Contains(err.Error(), "listed no named accounts") {
+		t.Errorf("err = %v; want a no-accounts error", err)
+	}
+	if r.plexTVHits != 0 {
+		t.Error("asked plex.tv with no accounts to match")
+	}
+	r.assertUntouched(t)
+}
+
+// Two shows with one title are listed apart, by key.
+func TestClearHistory_SameTitleShowsListedApart(t *testing.T) {
+	r := newClearHistoryRun(t, "n")
+	for i, key := range []string{"/library/metadata/100", "/library/metadata/100", "/library/metadata/200"} {
+		e := episode(30+i, 1, "Doctor Who", "Ep")
+		e.GrandparentKey = key
+		r.pms.history = append(r.pms.history, e)
+	}
+	if err := r.run(t, "", "Doctor Who"); err != nil {
+		t.Fatal(err)
+	}
+	out := r.out.String()
+	for _, want := range []string{"Doctor Who [/library/metadata/100]", "Doctor Who [/library/metadata/200]", "more than one show"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
 }
 
 func TestClearHistory_UnknownAccount(t *testing.T) {
@@ -422,8 +526,56 @@ func TestClearHistory_StopsAfterRepeatedFailures(t *testing.T) {
 	if len(recs) != 1 || len(recs[0].Failed) != 6 {
 		t.Errorf("records %+v; want all 6 entries failed", recs)
 	}
-	if !strings.Contains(r.out.String(), "Stopped after 3 failures in a row.") || strings.Count(r.out.String(), "  failed:") != 3 {
+	if !strings.Contains(r.out.String(), "Stopped after 3 failures in a row; 3 entries weren't tried.") || strings.Count(r.out.String(), "  failed:") != 3 {
 		t.Errorf("output:\n%s", r.out.String())
+	}
+}
+
+// A success between failures restarts the count, so scattered failures
+// don't stop the run.
+func TestClearHistory_ScatteredFailuresDontStop(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	r.pms.failKeys = map[string]bool{}
+	for i := 20; i < 27; i++ {
+		e := episode(i, 1, "Paw Patrol", "Ep")
+		r.pms.history = append(r.pms.history, e)
+		if i%2 == 0 {
+			r.pms.failKeys[e.HistoryKey] = true
+		}
+	}
+	if err := r.run(t, "", "Paw Patrol"); err == nil {
+		t.Fatal("expected an error")
+	}
+	if want := keys("21", "23", "25"); !slices.Equal(r.pms.deleted, want) {
+		t.Errorf("deleted %v; want %v", r.pms.deleted, want)
+	}
+	recs := r.records(t)
+	if len(recs) != 1 || !slices.Equal(recs[0].Failed, keys("20", "22", "24", "26")) {
+		t.Errorf("records %+v; want 20, 22, 24 and 26 failed", recs)
+	}
+	if strings.Contains(r.out.String(), "Stopped") {
+		t.Errorf("stopped on scattered failures:\n%s", r.out.String())
+	}
+}
+
+// Until the deletes are done the record says it isn't complete, so a run
+// that dies part way doesn't leave a record claiming every entry went.
+func TestClearHistory_RecordIncompleteDuringDeletes(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	var during []bool
+	r.pms.onDelete = func() {
+		for _, rec := range r.records(t) {
+			during = append(during, rec.Complete)
+		}
+	}
+	if err := r.run(t, "", "Bluey (2018)"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(during, []bool{false, false}) {
+		t.Errorf("record complete during deletes = %v; want false each time", during)
+	}
+	if recs := r.records(t); len(recs) != 1 || !recs[0].Complete {
+		t.Errorf("records %+v; want one, complete", recs)
 	}
 }
 
@@ -435,8 +587,10 @@ func TestClearHistory_RecordFails_DeletesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.recordDir = filepath.Join(blocker, "mkv-tvshow")
-	if err := r.run(t, "", "Bluey"); err == nil {
-		t.Fatal("expected an error")
+	err := r.run(t, "", "Bluey")
+	// The path is named once, not again inside the OS error.
+	if err == nil || !strings.HasSuffix(err.Error(), "Nothing was deleted") || strings.Count(err.Error(), blocker) != 1 {
+		t.Fatalf("err = %v; want one naming the record once and saying nothing was deleted", err)
 	}
 	if len(r.pms.deleted) != 0 {
 		t.Errorf("deleted %v without a record", r.pms.deleted)
@@ -453,7 +607,7 @@ func TestClearHistory_RecordExists_DeletesNothing(t *testing.T) {
 	if err := os.WriteFile(earlier, []byte("earlier"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.run(t, "", "Bluey"); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if err := r.run(t, "", "Bluey"); err == nil || !strings.Contains(err.Error(), "an earlier record has this name") {
 		t.Fatalf("err = %v; want an already-exists error", err)
 	}
 	if len(r.pms.deleted) != 0 {
@@ -467,17 +621,20 @@ func TestClearHistory_RecordExists_DeletesNothing(t *testing.T) {
 func TestMain_ClearHistoryFlagErrors(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
+		env  []string
 		want string
 	}{
-		{[]string{"--account", "Stephanie"}, "Error: --account only works with --clear-history."},
-		{[]string{"--clear-history", "Bluey", "--clean"}, "Error: --clean and --clear-history can't be combined; run them one at a time."},
-		{[]string{"--clear-history", "Bluey", "--set-rating", "M"}, "Error: --set-rating and --clear-history can't be combined; run them one at a time."},
-		{[]string{"--clear-history", "Bluey"}, "Error: --clear-history deletes Plex watch history: set PLEX_URL and PLEX_TOKEN."},
+		{[]string{"--account", "Stephanie"}, nil, "Error: --account only works with --clear-history."},
+		{[]string{"--clear-history", "Bluey", "--clean"}, nil, "Error: --clean and --clear-history can't be combined; run them one at a time."},
+		{[]string{"--clear-history", "Bluey", "--set-rating", "M"}, nil, "Error: --set-rating and --clear-history can't be combined; run them one at a time."},
+		{[]string{"--clear-history", "Bluey"}, nil, "Error: --clear-history deletes Plex watch history: set PLEX_URL and PLEX_TOKEN."},
+		{[]string{"--clear-history", "Bluey"}, []string{"PLEX_URL=http://127.0.0.1:1"}, "Error: --clear-history deletes Plex watch history: set PLEX_URL and PLEX_TOKEN."},
+		{[]string{"--clear-history", "Bluey"}, []string{"PLEX_TOKEN=" + secretToken}, "Error: --clear-history deletes Plex watch history: set PLEX_URL and PLEX_TOKEN."},
 		// An unquoted title: "Fire" stops flag parsing, so --account would be lost.
-		{[]string{"--clear-history", "Chicago", "Fire", "--account", "Stephanie"}, `Error: unexpected argument "Fire": quote a title with spaces or a year, e.g. --clear-history "Bluey (2018)".`},
+		{[]string{"--clear-history", "Chicago", "Fire", "--account", "Stephanie"}, nil, `Error: unexpected argument "Fire": quote a title with spaces or a year, e.g. --clear-history "Bluey (2018)".`},
 	} {
-		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
-			out, err := runMain(t, t.TempDir(), t.TempDir(), tc.args...)
+		t.Run(strings.Join(append(tc.env, tc.args...), " "), func(t *testing.T) {
+			out, err := runMainEnv(t, t.TempDir(), t.TempDir(), tc.env, tc.args...)
 			var exitErr *exec.ExitError
 			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 				t.Fatalf("err = %v; want exit status 1:\n%s", err, out)
@@ -517,6 +674,30 @@ func TestMain_ClearHistory(t *testing.T) {
 			t.Errorf("record files %v; want one in the config dir", files)
 		}
 	})
+	t.Run("no", func(t *testing.T) {
+		pms := newPMS()
+		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "n\n", args...)
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if len(pms.deleted) != 0 || !strings.Contains(out, "Aborted; no changes made.") {
+			t.Errorf("deleted %v:\n%s", pms.deleted, out)
+		}
+	})
+	t.Run("partial failure", func(t *testing.T) {
+		pms := newPMS()
+		pms.failKeys = map[string]bool{historyKeyPrefix + "8": true}
+		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "y\n", args...)
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			t.Fatalf("err = %v; want exit status 1:\n%s", err, out)
+		}
+		if want := keys("9"); !slices.Equal(pms.deleted, want) || !strings.Contains(out, `under "failed"`) {
+			t.Errorf("deleted %v; want %v:\n%s", pms.deleted, want, out)
+		}
+	})
 	t.Run("closed stdin", func(t *testing.T) {
 		pms := newPMS()
 		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
@@ -529,4 +710,18 @@ func TestMain_ClearHistory(t *testing.T) {
 			t.Errorf("deleted %v", pms.deleted)
 		}
 	})
+}
+
+type fixedOwner plexTVUser
+
+func (o fixedOwner) User() (plexTVUser, error) { return plexTVUser(o), nil }
+
+// Behind plex.tv's own check: an empty owner name never picks the unnamed
+// account the server lists.
+func TestResolveHistoryAccount_EmptyOwnerNameMatchesNothing(t *testing.T) {
+	f := &fakePMS{t: t, accounts: []plexAccount{{ID: 0, Name: ""}, {ID: 1, Name: "QuienNZ"}}}
+	acct, err := resolveHistoryAccount(newHTTPPlexClient(f.serve().URL, secretToken), fixedOwner{}, "")
+	if err == nil {
+		t.Errorf("resolved account %+v; want an error", acct)
+	}
 }

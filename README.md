@@ -667,10 +667,14 @@ Needs `PLEX_URL` and `PLEX_TOKEN`. It clears the token owner's history (found
 through plex.tv), or `--account <name>`'s. History entries don't record a
 show's year, so a year you give is only checked against a history title that
 ends in one, like `Bluey (2018)`; the plan says when a show matched on title
-alone. The matching entries are listed per show and nothing is deleted until
-you confirm. Before deleting, the entries are written to
+alone. A title with no year is skipped when the history also has the title
+with your year, since it's then a different show. Titles match whole, ignoring
+case, spaces and punctuation. The matching entries are listed per show (two
+shows with one title are listed apart) and nothing is deleted until you
+confirm. Before deleting, the entries are written to
 `history-cleared-<UTC time>.json` in the config folder, since Plex can't
-restore them; any that couldn't be deleted are listed in it under `failed`.
+restore them. Its `complete` stays `false` until every delete has been tried,
+and any not deleted are listed under `failed`.
 
 ### Missing episode check (`--missing`)
 

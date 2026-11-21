@@ -1,7 +1,9 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // stringList is a flag that can be given more than once.
@@ -26,13 +29,14 @@ func (l *stringList) Set(s string) error {
 
 // historyTarget is a show to clear from the watch history.
 type historyTarget struct {
-	raw     string
-	year    int // 0 when not given
-	matches func(string) bool
+	raw  string
+	key  string // historyTitleKey of the title
+	year int    // 0 when not given
 }
 
-// \p{Z} as well as \s: a CJK title may use an ideographic space before its year.
-var trailingYear = regexp.MustCompile(`^(.*?)[\s\p{Z}]*\((\d{4})\)[\s\p{Z}]*$`)
+// \p{Z} as well as \s, and full-width brackets: a CJK title may use an
+// ideographic space and （） before its year.
+var trailingYear = regexp.MustCompile(`^(.*?)[\s\p{Z}]*[(（](\d{4})[)）][\s\p{Z}]*$`)
 
 // splitTitleYear splits "Title (2018)" into "Title" and 2018. A title
 // without a trailing year comes back whole, with year 0.
@@ -43,7 +47,28 @@ func splitTitleYear(s string) (string, int) {
 		return s, 0
 	}
 	year, _ := strconv.Atoi(m[2])
+	if year == 0 {
+		return s, 0 // "(0000)" isn't a year, and year 0 would match any
+	}
 	return m[1], year
+}
+
+// historyTitleKey folds a show title for comparison: lower case, with the
+// letters and digits of every script kept and punctuation, spaces and
+// symbols dropped. titleMatcher keeps only ASCII, which is too loose here:
+// whatever matches gets deleted.
+func historyTitleKey(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if r >= 'ａ' && r <= 'ｚ' || r >= '０' && r <= '９' {
+			r -= 'ａ' - 'a' // full-width Latin: ＢＬＥＡＣＨ is BLEACH
+		}
+		// Spacing modifiers stand in for apostrophes: Hawaiʻi is Hawai'i.
+		if (unicode.IsLetter(r) || unicode.IsDigit(r)) && (r < 0x2B0 || r > 0x2FF) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func parseHistoryTargets(args []string) ([]historyTarget, error) {
@@ -51,25 +76,13 @@ func parseHistoryTargets(args []string) ([]historyTarget, error) {
 	for _, raw := range args {
 		raw = strings.TrimSpace(raw)
 		title, year := splitTitleYear(raw)
-		// titleMatcher expects a cleaned query, as FindShowByTitle's callers pass.
-		matches := titleMatcher(cleanSearchQuery(title))
-		if matches == nil {
+		key := historyTitleKey(title)
+		if key == "" {
 			return nil, fmt.Errorf("--clear-history needs a show title, got %q", raw)
 		}
-		targets = append(targets, historyTarget{raw: raw, year: year, matches: matches})
+		targets = append(targets, historyTarget{raw: raw, key: key, year: year})
 	}
 	return targets, nil
-}
-
-// matchesShow reports whether a history entry's show title is this target.
-// History entries carry no show year, but some titles end in one, e.g.
-// "Bluey (2018)"; when both sides have a year they must agree.
-func (t historyTarget) matchesShow(showTitle string) bool {
-	title, year := splitTitleYear(showTitle)
-	if !t.matches(title) {
-		return false
-	}
-	return t.year == 0 || year == 0 || t.year == year
 }
 
 // clearHistoryDeps are the side effects of clearHistory.
@@ -85,10 +98,15 @@ type clearHistoryDeps struct {
 // historyRecord is the file written before any entry is deleted: the
 // server can't restore deleted history, so this is the only trace of it.
 type historyRecord struct {
-	Account string         `json:"account"`
-	Targets []string       `json:"targets"`
-	Server  []historyEntry `json:"server"`
-	// Failed lists the history keys still on the server after the run.
+	Account   string         `json:"account"`
+	AccountID int            `json:"accountID"`
+	Targets   []string       `json:"targets"`
+	Server    []historyEntry `json:"server"`
+	// Complete is false until every delete has been tried, so a record left
+	// false is from an interrupted run and some of Server may remain.
+	Complete bool `json:"complete"`
+	// Failed lists the entries not deleted: those whose delete failed, and
+	// those not tried after the run stopped.
 	Failed []string `json:"failed,omitempty"`
 }
 
@@ -104,7 +122,7 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 	if err != nil {
 		return err
 	}
-	acct, err := resolveHistoryAccount(d, account)
+	acct, err := resolveHistoryAccount(d.server, d.owner, account)
 	if err != nil {
 		return err
 	}
@@ -119,14 +137,14 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		}
 	}
 
-	matched := matchHistory(entries, targets)
-	printHistoryPlan(d.out, acct.Name, targets, matched)
-	if len(matched) == 0 {
+	plan := planHistory(entries, targets)
+	printHistoryPlan(d.out, acct, plan)
+	if len(plan.matched) == 0 {
 		fmt.Fprintln(d.out, "Nothing to clear.")
 		return nil
 	}
 
-	ans, err := d.prompt.Ask(fmt.Sprintf("\nDelete these %d history entries for %s? This can't be undone. [y/N]: ", len(matched), acct.Name))
+	ans, err := d.prompt.Ask(fmt.Sprintf("\nDelete these %d history entries for %s (account %d)? This can't be undone. [y/N]: ", len(plan.matched), acct.Name, acct.ID))
 	if err != nil {
 		return fmt.Errorf("reading the answer: %w; nothing was deleted", err)
 	}
@@ -135,47 +153,33 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		return nil
 	}
 
-	record := historyRecord{Account: acct.Name, Server: matched}
+	record := historyRecord{Account: acct.Name, AccountID: acct.ID, Server: plan.matched}
 	for _, t := range targets {
 		record.Targets = append(record.Targets, t.raw)
 	}
-	recordPath, err := writeHistoryRecord(d.recordDir, d.now(), record)
-	if err != nil {
-		return fmt.Errorf("writing the record of entries to delete: %w; nothing was deleted", err)
+	recordPath := historyRecordPath(d.recordDir, d.now())
+	if err := writeNewHistoryRecord(recordPath, record); err != nil {
+		return fmt.Errorf("saving %s: %v\n%sNothing was deleted", recordPath, withoutPaths(err), hintLine(err))
 	}
 	fmt.Fprintf(d.out, "Recorded the entries in %s\n", recordPath)
 
-	deleted, consecutive := 0, 0
-	for i, e := range matched {
-		if err := d.server.DeleteHistory(e.HistoryKey); err != nil {
-			fmt.Fprintf(d.out, "  failed: %s: %v\n", describeHistoryEntry(e), err)
-			record.Failed = append(record.Failed, e.HistoryKey)
-			if consecutive++; consecutive == maxConsecutiveDeleteFailures {
-				for _, rest := range matched[i+1:] {
-					record.Failed = append(record.Failed, rest.HistoryKey)
-				}
-				fmt.Fprintf(d.out, "Stopped after %d failures in a row.\n", consecutive)
-				break
-			}
-			continue
-		}
-		deleted++
-		consecutive = 0
-	}
-	fmt.Fprintf(d.out, "Done. Deleted %d of %d history entries.\n", deleted, len(matched))
-	if len(record.Failed) == 0 {
-		return nil
-	}
+	record.Failed = deleteHistoryEntries(d.server, d.out, plan.matched)
+	record.Complete = true
+	fmt.Fprintf(d.out, "Deleted %d of %d history entries.\n", len(plan.matched)-len(record.Failed), len(plan.matched))
 	if err := writeRecordFile(recordPath, record); err != nil {
-		return fmt.Errorf("%d history entries were not deleted, and %s couldn't be updated to say which: %w", len(record.Failed), recordPath, err)
+		return fmt.Errorf("%d of %d history entries were deleted, but %s couldn't be updated to say so: %v\n%sIts \"complete\" stays false",
+			len(plan.matched)-len(record.Failed), len(plan.matched), recordPath, withoutPaths(err), hintLine(err))
 	}
-	return fmt.Errorf("%d history entries were not deleted; %s lists them under \"failed\"", len(record.Failed), recordPath)
+	if len(record.Failed) > 0 {
+		return fmt.Errorf("%d history entries were not deleted; %s lists them under \"failed\"", len(record.Failed), recordPath)
+	}
+	return nil
 }
 
 // resolveHistoryAccount finds the server account to clear: the one named
 // account, or the PLEX_TOKEN owner's, found by plex.tv username.
-func resolveHistoryAccount(d clearHistoryDeps, account string) (plexAccount, error) {
-	accounts, err := d.server.Accounts()
+func resolveHistoryAccount(server HistoryClient, owner OwnerLookup, account string) (plexAccount, error) {
+	accounts, err := server.Accounts()
 	if err != nil {
 		return plexAccount{}, err
 	}
@@ -185,25 +189,33 @@ func resolveHistoryAccount(d clearHistoryDeps, account string) (plexAccount, err
 			names = append(names, a.Name)
 		}
 	}
+	if len(names) == 0 {
+		return plexAccount{}, errors.New("the Plex server's /accounts listed no named accounts")
+	}
 	list := strings.Join(names, ", ")
 	name := account
 	if name == "" {
-		user, err := d.owner.User()
+		user, err := owner.User()
 		if err != nil {
 			return plexAccount{}, fmt.Errorf("finding the PLEX_TOKEN owner: %w; pass --account (one of: %s)", err, list)
 		}
 		name = user.Username
 	}
-	var folded []plexAccount
+	var exact, folded []plexAccount
 	for _, a := range accounts {
-		if a.Name == name {
-			return a, nil
-		}
-		if strings.EqualFold(a.Name, name) {
+		switch {
+		case a.Name == "" || name == "": // an unnamed account is no one's
+		case a.Name == name:
+			exact = append(exact, a)
+		case strings.EqualFold(a.Name, name):
 			folded = append(folded, a)
 		}
 	}
 	switch {
+	case len(exact) == 1:
+		return exact[0], nil
+	case len(exact) > 1:
+		return plexAccount{}, fmt.Errorf("%d server accounts are named %q (ids %s); rename one in Plex so they can be told apart", len(exact), name, accountIDs(exact))
 	case len(folded) == 1:
 		return folded[0], nil
 	case len(folded) > 1:
@@ -215,55 +227,115 @@ func resolveHistoryAccount(d clearHistoryDeps, account string) (plexAccount, err
 	}
 }
 
-// matchHistory returns the episode entries whose show is a target, each once.
-func matchHistory(entries []historyEntry, targets []historyTarget) []historyEntry {
-	var matched []historyEntry
-	for _, e := range entries {
-		if e.Type != "episode" {
-			continue
-		}
-		for _, t := range targets {
-			if t.matchesShow(e.GrandparentTitle) {
-				matched = append(matched, e)
-				break
-			}
-		}
+func accountIDs(accounts []plexAccount) string {
+	var ids []string
+	for _, a := range accounts {
+		ids = append(ids, strconv.Itoa(a.ID))
 	}
-	return matched
+	return strings.Join(ids, ", ")
 }
 
-// printHistoryPlan lists the matched entries per show title, since a target
-// can match more than one, and the targets that matched nothing.
-func printHistoryPlan(out io.Writer, account string, targets []historyTarget, matched []historyEntry) {
-	fmt.Fprintf(out, "Watch history for %s on the Plex server:\n", account)
-	counts := make(map[string]int)
-	for _, e := range matched {
-		counts[e.GrandparentTitle]++
+// historyShow is a show in the history. Plex titles two shows alike when
+// only their years differ, so the show's key keeps them apart.
+type historyShow struct{ title, key string }
+
+// historyPlan is what a run would delete, and what it couldn't match.
+type historyPlan struct {
+	matched       []historyEntry
+	shows         map[historyShow]int // matched episodes per show
+	missing       []string            // targets that matched nothing
+	yearUnchecked []string            // targets that matched a title with no year
+}
+
+// planHistory picks the episode entries whose show is a target, each once.
+// A target's year must equal the history title's when both have one. A
+// history title without a year matches too, unless the history also has the
+// target's title with its year: the year-less one is then another show.
+func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
+	type titleYear struct {
+		key  string
+		year int
 	}
-	for _, show := range slices.Sorted(maps.Keys(counts)) {
-		fmt.Fprintf(out, "  %-50s %d episode(s)\n", show, counts[show])
+	titles := make(map[string]titleYear)
+	for _, e := range entries {
+		if _, ok := titles[e.GrandparentTitle]; e.Type == "episode" && !ok {
+			title, year := splitTitleYear(e.GrandparentTitle)
+			titles[e.GrandparentTitle] = titleYear{historyTitleKey(title), year}
+		}
 	}
-	var missing, yearUnchecked []string
+
+	plan := historyPlan{shows: make(map[historyShow]int)}
+	take := make(map[string]bool)
+	listed := make(map[string]bool)
 	for _, t := range targets {
-		found := false
-		for show := range counts {
-			if t.matchesShow(show) {
-				found = true
-				if _, year := splitTitleYear(show); t.year != 0 && year == 0 {
-					yearUnchecked = append(yearUnchecked, t.raw)
-				}
+		exactYear := false
+		for _, ty := range titles {
+			if ty.key == t.key && t.year != 0 && ty.year == t.year {
+				exactYear = true
 			}
 		}
+		found, unchecked := false, false
+		for title, ty := range titles {
+			if ty.key != t.key {
+				continue
+			}
+			switch {
+			case t.year == 0 || ty.year == t.year:
+			case ty.year == 0 && !exactYear:
+				unchecked = true
+			default:
+				continue
+			}
+			take[title], found = true, true
+		}
+		if listed[t.raw] {
+			continue
+		}
+		listed[t.raw] = true
 		if !found {
-			missing = append(missing, t.raw)
+			plan.missing = append(plan.missing, t.raw)
+		} else if unchecked {
+			plan.yearUnchecked = append(plan.yearUnchecked, t.raw)
 		}
 	}
-	if len(yearUnchecked) > 0 {
-		fmt.Fprintf(out, "History doesn't record a show's year, so these matched on title alone: %s\n", strings.Join(slices.Compact(yearUnchecked), ", "))
+	for _, e := range entries {
+		if e.Type == "episode" && take[e.GrandparentTitle] {
+			plan.matched = append(plan.matched, e)
+			plan.shows[historyShow{e.GrandparentTitle, e.GrandparentKey}]++
+		}
 	}
-	if len(missing) > 0 {
+	return plan
+}
+
+// printHistoryPlan lists the matched entries per show, since a target can
+// match more than one, and the targets that matched nothing.
+func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
+	fmt.Fprintf(out, "Watch history for %s (account %d) on the Plex server:\n", acct.Name, acct.ID)
+	shows := slices.SortedFunc(maps.Keys(plan.shows), func(a, b historyShow) int {
+		return cmp.Or(strings.Compare(a.title, b.title), strings.Compare(a.key, b.key))
+	})
+	perTitle := make(map[string]int)
+	for _, s := range shows {
+		perTitle[s.title]++
+	}
+	shared := false
+	for _, s := range shows {
+		label := s.title
+		if perTitle[s.title] > 1 {
+			shared = true
+			label = fmt.Sprintf("%s [%s]", s.title, cmp.Or(s.key, "no key"))
+		}
+		fmt.Fprintf(out, "  %-50s %d episode(s)\n", label, plan.shows[s])
+	}
+	if shared {
+		fmt.Fprintln(out, "A title listed more than once is more than one show in Plex (or a show added again): check each before answering.")
+	}
+	if len(plan.yearUnchecked) > 0 {
+		fmt.Fprintf(out, "History doesn't record a show's year, so these matched on title alone: %s\n", strings.Join(plan.yearUnchecked, ", "))
+	}
+	if len(plan.missing) > 0 {
 		fmt.Fprintln(out, "Not in this history:")
-		for _, m := range missing {
+		for _, m := range plan.missing {
 			fmt.Fprintf(out, "  %s\n", m)
 		}
 	}
@@ -273,17 +345,43 @@ func describeHistoryEntry(e historyEntry) string {
 	return fmt.Sprintf("%s S%02dE%02d %q", e.GrandparentTitle, e.ParentIndex, e.Index, e.Title)
 }
 
-// writeHistoryRecord writes record to a new file in dir, never over an
-// earlier one.
-func writeHistoryRecord(dir string, now time.Time, record historyRecord) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+// deleteHistoryEntries deletes each entry and returns the keys of those it
+// didn't. It gives up after maxConsecutiveDeleteFailures failures in a row.
+func deleteHistoryEntries(server HistoryClient, out io.Writer, entries []historyEntry) []string {
+	var failed []string
+	consecutive := 0
+	for i, e := range entries {
+		if err := server.DeleteHistory(e.HistoryKey); err != nil {
+			fmt.Fprintf(out, "  failed: %s: %v\n", describeHistoryEntry(e), err)
+			failed = append(failed, e.HistoryKey)
+			if consecutive++; consecutive == maxConsecutiveDeleteFailures {
+				rest := entries[i+1:]
+				fmt.Fprintf(out, "Stopped after %d failures in a row; %d entries weren't tried.\n", consecutive, len(rest))
+				for _, r := range rest {
+					failed = append(failed, r.HistoryKey)
+				}
+				break
+			}
+			continue
+		}
+		consecutive = 0
 	}
-	path := filepath.Join(dir, "history-cleared-"+now.UTC().Format("20060102T150405Z")+".json")
+	return failed
+}
+
+func historyRecordPath(dir string, now time.Time) string {
+	return filepath.Join(dir, "history-cleared-"+now.UTC().Format("20060102T150405Z")+".json")
+}
+
+// writeNewHistoryRecord writes record to path, never over an earlier one.
+func writeNewHistoryRecord(path string, record historyRecord) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("%s already exists", path)
+		return errors.New("an earlier record has this name")
 	}
-	return path, writeRecordFile(path, record)
+	return writeRecordFile(path, record)
 }
 
 func writeRecordFile(path string, record historyRecord) error {

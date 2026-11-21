@@ -19,10 +19,12 @@ type fakePMS struct {
 	accounts []plexAccount
 	history  []historyEntry
 	failKeys map[string]bool // DELETEs of these keys get a 500
+	onDelete func()          // runs before each DELETE is answered
 	// Misbehaviours a real server might have.
 	ignoreAccount bool // return every account's history
 	omitTotal     bool // leave out totalSize
 	totalOver     int  // add this to totalSize
+	pageCap       int  // serve at most this many per page
 
 	mu         sync.Mutex
 	deleted    []string
@@ -44,6 +46,9 @@ func (f *fakePMS) serve() *httptest.Server {
 			account, _ := strconv.Atoi(q.Get("accountID"))
 			start, _ := strconv.Atoi(q.Get("X-Plex-Container-Start"))
 			size, _ := strconv.Atoi(q.Get("X-Plex-Container-Size"))
+			if f.pageCap > 0 {
+				size = min(size, f.pageCap)
+			}
 			f.pageStarts = append(f.pageStarts, start)
 			var mine []historyEntry
 			for _, e := range f.history {
@@ -59,6 +64,9 @@ func (f *fakePMS) serve() *httptest.Server {
 			}
 			writeJSON(w, map[string]any{"MediaContainer": container})
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, historyKeyPrefix):
+			if f.onDelete != nil {
+				f.onDelete()
+			}
 			if f.failKeys[r.URL.Path] {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
@@ -75,6 +83,15 @@ func (f *fakePMS) serve() *httptest.Server {
 
 func (f *fakePMS) isDeleted(key string) bool { return slices.Contains(f.deleted, key) }
 
+// blueyEpisodes is n of account 1's Bluey episodes, keyed 0 to n-1.
+func blueyEpisodes(n int) []historyEntry {
+	var out []historyEntry
+	for i := range n {
+		out = append(out, episode(i, 1, "Bluey", "Ep"))
+	}
+	return out
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
@@ -88,11 +105,7 @@ func episode(id, account int, show, title string) historyEntry {
 }
 
 func TestHTTPPlexClient_WatchHistory_PagesOneAccount(t *testing.T) {
-	f := &fakePMS{t: t}
-	for i := range historyPageSize*2 + 7 {
-		f.history = append(f.history, episode(i, 1, "Bluey", "Ep"))
-	}
-	f.history = append(f.history, episode(9999, 2, "Not mine", "Ep"))
+	f := &fakePMS{t: t, history: append(blueyEpisodes(historyPageSize*2+7), episode(9999, 2, "Not mine", "Ep"))}
 	c := newHTTPPlexClient(f.serve().URL, secretToken)
 
 	got, err := c.WatchHistory(1)
@@ -159,27 +172,36 @@ func TestHTTPPlexClient_DeleteHistory_RefusesOtherPaths(t *testing.T) {
 	}
 }
 
-// Without totalSize, paging goes on until a short page.
+// Without totalSize, paging goes on until an empty page.
 func TestHTTPPlexClient_WatchHistory_NoTotalSize(t *testing.T) {
-	f := &fakePMS{t: t, omitTotal: true}
-	for i := range historyPageSize + 3 {
-		f.history = append(f.history, episode(i, 1, "Bluey", "Ep"))
-	}
+	f := &fakePMS{t: t, omitTotal: true, history: blueyEpisodes(historyPageSize + 3)}
 	got, err := newHTTPPlexClient(f.serve().URL, secretToken).WatchHistory(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != historyPageSize+3 {
-		t.Errorf("got %d entries; want %d", len(got), historyPageSize+3)
+	if len(got) != historyPageSize+3 || len(f.pageStarts) != 3 {
+		t.Errorf("got %d entries in %d requests; want %d in 3", len(got), len(f.pageStarts), historyPageSize+3)
 	}
 }
 
-// A totalSize larger than the history ends at the short page, not in a loop.
-func TestHTTPPlexClient_WatchHistory_OverReportedTotal(t *testing.T) {
-	f := &fakePMS{t: t, totalOver: 10000}
-	for i := range historyPageSize {
-		f.history = append(f.history, episode(i, 1, "Bluey", "Ep"))
+// A server that sends fewer entries than asked for is paged to totalSize,
+// or without it to an empty page.
+func TestHTTPPlexClient_WatchHistory_ShortPages(t *testing.T) {
+	for _, omitTotal := range []bool{false, true} {
+		f := &fakePMS{t: t, pageCap: 100, omitTotal: omitTotal, history: blueyEpisodes(250)}
+		got, err := newHTTPPlexClient(f.serve().URL, secretToken).WatchHistory(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 250 {
+			t.Errorf("omitTotal %v: got %d entries; want 250", omitTotal, len(got))
+		}
 	}
+}
+
+// A totalSize larger than the history ends at the empty page, not in a loop.
+func TestHTTPPlexClient_WatchHistory_OverReportedTotal(t *testing.T) {
+	f := &fakePMS{t: t, totalOver: 10000, history: blueyEpisodes(historyPageSize)}
 	got, err := newHTTPPlexClient(f.serve().URL, secretToken).WatchHistory(1)
 	if err != nil {
 		t.Fatal(err)
@@ -189,34 +211,36 @@ func TestHTTPPlexClient_WatchHistory_OverReportedTotal(t *testing.T) {
 	}
 }
 
-// A server that serves the same full page whatever the offset stops after
-// the page that adds nothing new.
-func TestHTTPPlexClient_WatchHistory_RepeatedPageStops(t *testing.T) {
-	var page []historyEntry
-	for i := range historyPageSize {
-		page = append(page, episode(i, 1, "Bluey", "Ep"))
-	}
-	requests := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		writeJSON(w, map[string]any{"MediaContainer": map[string]any{"Metadata": page}})
-	}))
-	defer srv.Close()
-	got, err := newHTTPPlexClient(srv.URL, secretToken).WatchHistory(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != historyPageSize || requests != 2 {
-		t.Errorf("got %d entries in %d requests; want %d in 2", len(got), requests, historyPageSize)
+// A server that serves the same page whatever the offset can't be read in
+// full, so the fetch fails rather than pass off the first page as all.
+func TestHTTPPlexClient_WatchHistory_IgnoredOffsetFails(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		page  []historyEntry
+		total int
+	}{
+		{"full page", blueyEpisodes(historyPageSize), 0},
+		{"short page under totalSize", blueyEpisodes(100), 250},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				container := map[string]any{"Metadata": tc.page}
+				if tc.total > 0 {
+					container["totalSize"] = tc.total
+				}
+				writeJSON(w, map[string]any{"MediaContainer": container})
+			}))
+			defer srv.Close()
+			if _, err := newHTTPPlexClient(srv.URL, secretToken).WatchHistory(1); err == nil || !strings.Contains(err.Error(), "can't be read in full") {
+				t.Errorf("err = %v; want one saying the history can't be read in full", err)
+			}
+		})
 	}
 }
 
 // A play logged between pages shifts the next page; the repeat is dropped.
 func TestHTTPPlexClient_WatchHistory_DropsShiftedRepeat(t *testing.T) {
-	var all []historyEntry
-	for i := range historyPageSize + 2 {
-		all = append(all, episode(i, 1, "Bluey", "Ep"))
-	}
+	all := blueyEpisodes(historyPageSize + 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start, _ := strconv.Atoi(r.URL.Query().Get("X-Plex-Container-Start"))
 		if start > 0 {
@@ -241,5 +265,26 @@ func TestHTTPPlexClient_WatchHistory_RejectsBadKey(t *testing.T) {
 	f := &fakePMS{t: t, history: []historyEntry{episode(1, 1, "Bluey", "Ep"), {Type: "episode", Title: "No key", AccountID: 1}}}
 	if _, err := newHTTPPlexClient(f.serve().URL, secretToken).WatchHistory(1); err == nil {
 		t.Error("expected an error for an entry with no historyKey")
+	}
+}
+
+// A DELETE redirected (and so sent on as a GET) is a failure, not a 2xx.
+func TestHTTPPlexClient_DeleteHistory_RedirectFails(t *testing.T) {
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method+" "+r.URL.Path)
+		if r.URL.Path != "/moved" {
+			http.Redirect(w, r, "/moved", http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	err := newHTTPPlexClient(srv.URL, secretToken).DeleteHistory(historyKeyPrefix + "45")
+	if err == nil || !strings.Contains(err.Error(), "redirected") {
+		t.Errorf("err = %v; want a redirect error", err)
+	}
+	if !slices.Equal(methods, []string{"DELETE " + historyKeyPrefix + "45", "GET /moved"}) {
+		t.Errorf("requests %v", methods)
 	}
 }

@@ -160,6 +160,11 @@ func (c *httpPlexClient) plexRequest(method, path string) (*http.Response, error
 		resp.Body.Close()
 		return nil, fmt.Errorf("plex: %s %s: unexpected status %s", method, path, resp.Status)
 	}
+	// A 301/302/303 turns a DELETE or PUT into a GET, whose 2xx says nothing.
+	if resp.Request.Method != method {
+		resp.Body.Close()
+		return nil, fmt.Errorf("plex: %s %s was redirected and sent as %s; set PLEX_URL to the address it redirects to", method, path, resp.Request.Method)
+	}
 	return resp, nil
 }
 
