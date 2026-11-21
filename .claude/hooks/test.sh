@@ -197,11 +197,48 @@ readcheck 0 "$root/openapi.json.bak"
 readcheck 0 "$root/README.md"
 printf 'not json' | sh "$dir/block-openapi-read.sh" 2>/dev/null || fail 'block-openapi-read refused unreadable input'
 
+# twin-reminder: names the twin of a .go file both twins have, and says nothing otherwise.
+tmp=$(mktemp -d)
+mkdir -p "$tmp/mkv-movie" "$tmp/mkv-tvshow" "$tmp/mkv-audit"
+touch "$tmp/mkv-movie/a.go" "$tmp/mkv-tvshow/a.go" "$tmp/mkv-movie/only.go" "$tmp/mkv-audit/a.go" \
+  "$tmp/mkv-movie/go.mod" "$tmp/mkv-tvshow/go.mod"
+twin() { # twin <expected twin, or empty for no output> <file_path>
+  out=$(jq -n --arg f "$2" '{tool_input: {file_path: $f}}' | sh "$dir/twin-reminder.sh" 2>&1)
+  rc=$?
+  [ "$rc" = 0 ] || fail "twin-reminder rc $rc for $2"
+  if [ -z "$1" ]; then
+    [ -z "$out" ] || fail "twin-reminder want no output for $2, got: $out"
+  else
+    printf '%s' "$out" | jq -e --arg t "$1" '.hookSpecificOutput | .hookEventName == "PostToolUse" and (.additionalContext | startswith($t + " "))' \
+      >/dev/null || fail "twin-reminder want $1 for $2, got: $out"
+  fi
+}
+twin mkv-tvshow/a.go "$tmp/mkv-movie/a.go"
+twin mkv-movie/a.go "$tmp/mkv-tvshow/a.go"
+twin '' "$tmp/mkv-movie/only.go"
+twin '' "$tmp/mkv-movie/go.mod"
+twin '' "$tmp/mkv-audit/a.go"
+twin '' "$tmp/mkv-movie/new.go"
+if command -v cygpath >/dev/null 2>&1; then
+  twin mkv-tvshow/a.go "$(cygpath -w "$tmp/mkv-movie/a.go")"
+  twin mkv-tvshow/a.go "$(cygpath -w "$tmp/MKV-Movie/a.go")"
+fi
+for input in 'not json' '{}'; do
+  out=$(printf '%s' "$input" | sh "$dir/twin-reminder.sh" 2>&1)
+  [ $? = 0 ] && [ -z "$out" ] || fail "twin-reminder want silent rc 0 for: $input, got: $out"
+done
+rm -rf "$tmp"
+
 # settings.json wires each hook to its tool.
 for pair in 'Bash|PowerShell block-go-build.sh' 'Edit|Write backup-config.sh' 'Read block-openapi-read.sh'; do
   jq -e --arg m "${pair% *}" --arg s "${pair#* }" '.hooks.PreToolUse[] | select(.matcher == $m) | .hooks[].command | contains($s)' \
     "$dir/../settings.json" >/dev/null || fail "settings.json does not run ${pair#* } on ${pair% *}"
   [ -f "$dir/${pair#* }" ] || fail "missing hook ${pair#* }"
+done
+for s in gofmt-on-edit.sh twin-reminder.sh; do
+  jq -e --arg s "$s" 'any(.hooks.PostToolUse[] | select(.matcher == "Edit|Write") | .hooks[].command; contains($s))' \
+    "$dir/../settings.json" >/dev/null || fail "settings.json does not run $s after Edit|Write"
+  [ -f "$dir/$s" ] || fail "missing hook $s"
 done
 tmp=$(mktemp -d)
 readcheck 0 "$tmp/openapi.json"
