@@ -10,11 +10,9 @@ import (
 
 // HistoryClient reads and deletes a Plex server's watch history.
 type HistoryClient interface {
-	// Accounts lists the server's accounts.
 	Accounts() ([]plexAccount, error)
 	// WatchHistory returns every history entry of the account with this id.
 	WatchHistory(accountID int) ([]historyEntry, error)
-	// DeleteHistory deletes the entry with this historyKey.
 	DeleteHistory(historyKey string) error
 }
 
@@ -27,7 +25,7 @@ type plexAccount struct {
 
 // historyEntry is one play in a server account's watch history. An entry
 // outlives the item it played, so its titles are all that is left of a
-// removed show.
+// removed show; every field goes into the record of deleted entries.
 type historyEntry struct {
 	HistoryKey       string `json:"historyKey"`
 	Type             string `json:"type"`
@@ -39,10 +37,19 @@ type historyEntry struct {
 	AccountID        int    `json:"accountID"`
 }
 
-// historyPageSize is how many history entries one request asks for.
 const historyPageSize = 500
 
 const historyKeyPrefix = "/status/sessions/history/"
+
+// historyID returns the numeric id in a history key, or false for anything
+// else: the key comes from the server, and a DELETE goes to it.
+func historyID(historyKey string) (string, bool) {
+	id, ok := strings.CutPrefix(historyKey, historyKeyPrefix)
+	if _, err := strconv.ParseUint(id, 10, 64); !ok || err != nil {
+		return "", false
+	}
+	return id, true
+}
 
 // Accounts implements HistoryClient.
 func (c *httpPlexClient) Accounts() ([]plexAccount, error) {
@@ -62,7 +69,8 @@ func (c *httpPlexClient) Accounts() ([]plexAccount, error) {
 	return body.MediaContainer.Account, nil
 }
 
-// WatchHistory implements HistoryClient, a page at a time.
+// WatchHistory implements HistoryClient, a page at a time. It stops at a
+// short page, or once it has totalSize entries, if the server sent that.
 func (c *httpPlexClient) WatchHistory(accountID int) ([]historyEntry, error) {
 	var all []historyEntry
 	seen := make(map[string]bool)
@@ -73,15 +81,20 @@ func (c *httpPlexClient) WatchHistory(accountID int) ([]historyEntry, error) {
 		if err != nil {
 			return nil, err
 		}
+		added := 0
 		for _, e := range page {
+			if _, ok := historyID(e.HistoryKey); !ok {
+				return nil, fmt.Errorf("plex: watch history entry %q has no valid historyKey (%q)", e.Title, e.HistoryKey)
+			}
 			// A play logged while paging shifts later pages by one.
 			if !seen[e.HistoryKey] {
 				seen[e.HistoryKey] = true
 				all = append(all, e)
+				added++
 			}
 		}
 		start += len(page)
-		if len(page) == 0 || start >= total {
+		if len(page) < historyPageSize || added == 0 || (total > 0 && start >= total) {
 			return all, nil
 		}
 	}
@@ -105,12 +118,10 @@ func (c *httpPlexClient) historyPage(path string) ([]historyEntry, int, error) {
 	return body.MediaContainer.Metadata, body.MediaContainer.TotalSize, nil
 }
 
-// DeleteHistory implements HistoryClient. The key comes from the server, so
-// only a history key is accepted: anything else would send a DELETE to an
-// arbitrary server path.
+// DeleteHistory implements HistoryClient.
 func (c *httpPlexClient) DeleteHistory(historyKey string) error {
-	id, ok := strings.CutPrefix(historyKey, historyKeyPrefix)
-	if _, err := strconv.ParseUint(id, 10, 64); !ok || err != nil {
+	id, ok := historyID(historyKey)
+	if !ok {
 		return fmt.Errorf("plex: %q is not a watch history key", historyKey)
 	}
 	resp, err := c.plexRequest(http.MethodDelete, historyKeyPrefix+id)

@@ -48,6 +48,11 @@ func main() {
 	}
 
 	if len(clearHistoryShows) > 0 {
+		// flag stops at the first stray argument, which would drop a later --account.
+		if flag.NArg() > 0 {
+			fmt.Fprintf(os.Stderr, "Error: unexpected argument %q: quote a title with spaces or a year, e.g. --clear-history \"Bluey (2018)\".\n", flag.Arg(0))
+			os.Exit(1)
+		}
 		runClearHistory(clearHistoryShows, *historyAccount)
 		return
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,8 +11,7 @@ import (
 // plexTVBaseURL is plex.tv's account API.
 const plexTVBaseURL = "https://plex.tv"
 
-// plexTVClient calls plex.tv as the PLEX_TOKEN owner. plex.tv refuses
-// requests without a client identifier.
+// plexTVClient calls plex.tv as the PLEX_TOKEN owner.
 type plexTVClient struct {
 	baseURL    string
 	token      string
@@ -43,7 +43,11 @@ func (c *plexTVClient) User() (plexTVUser, error) {
 	if err != nil {
 		return plexTVUser{}, err
 	}
-	c.setHeaders(req)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.token) // a header, so transport errors can't print it
+	// plex.tv refuses requests without a client identifier.
+	req.Header.Set("X-Plex-Client-Identifier", "mkv-tvshow")
+	req.Header.Set("X-Plex-Product", "mkv-tvshow")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return plexTVUser{}, fmt.Errorf("plex.tv: get user: %w", err)
@@ -57,16 +61,7 @@ func (c *plexTVClient) User() (plexTVUser, error) {
 		return plexTVUser{}, fmt.Errorf("plex.tv: decode user: %w", err)
 	}
 	if u.Username == "" {
-		return plexTVUser{}, fmt.Errorf("plex.tv: get user: no username in the response")
+		return plexTVUser{}, errors.New("plex.tv: get user: no username in the response")
 	}
 	return u, nil
-}
-
-// setHeaders adds the token as a header, never to the URL, so a transport
-// error (which prints the URL) can't leak it.
-func (c *plexTVClient) setHeaders(req *http.Request) {
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Plex-Token", c.token)
-	req.Header.Set("X-Plex-Client-Identifier", "mkv-tvshow")
-	req.Header.Set("X-Plex-Product", "mkv-tvshow")
 }
