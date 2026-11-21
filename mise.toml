@@ -102,3 +102,19 @@ try { $state | jq -en 'input | .spec.data | select(.openapi and (.paths | length
 catch { Remove-Item -ErrorAction Ignore openapi.json.tmp; throw "openapi: no spec found on developer.plex.tv/pms/ ($_)" }
 Move-Item -Force openapi.json.tmp openapi.json
 '''
+
+# Fetched on demand by the tmdb-api skill, so gitignored. Examples are 90% of the 3 MB spec.
+[tasks.tmdb-openapi]
+description = "Fetch tmdb-openapi.json, the TMDB API spec without its examples (needs network)"
+run = '''
+$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; if ($PSVersionTable.PSVersion -lt '7.4') { throw 'needs PowerShell 7.4+' }
+$ProgressPreference = 'SilentlyContinue'
+$url = 'https://developer.themoviedb.org/openapi/tmdb-api.json'
+$raw = New-TemporaryFile
+try {
+  Invoke-WebRequest -UseBasicParsing $url -OutFile $raw
+  jq -e 'del(.. | .example?, .examples?) | select(.openapi and (.paths | length) > 0)' $raw > tmdb-openapi.json.tmp
+} catch { Remove-Item -ErrorAction Ignore tmdb-openapi.json.tmp; throw "tmdb-openapi: no spec at $url ($_)" }
+finally { Remove-Item -ErrorAction Ignore $raw }
+Move-Item -Force tmdb-openapi.json.tmp tmdb-openapi.json
+'''

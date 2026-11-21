@@ -195,6 +195,11 @@ readcheck 2 "$root/OpenAPI.JSON"
 if command -v cygpath >/dev/null 2>&1; then readcheck 2 "$(cygpath -w "$root")\openapi.json"; fi
 readcheck 0 "$root/openapi.json.bak"
 readcheck 0 "$root/README.md"
+readcheck 2 "$root/tmdb-openapi.json"
+readcheck 2 "$root/TMDB-OpenAPI.json"
+if command -v cygpath >/dev/null 2>&1; then readcheck 2 "$(cygpath -w "$root")\tmdb-openapi.json"; fi
+readcheck 0 "$root/tmdb-openapi.json.tmp"
+readcheck 0 "$root/mkv-movie/tmdb-openapi.json"
 printf 'not json' | sh "$dir/block-openapi-read.sh" 2>/dev/null || fail 'block-openapi-read refused unreadable input'
 
 # settings.json wires each hook to its tool.
@@ -205,6 +210,7 @@ for pair in 'Bash|PowerShell block-go-build.sh' 'Edit|Write backup-config.sh' 'R
 done
 tmp=$(mktemp -d)
 readcheck 0 "$tmp/openapi.json"
+readcheck 0 "$tmp/tmdb-openapi.json"
 rm -rf "$tmp"
 
 # backup-config: copies a module's live config aside, via the real path or a junction.

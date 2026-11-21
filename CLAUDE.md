@@ -15,7 +15,7 @@ When adding a new tool, changing a tool's commands/flags/config, or adding new f
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `mise run build`.
 In a worktree, run `mise run` and these skills from the worktree directory, and give `twin-port-checker` the worktree path. From the main checkout they build, test and diff `main` instead.
 
-The tasks are in `mise.toml` and run under `pwsh`, from PowerShell or Git Bash alike. Every task but `clean` and `openapi` takes module directory names and defaults to all of them.
+The tasks are in `mise.toml` and run under `pwsh`, from PowerShell or Git Bash alike. Every task but `clean`, `openapi` and `tmdb-openapi` takes module directory names and defaults to all of them.
 
 - `mise run build [module...]` — build to `dist/<module>.exe`.
 - `mise run vet [module...]` — `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters and formatter are configured in `.golangci.yml` and pinned in `mise.toml`; `mise install` provides them. Suppress a finding with `//nolint:<linter> // reason`, not staticcheck's `//lint:ignore`.
@@ -24,6 +24,7 @@ The tasks are in `mise.toml` and run under `pwsh`, from PowerShell or Git Bash a
 - `mise run vuln [module...]` — `govulncheck` per module (needs network).
 - `mise run clean` — delete `dist/`.
 - `mise run openapi` — refresh `openapi.json` from the Plex docs page (needs network).
+- `mise run tmdb-openapi` — fetch the gitignored `tmdb-openapi.json` for the `tmdb-api` skill (needs network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `mise run test` before committing.
 
 CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml`, `mise.lock` or `.golangci.yml` change). Each job runs `mise run vet`, `vet-linux`, `test` and `vuln` for its module; `vuln` only fails the weekly run.
@@ -33,7 +34,7 @@ Hooks in `.claude/settings.json`, in sessions started at the repo root:
 - Block direct `go build`. This is best-effort: `sh -c "go build"`, a quoted `"go" build` and `$cmd build` get through.
 - Before an `Edit`/`Write` to an existing file under `%APPDATA%\<tool>\` (or its `configs/<tool>` junction), copy it to `%LOCALAPPDATA%\claude-config-backups\<tool>\<path>.<UTC stamp>`. Per file it keeps the oldest copy and the newest 20, and skips a copy when nothing changed. Shell writes skip this.
 - All but the `Read` hook need `jq` on PATH. Without it every Bash, PowerShell, Edit and Write call is refused until Claude Code restarts from a shell that has it.
-- Refuse `Read` of this repo's `openapi.json`; use the `plex-api` skill.
+- Refuse `Read` of this repo's `openapi.json` and `tmdb-openapi.json`; use the `plex-api` and `tmdb-api` skills.
 - After changing a hook, run `sh .claude/hooks/test.sh` from the repo root.
 
 ## Architecture
@@ -61,3 +62,6 @@ Environment: `TMDB_API_KEY` (mkv-movie, mkv-tvshow; optional for mkv-audit), `PL
 
 ## Plex API
 The Plex API OpenAPI spec is at `openapi.json` in the repo root. Refer to it through the `plex-api` skill when working with Plex API endpoints, request/response shapes, or authentication. `.github/workflows/plex-openapi.yml` runs `mise run openapi` weekly and opens a PR when the spec changes.
+
+## TMDB API
+Use the `tmdb-api` skill for TMDB endpoints, parameters and response fields. It fetches TMDB's OpenAPI spec to the gitignored `tmdb-openapi.json` when that is missing or over 30 days old.
