@@ -116,6 +116,11 @@ func newPlexHTTPClient() *http.Client {
 			if len(via) >= 10 {
 				return errors.New("stopped after 10 redirects")
 			}
+			// A 301/302/303 turns a PUT, POST or DELETE into a GET, whose 2xx
+			// would read as the write succeeding.
+			if req.Method != via[0].Method {
+				return fmt.Errorf("refusing a redirect that would send %s as %s; set PLEX_URL to the address it redirects to", via[0].Method, req.Method)
+			}
 			if req.URL.Host != via[0].URL.Host {
 				req.Header.Del("X-Plex-Token")
 			}
@@ -159,11 +164,6 @@ func (c *httpPlexClient) plexRequest(method, path string) (*http.Response, error
 	if resp.StatusCode/100 != 2 {
 		resp.Body.Close()
 		return nil, fmt.Errorf("plex: %s %s: unexpected status %s", method, path, resp.Status)
-	}
-	// A 301/302/303 turns a DELETE or PUT into a GET, whose 2xx says nothing.
-	if resp.Request.Method != method {
-		resp.Body.Close()
-		return nil, fmt.Errorf("plex: %s %s was redirected and sent as %s; set PLEX_URL to the address it redirects to", method, path, resp.Request.Method)
 	}
 	return resp, nil
 }

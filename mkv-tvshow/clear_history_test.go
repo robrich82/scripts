@@ -195,6 +195,11 @@ func TestPlanHistory_TitleMatch(t *testing.T) {
 		{"進撃の巨人", "進撃の巨人（2013）", true},
 		{"【推しの子】", "【推しの子】", true},
 		{"ＢＬＥＡＣＨ", "BLEACH", true},
+		{"Ｓｈｏｗ ２", "Show 2", true},
+		{"Fargo 2", "Fargo 3", false},
+		{"1883", "1923", false},
+		// Vowel signs are marks, not letters, and tell these titles apart.
+		{"काल", "कल", false},
 		// Titles alike only in their ASCII, which the Plex lookup's
 		// titleMatcher would match.
 		{"Bleach", "BLEACH 千年血戦篇", false},
@@ -723,5 +728,53 @@ func TestResolveHistoryAccount_EmptyOwnerNameMatchesNothing(t *testing.T) {
 	acct, err := resolveHistoryAccount(newHTTPPlexClient(f.serve().URL, secretToken), fixedOwner{}, "")
 	if err == nil {
 		t.Errorf("resolved account %+v; want an error", acct)
+	}
+}
+
+// The record keeps every field of an entry: it is all that's left of it.
+func TestClearHistory_RecordKeepsEntries(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	var want []historyEntry
+	for i := range r.pms.history {
+		e := &r.pms.history[i]
+		e.ViewedAt = 1_700_000_000 + int64(i)
+		e.GrandparentKey = "/library/metadata/" + e.GrandparentTitle
+		if e.AccountID == 1 && e.Type == "episode" && strings.HasPrefix(e.GrandparentTitle, "Bluey (2018)") {
+			want = append(want, *e)
+		}
+	}
+	if err := r.run(t, "", "Bluey (2018)"); err != nil {
+		t.Fatal(err)
+	}
+	recs := r.records(t)
+	if len(recs) != 1 || !slices.Equal(recs[0].Server, want) {
+		t.Errorf("records %+v; want one listing %+v", recs, want)
+	}
+}
+
+// Deletes that went through are reported even when the record can't be
+// updated to say so.
+func TestClearHistory_RecordUpdateFails(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	r.pms.onDelete = func() {
+		files, _ := filepath.Glob(filepath.Join(r.recordDir, "history-cleared-*.json"))
+		for _, f := range files {
+			// A directory where the record was: the rewrite can't replace it.
+			if os.Remove(f) == nil {
+				if err := os.Mkdir(f, 0o755); err != nil {
+					t.Error(err)
+				}
+				if err := os.WriteFile(filepath.Join(f, "keep"), nil, 0o644); err != nil {
+					t.Error(err)
+				}
+			}
+		}
+	}
+	err := r.run(t, "", "Bluey (2018)")
+	if err == nil || !strings.Contains(err.Error(), "2 of 2 history entries were deleted, but") {
+		t.Errorf("err = %v; want one saying the deletes happened but the record wasn't updated", err)
+	}
+	if want := keys("1", "2"); !slices.Equal(r.pms.deleted, want) {
+		t.Errorf("deleted %v; want %v", r.pms.deleted, want)
 	}
 }

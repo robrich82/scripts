@@ -268,7 +268,7 @@ func TestHTTPPlexClient_WatchHistory_RejectsBadKey(t *testing.T) {
 	}
 }
 
-// A DELETE redirected (and so sent on as a GET) is a failure, not a 2xx.
+// A DELETE that a redirect would send on as a GET fails, unsent.
 func TestHTTPPlexClient_DeleteHistory_RedirectFails(t *testing.T) {
 	var methods []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -281,10 +281,51 @@ func TestHTTPPlexClient_DeleteHistory_RedirectFails(t *testing.T) {
 	}))
 	defer srv.Close()
 	err := newHTTPPlexClient(srv.URL, secretToken).DeleteHistory(historyKeyPrefix + "45")
-	if err == nil || !strings.Contains(err.Error(), "redirected") {
+	if err == nil || !strings.Contains(err.Error(), "refusing a redirect that would send DELETE as GET") {
 		t.Errorf("err = %v; want a redirect error", err)
 	}
-	if !slices.Equal(methods, []string{"DELETE " + historyKeyPrefix + "45", "GET /moved"}) {
+	if !slices.Equal(methods, []string{"DELETE " + historyKeyPrefix + "45"}) {
 		t.Errorf("requests %v", methods)
+	}
+}
+
+// A play logged on the last page shifts it so it holds only a repeat: that
+// is the end of the history, not an ignored offset.
+func TestHTTPPlexClient_WatchHistory_ShiftedTailOfRepeats(t *testing.T) {
+	all := blueyEpisodes(historyPageSize)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, _ := strconv.Atoi(r.URL.Query().Get("X-Plex-Container-Start"))
+		page := all[:historyPageSize]
+		if start > 0 {
+			page = all[historyPageSize-1:] // a new play pushed the last one down
+		}
+		writeJSON(w, map[string]any{"MediaContainer": map[string]any{"totalSize": historyPageSize + 1, "Metadata": page}})
+	}))
+	defer srv.Close()
+	got, err := newHTTPPlexClient(srv.URL, secretToken).WatchHistory(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != historyPageSize {
+		t.Errorf("got %d entries; want %d", len(got), historyPageSize)
+	}
+}
+
+// A 200 that isn't JSON (a proxy's or captive portal's page) is an error,
+// not an empty list.
+func TestHistoryClients_NonJSONReplyFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "<html>sign in</html>")
+	}))
+	defer srv.Close()
+	pms := newHTTPPlexClient(srv.URL, secretToken)
+	if _, err := pms.Accounts(); err == nil {
+		t.Error("Accounts: expected an error")
+	}
+	if _, err := pms.WatchHistory(1); err == nil {
+		t.Error("WatchHistory: expected an error")
+	}
+	if _, err := newPlexTVClient(srv.URL, secretToken).User(); err == nil {
+		t.Error("User: expected an error")
 	}
 }

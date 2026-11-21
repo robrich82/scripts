@@ -54,17 +54,17 @@ func splitTitleYear(s string) (string, int) {
 }
 
 // historyTitleKey folds a show title for comparison: lower case, with the
-// letters and digits of every script kept and punctuation, spaces and
-// symbols dropped. titleMatcher keeps only ASCII, which is too loose here:
+// letters, digits and marks (Thai and Indic vowel signs) of every script
+// kept and punctuation, spaces and symbols dropped. titleMatcher keeps only ASCII, which is too loose here:
 // whatever matches gets deleted.
 func historyTitleKey(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {
-		if r >= 'ａ' && r <= 'ｚ' || r >= '０' && r <= '９' {
+		if (r >= 'ａ' && r <= 'ｚ') || (r >= '０' && r <= '９') {
 			r -= 'ａ' - 'a' // full-width Latin: ＢＬＥＡＣＨ is BLEACH
 		}
 		// Spacing modifiers stand in for apostrophes: Hawaiʻi is Hawai'i.
-		if (unicode.IsLetter(r) || unicode.IsDigit(r)) && (r < 0x2B0 || r > 0x2FF) {
+		if (unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r)) && (r < 0x2B0 || r > 0x2FF) {
 			b.WriteRune(r)
 		}
 	}
@@ -165,10 +165,11 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 
 	record.Failed = deleteHistoryEntries(d.server, d.out, plan.matched)
 	record.Complete = true
-	fmt.Fprintf(d.out, "Deleted %d of %d history entries.\n", len(plan.matched)-len(record.Failed), len(plan.matched))
+	deleted, total := len(plan.matched)-len(record.Failed), len(plan.matched)
+	fmt.Fprintf(d.out, "Deleted %d of %d history entries.\n", deleted, total)
 	if err := writeRecordFile(recordPath, record); err != nil {
 		return fmt.Errorf("%d of %d history entries were deleted, but %s couldn't be updated to say so: %v\n%sIts \"complete\" stays false",
-			len(plan.matched)-len(record.Failed), len(plan.matched), recordPath, withoutPaths(err), hintLine(err))
+			deleted, total, recordPath, withoutPaths(err), hintLine(err))
 	}
 	if len(record.Failed) > 0 {
 		return fmt.Errorf("%d history entries were not deleted; %s lists them under \"failed\"", len(record.Failed), recordPath)
@@ -204,7 +205,7 @@ func resolveHistoryAccount(server HistoryClient, owner OwnerLookup, account stri
 	var exact, folded []plexAccount
 	for _, a := range accounts {
 		switch {
-		case a.Name == "" || name == "": // an unnamed account is no one's
+		case name == "": // an empty owner name is no one's, not the unnamed account's
 		case a.Name == name:
 			exact = append(exact, a)
 		case strings.EqualFold(a.Name, name):
@@ -258,7 +259,10 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 	}
 	titles := make(map[string]titleYear)
 	for _, e := range entries {
-		if _, ok := titles[e.GrandparentTitle]; e.Type == "episode" && !ok {
+		if e.Type != "episode" {
+			continue
+		}
+		if _, ok := titles[e.GrandparentTitle]; !ok {
 			title, year := splitTitleYear(e.GrandparentTitle)
 			titles[e.GrandparentTitle] = titleYear{historyTitleKey(title), year}
 		}
@@ -268,6 +272,10 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 	take := make(map[string]bool)
 	listed := make(map[string]bool)
 	for _, t := range targets {
+		if listed[t.raw] {
+			continue // a repeat: the same raw is the same target
+		}
+		listed[t.raw] = true
 		exactYear := false
 		for _, ty := range titles {
 			if ty.key == t.key && t.year != 0 && ty.year == t.year {
@@ -286,12 +294,9 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 			default:
 				continue
 			}
-			take[title], found = true, true
+			take[title] = true
+			found = true
 		}
-		if listed[t.raw] {
-			continue
-		}
-		listed[t.raw] = true
 		if !found {
 			plan.missing = append(plan.missing, t.raw)
 		} else if unchecked {
@@ -351,20 +356,22 @@ func deleteHistoryEntries(server HistoryClient, out io.Writer, entries []history
 	var failed []string
 	consecutive := 0
 	for i, e := range entries {
-		if err := server.DeleteHistory(e.HistoryKey); err != nil {
-			fmt.Fprintf(out, "  failed: %s: %v\n", describeHistoryEntry(e), err)
-			failed = append(failed, e.HistoryKey)
-			if consecutive++; consecutive == maxConsecutiveDeleteFailures {
-				rest := entries[i+1:]
-				fmt.Fprintf(out, "Stopped after %d failures in a row; %d entries weren't tried.\n", consecutive, len(rest))
-				for _, r := range rest {
-					failed = append(failed, r.HistoryKey)
-				}
-				break
-			}
+		err := server.DeleteHistory(e.HistoryKey)
+		if err == nil {
+			consecutive = 0
 			continue
 		}
-		consecutive = 0
+		fmt.Fprintf(out, "  failed: %s: %v\n", describeHistoryEntry(e), err)
+		failed = append(failed, e.HistoryKey)
+		consecutive++
+		if consecutive == maxConsecutiveDeleteFailures {
+			rest := entries[i+1:]
+			fmt.Fprintf(out, "Stopped after %d failures in a row; %d entries weren't tried.\n", consecutive, len(rest))
+			for _, r := range rest {
+				failed = append(failed, r.HistoryKey)
+			}
+			break
+		}
 	}
 	return failed
 }

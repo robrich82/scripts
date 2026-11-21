@@ -81,6 +81,9 @@ func (c *httpPlexClient) WatchHistory(accountID int) ([]historyEntry, error) {
 		if err != nil {
 			return nil, err
 		}
+		if len(page) == 0 {
+			return all, nil
+		}
 		added := 0
 		for _, e := range page {
 			if !validHistoryKey(e.HistoryKey) {
@@ -92,9 +95,6 @@ func (c *httpPlexClient) WatchHistory(accountID int) ([]historyEntry, error) {
 				all = append(all, e)
 				added++
 			}
-		}
-		if len(page) == 0 {
-			return all, nil
 		}
 		if added == 0 {
 			// Repeats that fill the page, or fall short of totalSize: the
