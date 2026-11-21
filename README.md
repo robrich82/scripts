@@ -1082,7 +1082,8 @@ string match.
 
 ```
 .
-├── mise.toml           # Tool versions and build/test/lint tasks
+├── mise.toml           # Tool versions and the build/test/lint tasks
+├── tasks/              # Each task's script: <name>.sh for macOS/Linux, <name>.ps1 for Windows
 ├── dist/               # Built executables (git-ignored)
 ├── cbz-fix/
 ├── mkv-audit/

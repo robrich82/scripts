@@ -1,4 +1,6 @@
 $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; if ($PSVersionTable.PSVersion -lt '7.4') { throw 'needs PowerShell 7.4+' }
+# Plex has no download URL for the spec; it's embedded in the Redoc page as __redoc_state.
+# jq -e fails on no match, so a page layout change errors instead of emptying openapi.json.
 $ProgressPreference = 'SilentlyContinue'
 $page = (Invoke-WebRequest -UseBasicParsing https://developer.plex.tv/pms/).Content
 $state = [regex]::Match($page, '(?m)^\s*const __redoc_state = (.*);\s*$').Groups[1].Value

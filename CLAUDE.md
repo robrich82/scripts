@@ -15,10 +15,10 @@ When adding a new tool, changing a tool's commands/flags/config, or adding new f
 Use the `/build`, `/check`, and `/finish` skills for these workflows. Never invoke `go build` directly — always use `mise run build`.
 In a worktree, run `mise run` and these skills from the worktree directory, and give `twin-port-checker` and `security-guard-checker` the worktree path. From the main checkout they build, test and diff `main` instead.
 
-The tasks are declared in `mise.toml`, each as a pair of scripts in `tasks/`: `<name>.sh` runs under `sh` on macOS and Linux, and `<name>.ps1` under `pwsh` on Windows, whatever shell `mise run` is typed in. Make every change to both. Every task but `clean`, `openapi` and `tmdb-openapi` takes module directory names and defaults to all of them.
+The tasks are declared in `mise.toml`. Each is a pair of scripts in `tasks/`: `<name>.sh` runs under `sh` on macOS and Linux, and `<name>.ps1` under `pwsh` on Windows, whatever shell `mise run` is typed in. Make every change to both. Every task but `clean`, `openapi` and `tmdb-openapi` takes module directory names and defaults to all of them.
 
 - `mise run build [module...]` — build to `dist/<module>` (`dist/<module>.exe` on Windows).
-- `mise run vet [module...]` — `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` per module (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters and formatter are configured in `.golangci.yml` and pinned in `mise.toml`; `mise install` provides them. Suppress a finding with `//nolint:<linter> // reason`, not staticcheck's `//lint:ignore`.
+- `mise run vet [module...]` — `go vet`, `go mod tidy -diff`, `golangci-lint run` and `golangci-lint fmt --diff` per module, for the Windows build on every OS (fails on unformatted files or an untidy `go.mod`/`go.sum`). The linters and formatter are configured in `.golangci.yml` and pinned in `mise.toml`; `mise install` provides them. Suppress a finding with `//nolint:<linter> // reason`, not staticcheck's `//lint:ignore`.
 - `mise run vet-linux [module...]` — `GOOS=linux go vet ./...` and `GOOS=linux golangci-lint run ./...` per module, to type-check and lint the non-Windows stubs.
 - `mise run test [module...]` — `go test ./...` per module.
 - `mise run vuln [module...]` — `govulncheck` per module (needs network).

@@ -1,0 +1,2 @@
+# sh fails on a CRLF checkout of these ("set: Illegal option -").
+*.sh text eol=lf

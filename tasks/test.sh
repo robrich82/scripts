@@ -6,5 +6,5 @@ set -f
 for m in $mods; do
   m=$(printf '%s' "$m" | sed "s#^[./\']*##; s#[./\']*\$##"); [ -n "$m" ] || { echo 'empty module name' >&2; exit 1; }
   echo "# $m"
-  (cd "$m" && go test ./...)
+  (cd "./$m" && go test ./...) || exit # set -e misses a failed subshell in bash 3.2, macOS's sh
 done

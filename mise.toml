@@ -4,7 +4,7 @@ GOTOOLCHAIN = "local"
 POWERSHELL_TELEMETRY_OPTOUT = "1"
 
 [settings]
-# Lock every OS the tasks run on, not just the one that last ran `mise lock`.
+# Lock Linux and macOS too, not just the platform that last ran `mise lock`.
 lockfile_platforms = ["linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64"]
 
 [tools]
@@ -14,8 +14,8 @@ ffmpeg = "9.0.2" # tests only: builds fixtures for the real-binary tests
 golangci-lint = "2.15.0"
 "go:golang.org/x/vuln/cmd/govulncheck" = "v1.10.0"
 
-# Each task runs tasks/<name>.sh under sh on macOS and Linux, and tasks/<name>.ps1 under pwsh 7.4+
-# on Windows (from cmd, mise's Windows shell), so it works from any shell. Change the pair together.
+# Tasks run tasks/<name>.sh under sh on macOS and Linux, and tasks/<name>.ps1 under pwsh 7.4+ on
+# Windows (from cmd, mise's Windows shell), so they work from any shell. Change both together.
 # Module tasks take module directory names (`mise run test mkv-movie`) and default to every
 # top-level directory with a go.mod.
 
@@ -23,47 +23,45 @@ golangci-lint = "2.15.0"
 description = "Build each module to dist/<module> (.exe on Windows)"
 usage = 'arg "[module]..." help="Modules to build; all by default"'
 run = "sh tasks/build.sh"
-run_windows = "pwsh -NoProfile -File tasks/build.ps1"
+run_windows = "pwsh -NoProfile -ExecutionPolicy Bypass -File tasks/build.ps1"
 
 [tasks.test]
 description = "go test each module"
 usage = 'arg "[module]..." help="Modules to test; all by default"'
 run = "sh tasks/test.sh"
-run_windows = "pwsh -NoProfile -File tasks/test.ps1"
+run_windows = "pwsh -NoProfile -ExecutionPolicy Bypass -File tasks/test.ps1"
 
 [tasks.vet]
 description = "go vet, go mod tidy -diff, golangci-lint run and fmt --diff for each module"
 usage = 'arg "[module]..." help="Modules to vet; all by default"'
 run = "sh tasks/vet.sh"
-run_windows = "pwsh -NoProfile -File tasks/vet.ps1"
+run_windows = "pwsh -NoProfile -ExecutionPolicy Bypass -File tasks/vet.ps1"
 
 # No fmt: it ignores build tags, so vet's run already covers the stubs.
 [tasks.vet-linux]
 description = "Type-check and lint each module's non-Windows stubs"
 usage = 'arg "[module]..." help="Modules to vet; all by default"'
 run = "sh tasks/vet-linux.sh"
-run_windows = "pwsh -NoProfile -File tasks/vet-linux.ps1"
+run_windows = "pwsh -NoProfile -ExecutionPolicy Bypass -File tasks/vet-linux.ps1"
 
 [tasks.vuln]
 description = "govulncheck each module (needs network)"
 usage = 'arg "[module]..." help="Modules to scan; all by default"'
 run = "sh tasks/vuln.sh"
-run_windows = "pwsh -NoProfile -File tasks/vuln.ps1"
+run_windows = "pwsh -NoProfile -ExecutionPolicy Bypass -File tasks/vuln.ps1"
 
 [tasks.clean]
 description = "Delete dist/"
-run = "rm -rf dist"
-run_windows = "if exist dist rmdir /s /q dist"
+run = "sh tasks/clean.sh"
+run_windows = "pwsh -NoProfile -ExecutionPolicy Bypass -File tasks/clean.ps1"
 
-# Plex has no download URL for the spec; it's embedded in the Redoc page as __redoc_state.
-# jq -e fails on no match, so a page layout change errors instead of emptying openapi.json.
 [tasks.openapi]
 description = "Refresh openapi.json from the Plex docs page (needs network)"
 run = "sh tasks/openapi.sh"
-run_windows = "pwsh -NoProfile -File tasks/openapi.ps1"
+run_windows = "pwsh -NoProfile -ExecutionPolicy Bypass -File tasks/openapi.ps1"
 
 # Fetched on demand by the tmdb-api skill, so gitignored. Examples are 90% of the 3 MB spec.
 [tasks.tmdb-openapi]
 description = "Fetch tmdb-openapi.json, the TMDB API spec without its examples (needs network)"
 run = "sh tasks/tmdb-openapi.sh"
-run_windows = "pwsh -NoProfile -File tasks/tmdb-openapi.ps1"
+run_windows = "pwsh -NoProfile -ExecutionPolicy Bypass -File tasks/tmdb-openapi.ps1"
