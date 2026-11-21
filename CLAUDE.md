@@ -50,7 +50,7 @@ Common shape of each tool:
 - Every side effect — `mkvmerge`/`mkvpropedit`/`mkvextract`/`magick` subprocesses, TMDB and Plex HTTP clients, stdin prompts, file timestamps — sits behind an interface (`MKVEditor`, `TMDBClient`, `PlexClient`, `Prompter`, `FileTimer`, `Checker`, `LocalDetector`, …) so tests substitute fakes and use `t.TempDir()` for the filesystem.
 - Config, caches and state live in `%APPDATA%\<tool>\` (`$XDG_CONFIG_HOME/<tool>/` elsewhere). `configs/` in the repo holds gitignored junctions to those dirs for viewing real config.
 - Platform-specific code uses `//go:build windows` / `!windows` file pairs (Windows file creation time, process detection in sw-update).
-- Security guards that new code must keep using, since a missing call fails silently:
+- Security guards that new code must keep using, since a missing call fails silently. The `security-guard-checker` agent checks a diff against this list, and `/finish` runs it:
   - sw-update: checker and asset URLs pass `requireHTTPS` (`checker.go`), downloads go through `getDownload`'s https check, and every HTTP client gets `httpsOnlyRedirect` (via `NewChecker` or the downloader's client). Every remote file name passes `checkAssetName` (`downloader.go`), and archive entries are written only through `writeEntry` (`archive.go`).
   - Plex and TMDB: the Plex token goes in the `X-Plex-Token` header, never the URL, on a client from `newPlexHTTPClient`. TMDB errors pass through `redactAPIKey`.
   - cbz-fix: pages reach `magick` on stdin, with the coder chosen by `imageCoder`'s allowlist, never as a filename.
