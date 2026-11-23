@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -204,13 +206,15 @@ func TestPlanHistory_TitleMatch(t *testing.T) {
 		{"Show", "Show²", false},
 		{"とある魔術の禁書目録", "とある魔術の禁書目録Ⅱ", false},
 		{"とある魔術の禁書目録Ⅱ", "とある魔術の禁書目録Ⅱ", true},
-		// Symbols tell titles apart; modifier letters and symbols are
-		// apostrophes.
+		// Other symbols tell titles apart; math symbols stand in for dashes.
 		{"Gintama", "Gintama°", false},
+		{"Prisma Illya", "Prisma☆Illya", false},
 		{"Re:ステージ！ドリームデイズ", "Re:ステージ！ドリームデイズ♪", false},
-		{"Hunter × Hunter", "Hunter × Hunter", true},
+		{"かぐや様 ～Ultra Romantic～", "かぐや様 〜Ultra Romantic〜", true},
+		{"Re:ゼロ − 始める", "Re:ゼロ - 始める", true},
 		{"NCIS: Hawai`i", "NCIS: Hawai'i", true},
-		{"Ｓｈｏｗ＋", "Show+", true},
+		// Full-width punctuation folds to ASCII, then drops.
+		{"Ｍｒ．Ｒｏｂｏｔ", "Mr. Robot", true},
 		// Vowel signs are marks, not letters, and tell these titles apart.
 		{"काल", "कल", false},
 		// Titles alike only in their ASCII, which the Plex lookup's
@@ -815,20 +819,7 @@ func TestClearHistory_RecordKeepsEntries(t *testing.T) {
 func TestClearHistory_RecordUpdateFails(t *testing.T) {
 	setBeforeFinalSave(t, func() {})
 	r := newClearHistoryRun(t, "y")
-	r.pms.onDelete = func() {
-		files, _ := filepath.Glob(filepath.Join(r.recordDir, "history-cleared-*.json"))
-		for _, f := range files {
-			// A directory where the record was: the rewrite can't replace it.
-			if os.Remove(f) == nil {
-				if err := os.Mkdir(f, 0o755); err != nil {
-					t.Error(err)
-				}
-				if err := os.WriteFile(filepath.Join(f, "keep"), nil, 0o644); err != nil {
-					t.Error(err)
-				}
-			}
-		}
-	}
+	r.blockRecordOnDelete(t) // never unblocked, so the retry fails too
 	err := r.run(t, "", "Bluey (2018)")
 	if err == nil || !strings.Contains(err.Error(), "2 of 2 history entries were deleted, but") {
 		t.Errorf("err = %v; want one saying the deletes happened but the record wasn't updated", err)
@@ -838,8 +829,8 @@ func TestClearHistory_RecordUpdateFails(t *testing.T) {
 	}
 }
 
-// blockRecordOnDelete puts a directory where the record was once deletes
-// start, so rewriting the record fails until unblock removes it.
+// blockRecordOnDelete replaces the record with a directory when the first
+// delete runs, so rewriting it fails until unblock removes the directory.
 func (r *clearHistoryRun) blockRecordOnDelete(t *testing.T) (unblock func()) {
 	t.Helper()
 	var blocked []string
@@ -884,11 +875,12 @@ func TestClearHistory_TornRecordRemoved(t *testing.T) {
 	t.Cleanup(func() { writeAndClose = old })
 	writeAndClose = func(f *os.File, data []byte) error {
 		_, _ = f.Write(data[:len(data)/2])
-		return errors.Join(errors.New("disk full"), f.Close())
+		_ = f.Close()
+		return &fs.PathError{Op: "write", Path: f.Name(), Err: errors.New("disk full")}
 	}
 	r := newClearHistoryRun(t, "y")
 	err := r.run(t, "", "Bluey (2018)")
-	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
+	if err == nil || !strings.Contains(err.Error(), "disk full") || strings.Contains(err.Error(), "couldn't be removed") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
 		t.Fatalf("err = %v; want the write error and that nothing was deleted", err)
 	}
 	files, _ := filepath.Glob(filepath.Join(r.recordDir, "*"))
@@ -924,5 +916,135 @@ func TestPlanHistory_RetitledShow(t *testing.T) {
 	}
 	if len(plan.yearUnchecked) != 0 {
 		t.Errorf("year unchecked %v; the key ties the year-less title to the show", plan.yearUnchecked)
+	}
+}
+
+// stubWriteAndClose replaces the record's first write for one test.
+func stubWriteAndClose(t *testing.T, f func(*os.File, []byte) error) {
+	old := writeAndClose
+	t.Cleanup(func() { writeAndClose = old })
+	writeAndClose = f
+}
+
+// An unfinished file that can't be removed is reported, though withoutPaths
+// keeps only the OS error.
+func TestClearHistory_TornRecordRemovalFails(t *testing.T) {
+	stubWriteAndClose(t, func(f *os.File, data []byte) error {
+		_ = f.Close()
+		// A directory in its place: the remove fails, as when antivirus holds it.
+		if err := os.Remove(f.Name()); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(f.Name(), "keep"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return &fs.PathError{Op: "write", Path: f.Name(), Err: errors.New("disk full")}
+	})
+	r := newClearHistoryRun(t, "y")
+	err := r.run(t, "", "Bluey (2018)")
+	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.Contains(err.Error(), "The unfinished file couldn't be removed.") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
+		t.Fatalf("err = %v; want the write error, the file left behind and that nothing was deleted", err)
+	}
+	if len(r.pms.deleted) != 0 {
+		t.Errorf("deleted %v", r.pms.deleted)
+	}
+}
+
+// A file already gone when the write fails isn't reported as left behind.
+func TestClearHistory_TornRecordAlreadyGone(t *testing.T) {
+	stubWriteAndClose(t, func(f *os.File, data []byte) error {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return &fs.PathError{Op: "write", Path: f.Name(), Err: errors.New("disk full")}
+	})
+	r := newClearHistoryRun(t, "y")
+	if err := r.run(t, "", "Bluey (2018)"); err == nil || strings.Contains(err.Error(), "couldn't be removed") {
+		t.Fatalf("err = %v; want the write error alone", err)
+	}
+}
+
+func planShows(t *testing.T, target string, shows ...historyShow) historyPlan {
+	t.Helper()
+	targets, err := parseHistoryTargets([]string{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []historyEntry
+	for i, s := range shows {
+		e := episode(i, 1, s.title, "Ep")
+		e.GrandparentKey = s.key
+		entries = append(entries, e)
+	}
+	return planHistory(entries, targets)
+}
+
+// A year-less title Plex links to a show titled with another year is that
+// show, so it isn't taken on title alone.
+func TestPlanHistory_YearlessLinkedToOtherYear(t *testing.T) {
+	plan := planShows(t, "Show (2019)",
+		historyShow{"Show (2018)", "/library/metadata/1"},
+		historyShow{"Show", "/library/metadata/1"},
+		historyShow{"Show", "/library/metadata/2"},
+	)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("2")) {
+		t.Errorf("matched %v; want only the unlinked year-less show", got)
+	}
+	if !slices.Equal(plan.yearUnchecked, []string{"Show (2019)"}) {
+		t.Errorf("year unchecked %v; want the target", plan.yearUnchecked)
+	}
+}
+
+// An empty key ties nothing: it isn't a show's identity.
+func TestPlanHistory_EmptyKeyDoesNotTie(t *testing.T) {
+	plan := planShows(t, "Show (2018)",
+		historyShow{"Show (2018)", ""},
+		historyShow{"Show", ""},
+		historyShow{"Show", "/library/metadata/2"},
+	)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("0")) {
+		t.Errorf("matched %v; want only the titled show", got)
+	}
+	if len(plan.yearUnchecked) != 0 {
+		t.Errorf("year unchecked %v", plan.yearUnchecked)
+	}
+}
+
+// Without view times the first entry stands for the show, with no date; a
+// timed entry beats an untimed one.
+func TestPlanHistory_LastWatched(t *testing.T) {
+	targets, err := parseHistoryTargets([]string{"Bar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	untimed := []historyEntry{episode(1, 1, "Bar", "First"), episode(2, 1, "Bar", "Second")}
+	last := planHistory(untimed, targets).shows[historyShow{"Bar", ""}].last
+	if got := describeLastWatched(last); got != `S01E01 "First"` {
+		t.Errorf("last watched %q; want the first entry, undated", got)
+	}
+	timed := episode(3, 1, "Bar", "Third")
+	timed.ViewedAt = 1_700_000_000
+	last = planHistory(append(untimed, timed), targets).shows[historyShow{"Bar", ""}].last
+	if last.HistoryKey != timed.HistoryKey {
+		t.Errorf("last watched %q; want the timed entry", last.Title)
+	}
+}
+
+// Shows whose lines would read alike are told apart by key.
+func TestClearHistory_IdenticalShowLinesShowKeys(t *testing.T) {
+	r := newClearHistoryRun(t, "n")
+	for i, key := range []string{"/library/metadata/1", "/library/metadata/2"} {
+		e := episode(40, 1, "Bar", "Pilot")
+		e.HistoryKey = fmt.Sprintf("%s%d", historyKeyPrefix, 40+i)
+		e.GrandparentKey = key
+		r.pms.history = append(r.pms.history, e)
+	}
+	if err := r.run(t, "", "Bar"); err != nil {
+		t.Fatal(err)
+	}
+	out := r.out.String()
+	for _, want := range []string{`"Pilot" [/library/metadata/1]`, `"Pilot" [/library/metadata/2]`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
 	}
 }

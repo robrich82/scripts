@@ -56,8 +56,9 @@ func splitTitleYear(s string) (string, int) {
 
 // historyTitleKey folds a show title for comparison: lower case, with the
 // letters, numbers (Ⅱ and ② too), marks (Thai and Indic vowel signs) and
-// symbols (Gintama° is another series) of every script kept, and punctuation
-// and spaces dropped. titleMatcher keeps only ASCII, which is too loose here:
+// other and currency symbols (Gintama° is another series) of every script
+// kept. Punctuation, spaces and math symbols (~ and − stand in for dashes)
+// are dropped. titleMatcher keeps only ASCII, which is too loose here:
 // whatever matches gets deleted.
 func historyTitleKey(s string) string {
 	var b strings.Builder
@@ -65,10 +66,10 @@ func historyTitleKey(s string) string {
 		if r >= '！' && r <= '～' {
 			r -= '！' - '!' // full width mirrors ASCII: ＢＬＥＡＣＨ is BLEACH
 		}
-		// Spacing modifiers stand in for apostrophes: Hawaiʻi and Hawai`i are
-		// Hawai'i.
 		keep := unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) ||
-			unicode.In(r, unicode.Sm, unicode.Sc, unicode.So)
+			unicode.In(r, unicode.Sc, unicode.So)
+		// Modifier letters stand in for apostrophes (Hawaiʻi), as do modifier
+		// symbols (Hawai`i), which aren't kept.
 		if keep && (r < 0x2B0 || r > 0x2FF) {
 			b.WriteRune(r)
 		}
@@ -163,8 +164,12 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		record.Targets = append(record.Targets, t.raw)
 	}
 	recordPath := historyRecordPath(d.recordDir, d.now())
-	if err := writeNewHistoryRecord(recordPath, record); err != nil {
-		return fmt.Errorf("saving %s: %v\n%sNothing was deleted", recordPath, withoutPaths(err), hintLine(err))
+	if leftBehind, err := writeNewHistoryRecord(recordPath, record); err != nil {
+		left := ""
+		if leftBehind {
+			left = "The unfinished file couldn't be removed. "
+		}
+		return fmt.Errorf("saving %s: %v\n%s%sNothing was deleted", recordPath, withoutPaths(err), hintLine(err), left)
 	}
 	fmt.Fprintf(d.out, "Recorded the entries in %s\n", recordPath)
 
@@ -263,8 +268,9 @@ type historyPlan struct {
 // planHistory picks the episode entries whose show is a target, each once.
 // A target's year must equal the history title's when both have one. A
 // history title without a year matches too, unless the history also has the
-// target's title with its year: the year-less one is then another show,
-// except where its key is that show's (the show was retitled).
+// target's title with its year: the year-less one is then another show. A
+// year-less show whose key a titled show also has is that show, retitled: it
+// matches when that show does.
 func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 	type titleInfo struct {
 		key   string // historyTitleKey of the title
@@ -297,16 +303,22 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 			continue // a repeat: the same raw is the same target
 		}
 		listed[t.raw] = true
-		exactKeys := make(map[string]bool) // keys of the shows titled with the target's year
+		// The keys of the shows titled with the target's year, and with
+		// another year: a year-less title with one of them is that show.
+		exactKeys, otherKeys := make(map[string]bool), make(map[string]bool)
 		exactYear := false
 		if t.year != 0 {
 			for _, ti := range titles {
-				if ti.key == t.key && ti.year == t.year {
-					exactYear = true
-					for _, s := range ti.shows {
-						if s.key != "" {
-							exactKeys[s.key] = true
-						}
+				if ti.key != t.key || ti.year == 0 {
+					continue
+				}
+				keys := otherKeys
+				if ti.year == t.year {
+					exactYear, keys = true, exactKeys
+				}
+				for _, s := range ti.shows {
+					if s.key != "" {
+						keys[s.key] = true
 					}
 				}
 			}
@@ -319,11 +331,13 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 			for _, s := range ti.shows {
 				switch {
 				case t.year == 0 || ti.year == t.year:
-				case ti.year == 0 && !exactYear:
-					unchecked = true
-				case ti.year == 0 && exactKeys[s.key]:
-				default:
+				case ti.year != 0:
 					continue
+				case exactKeys[s.key]:
+				case otherKeys[s.key] || exactYear:
+					continue
+				default:
+					unchecked = true
 				}
 				take[s] = true
 				found = true
@@ -354,23 +368,29 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 	return plan
 }
 
-// printHistoryPlan lists the matched entries per show, since a target can
-// match more than one, and the targets that matched nothing.
+// printHistoryPlan lists each matched show with its episode count and the
+// episode watched last, since a target can match more than one show, and the
+// targets that matched nothing.
 func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 	fmt.Fprintf(out, "Watch history for %s (account %d) on the Plex server:\n", acct.Name, acct.ID)
 	shows := slices.SortedFunc(maps.Keys(plan.shows), func(a, b historyShow) int {
 		return cmp.Or(strings.Compare(a.title, b.title), strings.Compare(a.key, b.key))
 	})
-	perTitle := make(map[string]int)
-	for _, s := range shows {
-		perTitle[s.title]++
-	}
+	lines := make([]string, len(shows))
+	count := make(map[string]int)
 	shared := false
-	for _, s := range shows {
-		shared = shared || perTitle[s.title] > 1
+	for i, s := range shows {
+		shared = shared || (i > 0 && shows[i-1].title == s.title)
 		sum := plan.shows[s]
 		// The last episode watched tells apart two shows with one title.
-		fmt.Fprintf(out, "  %-40s %d episode(s), last watched %s\n", s.title, sum.episodes, describeLastWatched(sum.last))
+		lines[i] = fmt.Sprintf("  %-40s %d episode(s), last watched %s", s.title, sum.episodes, describeLastWatched(sum.last))
+		count[lines[i]]++
+	}
+	for i, line := range lines {
+		if count[line] > 1 {
+			line += " [" + cmp.Or(shows[i].key, "no key") + "]" // nothing else tells them apart
+		}
+		fmt.Fprintln(out, line)
 	}
 	if shared {
 		fmt.Fprintln(out, "A title listed more than once is more than one show in Plex (or a show added again): check each before answering.")
@@ -386,12 +406,16 @@ func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 	}
 }
 
+func episodeLabel(e historyEntry) string {
+	return fmt.Sprintf("S%02dE%02d %q", e.ParentIndex, e.Index, e.Title)
+}
+
 func describeHistoryEntry(e historyEntry) string {
-	return fmt.Sprintf("%s S%02dE%02d %q", e.GrandparentTitle, e.ParentIndex, e.Index, e.Title)
+	return e.GrandparentTitle + " " + episodeLabel(e)
 }
 
 func describeLastWatched(e historyEntry) string {
-	s := fmt.Sprintf("S%02dE%02d %q", e.ParentIndex, e.Index, e.Title)
+	s := episodeLabel(e)
 	if e.ViewedAt > 0 {
 		s += " on " + time.Unix(e.ViewedAt, 0).Format("2006-01-02")
 	}
@@ -433,44 +457,46 @@ func historyRecordPath(dir string, now time.Time) string {
 // writeNewHistoryRecord writes record to path, never over an earlier one.
 // It creates the file exclusively and writes in place, since a rename could
 // replace a record another run wrote in between. A torn write can only
-// happen before any delete.
-func writeNewHistoryRecord(path string, record historyRecord) error {
+// happen before any delete. leftBehind reports an unfinished file it
+// couldn't remove; the caller says so, since withoutPaths keeps only the OS
+// error.
+func writeNewHistoryRecord(path string, record historyRecord) (leftBehind bool, err error) {
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return false, err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if errors.Is(err, fs.ErrExist) {
-		return errors.New("an earlier record has this name")
+		return false, errors.New("an earlier record has this name")
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := writeAndClose(f, data); err != nil {
-		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
-			return fmt.Errorf("%w; the unfinished file is left behind", err)
-		}
-		return err
+		rmErr := os.Remove(path)
+		return rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist), err
 	}
-	return nil
+	return false, nil
 }
 
-// writeAndClose writes data to f, flushes it to disk and closes f; tests
-// replace it.
+// writeAndClose writes data to f, flushes it to disk and closes f, returning
+// the first error; tests replace it.
 var writeAndClose = func(f *os.File, data []byte) error {
 	_, err := f.Write(data)
 	if err == nil {
 		err = f.Sync()
 	}
-	return errors.Join(err, f.Close())
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
-// updateHistoryRecord replaces the record at path, trying again once like
-// cacheSaver: on Windows the rename fails while another program (antivirus,
-// an indexer) briefly holds the file open.
+// updateHistoryRecord replaces the record at path, retrying once after a
+// pause like cacheSaver.finish (a briefly locked file on Windows).
 func updateHistoryRecord(path string, record historyRecord) error {
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
