@@ -63,9 +63,9 @@ func newClearHistoryRun(t *testing.T, answers ...string) *clearHistoryRun {
 				episode(3, 1, "Peppa Pig", "Muddy Puddles"),
 				episode(4, 1, "NCIS: Hawaiʻi", "Pilot"),
 				episode(5, 1, "NCIS: Los Angeles", "Identity"),
-				// A track with the show's title in the episode's field: only
-				// the episode filter keeps it.
-				{HistoryKey: historyKeyPrefix + "7", Type: "track", Title: "Bluey", GrandparentTitle: "Bluey", AccountID: 1},
+				// A track whose artist has the matched show's exact title:
+				// only the episode filter keeps it.
+				{HistoryKey: historyKeyPrefix + "7", Type: "track", Title: "Bluey", GrandparentTitle: "Bluey (2018)", AccountID: 1},
 				episode(8, 5, "Chicago Fire", "Pilot"),
 				episode(9, 5, "Bluey (2018)", "Keepy Uppy"),
 				episode(10, 1, "Bluey (1992)", "Pilot"),
@@ -204,6 +204,13 @@ func TestPlanHistory_TitleMatch(t *testing.T) {
 		{"Show", "Show²", false},
 		{"とある魔術の禁書目録", "とある魔術の禁書目録Ⅱ", false},
 		{"とある魔術の禁書目録Ⅱ", "とある魔術の禁書目録Ⅱ", true},
+		// Symbols tell titles apart; modifier letters and symbols are
+		// apostrophes.
+		{"Gintama", "Gintama°", false},
+		{"Re:ステージ！ドリームデイズ", "Re:ステージ！ドリームデイズ♪", false},
+		{"Hunter × Hunter", "Hunter × Hunter", true},
+		{"NCIS: Hawai`i", "NCIS: Hawai'i", true},
+		{"Ｓｈｏｗ＋", "Show+", true},
 		// Vowel signs are marks, not letters, and tell these titles apart.
 		{"काल", "कल", false},
 		// Titles alike only in their ASCII, which the Plex lookup's
@@ -407,22 +414,37 @@ func TestClearHistory_NoNamedAccounts(t *testing.T) {
 	r.assertUntouched(t)
 }
 
-// Two shows with one title are listed apart, by key.
+// Two shows with one title are listed apart, each with its last episode.
 func TestClearHistory_SameTitleShowsListedApart(t *testing.T) {
 	r := newClearHistoryRun(t, "n")
-	for i, key := range []string{"/library/metadata/100", "/library/metadata/100", "/library/metadata/200"} {
-		e := episode(30+i, 1, "Doctor Who", "Ep")
-		e.GrandparentKey = key
+	for i, ep := range []struct {
+		key, title string
+		viewedAt   int64
+	}{
+		{"/library/metadata/100", "Rose", 1_700_000_000},
+		{"/library/metadata/100", "The End of the World", 1_700_100_000},
+		{"/library/metadata/200", "An Unearthly Child", 1_600_000_000},
+	} {
+		e := episode(30+i, 1, "Doctor Who", ep.title)
+		e.GrandparentKey, e.ViewedAt = ep.key, ep.viewedAt
 		r.pms.history = append(r.pms.history, e)
 	}
 	if err := r.run(t, "", "Doctor Who"); err != nil {
 		t.Fatal(err)
 	}
 	out := r.out.String()
-	for _, want := range []string{"Doctor Who [/library/metadata/100]", "Doctor Who [/library/metadata/200]", "more than one show"} {
+	day := func(sec int64) string { return time.Unix(sec, 0).Format("2006-01-02") }
+	for _, want := range []string{
+		`2 episode(s), last watched S01E31 "The End of the World" on ` + day(1_700_100_000),
+		`1 episode(s), last watched S01E32 "An Unearthly Child" on ` + day(1_600_000_000),
+		"more than one show",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "/library/metadata/") {
+		t.Errorf("output shows a key:\n%s", out)
 	}
 }
 
@@ -515,6 +537,9 @@ func TestClearHistory_PartialFailure(t *testing.T) {
 	if len(recs) != 1 || !slices.Equal(keysOf(recs[0].Server), keys("1", "2")) || !slices.Equal(recs[0].Failed, keys("1")) {
 		t.Errorf("records %+v; want one listing 1 and 2, with 1 failed", recs)
 	}
+	if len(recs) == 1 && !recs[0].Complete {
+		t.Error("record not complete after a finished run with a failure")
+	}
 	if !strings.Contains(r.out.String(), "Deleted 1 of 2") {
 		t.Errorf("output:\n%s", r.out.String())
 	}
@@ -525,7 +550,35 @@ func TestClearHistory_PartialFailure(t *testing.T) {
 func TestClearHistory_StopsAfterRepeatedFailures(t *testing.T) {
 	r := newClearHistoryRun(t, "y")
 	r.pms.failKeys = map[string]bool{}
+	var want []string
 	for i := 20; i < 26; i++ {
+		e := episode(i, 1, "Paw Patrol", "Ep")
+		r.pms.history = append(r.pms.history, e)
+		want = append(want, e.HistoryKey)
+		if i < 23 {
+			r.pms.failKeys[e.HistoryKey] = true // the rest would succeed
+		}
+	}
+	if err := r.run(t, "", "Paw Patrol"); err == nil {
+		t.Fatal("expected an error")
+	}
+	if len(r.pms.deleted) != 0 {
+		t.Errorf("deleted %v after stopping", r.pms.deleted)
+	}
+	recs := r.records(t)
+	if len(recs) != 1 || !slices.Equal(recs[0].Failed, want) || !recs[0].Complete {
+		t.Errorf("records %+v; want one, complete, with all 6 failed in order", recs)
+	}
+	if !strings.Contains(r.out.String(), "Stopped after 3 failures in a row; 3 entries weren't tried.") || strings.Count(r.out.String(), "  failed:") != 3 {
+		t.Errorf("output:\n%s", r.out.String())
+	}
+}
+
+// A third failure on the last entry stops nothing, so it says nothing of it.
+func TestClearHistory_LastThreeFail(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	r.pms.failKeys = map[string]bool{}
+	for i := 20; i < 23; i++ {
 		e := episode(i, 1, "Paw Patrol", "Ep")
 		r.pms.history = append(r.pms.history, e)
 		r.pms.failKeys[e.HistoryKey] = true
@@ -533,12 +586,8 @@ func TestClearHistory_StopsAfterRepeatedFailures(t *testing.T) {
 	if err := r.run(t, "", "Paw Patrol"); err == nil {
 		t.Fatal("expected an error")
 	}
-	recs := r.records(t)
-	if len(recs) != 1 || len(recs[0].Failed) != 6 {
-		t.Errorf("records %+v; want all 6 entries failed", recs)
-	}
-	if !strings.Contains(r.out.String(), "Stopped after 3 failures in a row; 3 entries weren't tried.") || strings.Count(r.out.String(), "  failed:") != 3 {
-		t.Errorf("output:\n%s", r.out.String())
+	if out := r.out.String(); strings.Contains(out, "Stopped") || strings.Count(out, "  failed:") != 3 {
+		t.Errorf("output:\n%s", out)
 	}
 }
 
@@ -577,6 +626,9 @@ func TestClearHistory_RecordIncompleteDuringDeletes(t *testing.T) {
 	r.pms.onDelete = func() {
 		for _, rec := range r.records(t) {
 			during = append(during, rec.Complete)
+			if !slices.Equal(keysOf(rec.Server), keys("1", "2")) || rec.AccountID != 1 || !slices.Equal(rec.Targets, []string{"Bluey (2018)"}) {
+				t.Errorf("record during deletes = %+v; want every entry, the account and the target", rec)
+			}
 		}
 	}
 	if err := r.run(t, "", "Bluey (2018)"); err != nil {
@@ -761,6 +813,7 @@ func TestClearHistory_RecordKeepsEntries(t *testing.T) {
 // Deletes that went through are reported even when the record can't be
 // updated to say so.
 func TestClearHistory_RecordUpdateFails(t *testing.T) {
+	setBeforeFinalSave(t, func() {})
 	r := newClearHistoryRun(t, "y")
 	r.pms.onDelete = func() {
 		files, _ := filepath.Glob(filepath.Join(r.recordDir, "history-cleared-*.json"))
@@ -782,5 +835,94 @@ func TestClearHistory_RecordUpdateFails(t *testing.T) {
 	}
 	if want := keys("1", "2"); !slices.Equal(r.pms.deleted, want) {
 		t.Errorf("deleted %v; want %v", r.pms.deleted, want)
+	}
+}
+
+// blockRecordOnDelete puts a directory where the record was once deletes
+// start, so rewriting the record fails until unblock removes it.
+func (r *clearHistoryRun) blockRecordOnDelete(t *testing.T) (unblock func()) {
+	t.Helper()
+	var blocked []string
+	r.pms.onDelete = func() {
+		files, _ := filepath.Glob(filepath.Join(r.recordDir, "history-cleared-*.json"))
+		for _, f := range files {
+			if fi, err := os.Stat(f); err != nil || fi.IsDir() || os.Remove(f) != nil {
+				continue
+			}
+			if err := os.MkdirAll(filepath.Join(f, "keep"), 0o755); err != nil {
+				t.Error(err)
+			}
+			blocked = append(blocked, f)
+		}
+	}
+	return func() {
+		for _, f := range blocked {
+			if err := os.RemoveAll(f); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+}
+
+// A rewrite that fails once, as when antivirus holds the file, is retried.
+func TestClearHistory_RecordUpdateRetried(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	unblock := r.blockRecordOnDelete(t)
+	pauses := 0
+	setBeforeFinalSave(t, func() { pauses++; unblock() })
+	if err := r.run(t, "", "Bluey (2018)"); err != nil {
+		t.Fatal(err)
+	}
+	if recs := r.records(t); pauses != 1 || len(recs) != 1 || !recs[0].Complete {
+		t.Errorf("pauses %d, records %+v; want one retry and a complete record", pauses, recs)
+	}
+}
+
+// A first write that fails partway leaves no file behind, and deletes nothing.
+func TestClearHistory_TornRecordRemoved(t *testing.T) {
+	old := writeAndClose
+	t.Cleanup(func() { writeAndClose = old })
+	writeAndClose = func(f *os.File, data []byte) error {
+		_, _ = f.Write(data[:len(data)/2])
+		return errors.Join(errors.New("disk full"), f.Close())
+	}
+	r := newClearHistoryRun(t, "y")
+	err := r.run(t, "", "Bluey (2018)")
+	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
+		t.Fatalf("err = %v; want the write error and that nothing was deleted", err)
+	}
+	files, _ := filepath.Glob(filepath.Join(r.recordDir, "*"))
+	if len(files) != 0 {
+		t.Errorf("left %v", files)
+	}
+	if len(r.pms.deleted) != 0 {
+		t.Errorf("deleted %v", r.pms.deleted)
+	}
+}
+
+// A year-less title Plex links to the show titled with the target's year is
+// that show, retitled; one linked elsewhere is another show.
+func TestPlanHistory_RetitledShow(t *testing.T) {
+	targets, err := parseHistoryTargets([]string{"Show (2018)"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []historyEntry
+	for i, s := range []struct{ title, key string }{
+		{"Show (2018)", "/library/metadata/1"},
+		{"Show", "/library/metadata/1"},
+		{"Show", "/library/metadata/2"},
+		{"Show", ""},
+	} {
+		e := episode(i, 1, s.title, "Ep")
+		e.GrandparentKey = s.key
+		entries = append(entries, e)
+	}
+	plan := planHistory(entries, targets)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("0", "1")) {
+		t.Errorf("matched %v; want the 2018 show under both titles", got)
+	}
+	if len(plan.yearUnchecked) != 0 {
+		t.Errorf("year unchecked %v; the key ties the year-less title to the show", plan.yearUnchecked)
 	}
 }
