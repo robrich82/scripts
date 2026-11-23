@@ -56,8 +56,8 @@ func splitTitleYear(s string) (string, int) {
 
 // historyTitleKey folds a show title for comparison: lower case, with the
 // letters, numbers (Ⅱ and ② too), marks (Thai and Indic vowel signs) and
-// other and currency symbols (Gintama° is another series) of every script
-// kept. Punctuation, spaces and math symbols (~ and − stand in for dashes)
+// symbols (Gintama°, ∀ Gundam and C++ are other series) of every script kept.
+// Punctuation, spaces, and tildes and minus signs, which stand in for dashes,
 // are dropped. titleMatcher keeps only ASCII, which is too loose here:
 // whatever matches gets deleted.
 func historyTitleKey(s string) string {
@@ -67,7 +67,7 @@ func historyTitleKey(s string) string {
 			r -= '！' - '!' // full width mirrors ASCII: ＢＬＥＡＣＨ is BLEACH
 		}
 		keep := unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) ||
-			unicode.In(r, unicode.Sc, unicode.So)
+			(unicode.IsSymbol(r) && !unicode.Is(unicode.Sk, r) && !strings.ContainsRune("~∼⁓−", r))
 		// Modifier letters stand in for apostrophes (Hawaiʻi), as do modifier
 		// symbols (Hawai`i), which aren't kept.
 		if keep && (r < 0x2B0 || r > 0x2FF) {
@@ -164,10 +164,11 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		record.Targets = append(record.Targets, t.raw)
 	}
 	recordPath := historyRecordPath(d.recordDir, d.now())
-	if leftBehind, err := writeNewHistoryRecord(recordPath, record); err != nil {
+	if rmErr, err := writeNewHistoryRecord(recordPath, record); err != nil {
 		left := ""
-		if leftBehind {
-			left = "The unfinished file couldn't be removed. "
+		if rmErr != nil {
+			left = fmt.Sprintf("The unfinished file couldn't be removed (%v); delete it, since it lists entries that weren't deleted.\n%s",
+				withoutPaths(rmErr), hintLine(rmErr))
 		}
 		return fmt.Errorf("saving %s: %v\n%s%sNothing was deleted", recordPath, withoutPaths(err), hintLine(err), left)
 	}
@@ -376,18 +377,27 @@ func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 	shows := slices.SortedFunc(maps.Keys(plan.shows), func(a, b historyShow) int {
 		return cmp.Or(strings.Compare(a.title, b.title), strings.Compare(a.key, b.key))
 	})
-	lines := make([]string, len(shows))
-	count := make(map[string]int)
-	shared := false
-	for i, s := range shows {
-		shared = shared || (i > 0 && shows[i-1].title == s.title)
-		sum := plan.shows[s]
-		// The last episode watched tells apart two shows with one title.
-		lines[i] = fmt.Sprintf("  %-40s %d episode(s), last watched %s", s.title, sum.episodes, describeLastWatched(sum.last))
-		count[lines[i]]++
+	// Titles are compared as matching folds them, so ones that differ only
+	// in spaces or invisible characters count as one.
+	folded := func(title string) string {
+		t, year := splitTitleYear(title)
+		return historyTitleKey(t) + "\x00" + strconv.Itoa(year)
 	}
+	perTitle, perLine := make(map[string]int), make(map[string]int)
+	lines, lineIDs := make([]string, len(shows)), make([]string, len(shows))
+	for i, s := range shows {
+		sum := plan.shows[s]
+		last := describeLastWatched(sum.last)
+		// The last episode watched tells apart two shows with one title.
+		lines[i] = fmt.Sprintf("  %-40s %d episode(s), last watched %s", s.title, sum.episodes, last)
+		lineIDs[i] = fmt.Sprintf("%s\x00%d\x00%s", folded(s.title), sum.episodes, last)
+		perTitle[folded(s.title)]++
+		perLine[lineIDs[i]]++
+	}
+	shared := false
 	for i, line := range lines {
-		if count[line] > 1 {
+		shared = shared || perTitle[folded(shows[i].title)] > 1
+		if perLine[lineIDs[i]] > 1 {
 			line += " [" + cmp.Or(shows[i].key, "no key") + "]" // nothing else tells them apart
 		}
 		fmt.Fprintln(out, line)
@@ -457,29 +467,30 @@ func historyRecordPath(dir string, now time.Time) string {
 // writeNewHistoryRecord writes record to path, never over an earlier one.
 // It creates the file exclusively and writes in place, since a rename could
 // replace a record another run wrote in between. A torn write can only
-// happen before any delete. leftBehind reports an unfinished file it
-// couldn't remove; the caller says so, since withoutPaths keeps only the OS
-// error.
-func writeNewHistoryRecord(path string, record historyRecord) (leftBehind bool, err error) {
+// happen before any delete. rmErr is why an unfinished file couldn't be
+// removed; the caller reports it, since withoutPaths keeps only the OS error.
+func writeNewHistoryRecord(path string, record historyRecord) (rmErr, err error) {
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return false, err
+		return nil, err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if errors.Is(err, fs.ErrExist) {
-		return false, errors.New("an earlier record has this name")
+		return nil, errors.New("an earlier record has this name")
 	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if err := writeAndClose(f, data); err != nil {
-		rmErr := os.Remove(path)
-		return rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist), err
+		if rmErr := os.Remove(path); !errors.Is(rmErr, fs.ErrNotExist) {
+			return rmErr, err
+		}
+		return nil, err
 	}
-	return false, nil
+	return nil, nil
 }
 
 // writeAndClose writes data to f, flushes it to disk and closes f, returning

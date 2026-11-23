@@ -206,7 +206,10 @@ func TestPlanHistory_TitleMatch(t *testing.T) {
 		{"Show", "Show²", false},
 		{"とある魔術の禁書目録", "とある魔術の禁書目録Ⅱ", false},
 		{"とある魔術の禁書目録Ⅱ", "とある魔術の禁書目録Ⅱ", true},
-		// Other symbols tell titles apart; math symbols stand in for dashes.
+		// Symbols tell titles apart; tildes and minus signs stand in for dashes.
+		{"Gundam", "∀ Gundam", false},
+		{"C", "C++", false},
+		{"Hunter Hunter", "Hunter × Hunter", false},
 		{"Gintama", "Gintama°", false},
 		{"Prisma Illya", "Prisma☆Illya", false},
 		{"Re:ステージ！ドリームデイズ", "Re:ステージ！ドリームデイズ♪", false},
@@ -929,6 +932,7 @@ func stubWriteAndClose(t *testing.T, f func(*os.File, []byte) error) {
 // An unfinished file that can't be removed is reported, though withoutPaths
 // keeps only the OS error.
 func TestClearHistory_TornRecordRemovalFails(t *testing.T) {
+	var reason string // why the remove fails
 	stubWriteAndClose(t, func(f *os.File, data []byte) error {
 		_ = f.Close()
 		// A directory in its place: the remove fails, as when antivirus holds it.
@@ -938,11 +942,12 @@ func TestClearHistory_TornRecordRemovalFails(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(f.Name(), "keep"), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		reason = withoutPaths(os.Remove(f.Name())).Error()
 		return &fs.PathError{Op: "write", Path: f.Name(), Err: errors.New("disk full")}
 	})
 	r := newClearHistoryRun(t, "y")
 	err := r.run(t, "", "Bluey (2018)")
-	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.Contains(err.Error(), "The unfinished file couldn't be removed.") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
+	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.Contains(err.Error(), "couldn't be removed ("+reason+")") || !strings.Contains(err.Error(), "delete it") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
 		t.Fatalf("err = %v; want the write error, the file left behind and that nothing was deleted", err)
 	}
 	if len(r.pms.deleted) != 0 {
@@ -1043,6 +1048,27 @@ func TestClearHistory_IdenticalShowLinesShowKeys(t *testing.T) {
 	}
 	out := r.out.String()
 	for _, want := range []string{`"Pilot" [/library/metadata/1]`, `"Pilot" [/library/metadata/2]`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// Titles that differ only in spaces or invisible characters, which matching
+// ignores, are listed as one title shared by two shows.
+func TestClearHistory_InvisiblyDifferentTitlesFlagged(t *testing.T) {
+	r := newClearHistoryRun(t, "n")
+	for i, show := range []string{"Bar", "Bar\u200b"} {
+		e := episode(50+i, 1, show, "Pilot")
+		e.Index = 1
+		e.GrandparentKey = fmt.Sprintf("/library/metadata/%d", i+1)
+		r.pms.history = append(r.pms.history, e)
+	}
+	if err := r.run(t, "", "Bar"); err != nil {
+		t.Fatal(err)
+	}
+	out := r.out.String()
+	for _, want := range []string{"[/library/metadata/1]", "[/library/metadata/2]", "more than one show"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
