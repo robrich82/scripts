@@ -7,6 +7,18 @@ POWERSHELL_TELEMETRY_OPTOUT = "1"
 # Lock Linux and macOS too, not just the platform that last ran `mise lock`.
 lockfile_platforms = ["linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64"]
 
+# The first of these on the machine installs each unprefixed [bootstrap.packages] key: the distro's
+# own manager, then Homebrew, MacPorts, Nix; on Windows Chocolatey or Scoop when installed, else winget.
+system_packages.prefer = ["apt", "dnf", "pacman", "zypper", "apk", "brew", "macports", "nix", "choco", "scoop", "winget"]
+
+# What the built tools run. `mise bootstrap packages apply` installs what's missing; `mise install`
+# only hints. A manager missing from `names` installs the key's own name.
+[bootstrap.packages]
+mkvtoolnix = { names = { winget = "MoritzBunkus.MKVToolNix", scoop = "extras/mkvtoolnix", pacman = "mkvtoolnix-cli", nix = "mkvtoolnix-cli" } }
+# Must be ImageMagick 7: cbz-fix runs `magick`, which 6 lacks.
+imagemagick = { names = { winget = "ImageMagick.ImageMagick", macports = "ImageMagick7", dnf = "ImageMagick", zypper = "ImageMagick" } }
+exiftool = { names = { winget = "OliverBetz.ExifTool", apt = "libimage-exiftool-perl", pacman = "perl-image-exiftool", dnf = "perl-Image-ExifTool" } }
+
 [tools]
 go = "1.27.4"
 jq = "1.8.2"

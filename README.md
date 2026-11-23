@@ -18,8 +18,10 @@ A collection of Go command-line utilities for managing MKV media files, CBZ comi
 - Go, jq, golangci-lint, govulncheck and ffmpeg (tests only), pinned in `mise.toml`: run `mise install`.
   - A linter `go install`ed into `go env GOBIN` shadows the pinned one; delete it there.
 - For the `mise run` tasks below: PowerShell 7.4+ (`pwsh` on PATH) on Windows; `sh` on macOS and Linux, plus `curl` for `openapi` and `tmdb-openapi`.
-- [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`, `mkvextract`) — required by mkv-audit, mkv-movie, mkv-tvshow
-- [ExifTool](https://exiftool.org/) (`exiftool` on PATH) — used by mkv-music's audio timestamp sync
+- The programs the tools run, declared under `[bootstrap.packages]` in `mise.toml`. `mise bootstrap packages apply` installs any that are missing, with Chocolatey or Scoop if installed, else winget, on Windows; Homebrew, else MacPorts, on macOS; and the distro's own manager, else Nix, on Linux:
+  - [MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge`, `mkvpropedit`, `mkvextract`) — required by mkv-audit, mkv-movie, mkv-tvshow; mkv-music needs it to copy tags. RHEL, Alma and Rocky don't package it: add [its repository](https://mkvtoolnix.download/downloads.html) first.
+  - [ImageMagick](https://imagemagick.org/) 7 (`magick` on PATH) — used by cbz-fix's page conversion. Ubuntu 24.04's is ImageMagick 6, which has no `magick`. MacPorts puts it in `/opt/local/lib/ImageMagick7/bin`, which you add to PATH.
+  - [ExifTool](https://exiftool.org/) (`exiftool` on PATH) — used by mkv-music's audio timestamp sync
 - TMDB API key — required by mkv-movie, mkv-tvshow; optional for mkv-audit (enables automatic IETF and original-language detection)
 
 ## Building
