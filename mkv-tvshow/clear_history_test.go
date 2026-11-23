@@ -215,6 +215,12 @@ func TestPlanHistory_TitleMatch(t *testing.T) {
 		{"Re:ステージ！ドリームデイズ", "Re:ステージ！ドリームデイズ♪", false},
 		{"かぐや様 ～Ultra Romantic～", "かぐや様 〜Ultra Romantic〜", true},
 		{"Re:ゼロ − 始める", "Re:ゼロ - 始める", true},
+		{"A-B", "A─B", true},
+		{"A-B", "A━B", true},
+		{"A-B", "A➖B", true},
+		{"A-B", "A⁻B", true},
+		{"A-B", "A₋B", true},
+		{"A-B", "A⁓B", true},
 		{"NCIS: Hawai`i", "NCIS: Hawai'i", true},
 		// Full-width punctuation folds to ASCII, then drops.
 		{"Ｍｒ．Ｒｏｂｏｔ", "Mr. Robot", true},
@@ -444,7 +450,7 @@ func TestClearHistory_SameTitleShowsListedApart(t *testing.T) {
 	for _, want := range []string{
 		`2 episode(s), last watched S01E31 "The End of the World" on ` + day(1_700_100_000),
 		`1 episode(s), last watched S01E32 "An Unearthly Child" on ` + day(1_600_000_000),
-		"more than one show",
+		"may be different shows",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -947,11 +953,30 @@ func TestClearHistory_TornRecordRemovalFails(t *testing.T) {
 	})
 	r := newClearHistoryRun(t, "y")
 	err := r.run(t, "", "Bluey (2018)")
-	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.Contains(err.Error(), "couldn't be removed ("+reason+")") || !strings.Contains(err.Error(), "delete it") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
+	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.Contains(err.Error(), "couldn't be removed: "+reason+"\n") || !strings.Contains(err.Error(), "Delete it") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
 		t.Fatalf("err = %v; want the write error, the file left behind and that nothing was deleted", err)
 	}
 	if len(r.pms.deleted) != 0 {
 		t.Errorf("deleted %v", r.pms.deleted)
+	}
+}
+
+// The note for a file left behind gives the remove's hint only when the
+// write's error didn't already give it.
+func TestLeftBehindNote_Hints(t *testing.T) {
+	denied := &fs.PathError{Op: "remove", Path: "x", Err: fs.ErrPermission}
+	hint := hintLine(denied)
+	if hint == "" {
+		t.Fatal("no hint for a permission error")
+	}
+	if note := leftBehindNote(&fs.PathError{Op: "write", Path: "x", Err: fs.ErrPermission}, denied); strings.Contains(note, hint) {
+		t.Errorf("note repeats the write's hint:\n%s", note)
+	}
+	if note := leftBehindNote(errors.New("disk full"), denied); !strings.Contains(note, hint) {
+		t.Errorf("note lacks the remove's hint:\n%s", note)
+	}
+	if note := leftBehindNote(errors.New("disk full"), nil); note != "" {
+		t.Errorf("note without a remove error = %q", note)
 	}
 }
 
@@ -1068,7 +1093,7 @@ func TestClearHistory_InvisiblyDifferentTitlesFlagged(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := r.out.String()
-	for _, want := range []string{"[/library/metadata/1]", "[/library/metadata/2]", "more than one show"} {
+	for _, want := range []string{"[/library/metadata/1]", "[/library/metadata/2]", "may be different shows"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

@@ -67,7 +67,7 @@ func historyTitleKey(s string) string {
 			r -= '！' - '!' // full width mirrors ASCII: ＢＬＥＡＣＨ is BLEACH
 		}
 		keep := unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) ||
-			(unicode.IsSymbol(r) && !unicode.Is(unicode.Sk, r) && !strings.ContainsRune("~∼⁓−", r))
+			(unicode.IsSymbol(r) && !unicode.Is(unicode.Sk, r) && !strings.ContainsRune("~∼−─━➖⁻₋", r))
 		// Modifier letters stand in for apostrophes (Hawaiʻi), as do modifier
 		// symbols (Hawai`i), which aren't kept.
 		if keep && (r < 0x2B0 || r > 0x2FF) {
@@ -165,12 +165,7 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 	}
 	recordPath := historyRecordPath(d.recordDir, d.now())
 	if rmErr, err := writeNewHistoryRecord(recordPath, record); err != nil {
-		left := ""
-		if rmErr != nil {
-			left = fmt.Sprintf("The unfinished file couldn't be removed (%v); delete it, since it lists entries that weren't deleted.\n%s",
-				withoutPaths(rmErr), hintLine(rmErr))
-		}
-		return fmt.Errorf("saving %s: %v\n%s%sNothing was deleted", recordPath, withoutPaths(err), hintLine(err), left)
+		return fmt.Errorf("saving %s: %v\n%s%sNothing was deleted", recordPath, withoutPaths(err), hintLine(err), leftBehindNote(err, rmErr))
 	}
 	fmt.Fprintf(d.out, "Recorded the entries in %s\n", recordPath)
 
@@ -403,7 +398,7 @@ func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 		fmt.Fprintln(out, line)
 	}
 	if shared {
-		fmt.Fprintln(out, "A title listed more than once is more than one show in Plex (or a show added again): check each before answering.")
+		fmt.Fprintln(out, "Titles that repeat, or differ only in spacing or punctuation, may be different shows: check each before answering.")
 	}
 	if len(plan.yearUnchecked) > 0 {
 		fmt.Fprintf(out, "History doesn't record a show's year, so these matched on title alone: %s\n", strings.Join(plan.yearUnchecked, ", "))
@@ -462,6 +457,21 @@ func deleteHistoryEntries(server HistoryClient, out io.Writer, entries []history
 
 func historyRecordPath(dir string, now time.Time) string {
 	return filepath.Join(dir, "history-cleared-"+now.UTC().Format("20060102T150405Z")+".json")
+}
+
+// leftBehindNote is the lines saying the unfinished record couldn't be
+// removed, or "" when rmErr is nil. A hint the write's error already gave
+// isn't repeated.
+func leftBehindNote(err, rmErr error) string {
+	if rmErr == nil {
+		return ""
+	}
+	hint := hintLine(rmErr)
+	if hint == hintLine(err) {
+		hint = ""
+	}
+	return fmt.Sprintf("The unfinished file couldn't be removed: %v\nDelete it, since it lists entries that weren't deleted.\n%s",
+		withoutPaths(rmErr), hint)
 }
 
 // writeNewHistoryRecord writes record to path, never over an earlier one.
