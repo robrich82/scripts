@@ -707,7 +707,9 @@ func TestMain_ClearHistoryFlagErrors(t *testing.T) {
 		{[]string{"--clear-history", "Bluey"}, []string{"PLEX_URL=http://127.0.0.1:1"}, "Error: --clear-history deletes Plex watch history: set PLEX_URL and PLEX_TOKEN."},
 		{[]string{"--clear-history", "Bluey"}, []string{"PLEX_TOKEN=" + secretToken}, "Error: --clear-history deletes Plex watch history: set PLEX_URL and PLEX_TOKEN."},
 		// An unquoted title: "Fire" stops flag parsing, so --account would be lost.
-		{[]string{"--clear-history", "Chicago", "Fire", "--account", "Stephanie"}, nil, `Error: unexpected argument "Fire": quote a title with spaces or a year, e.g. --clear-history "Bluey (2018)".`},
+		{[]string{"--clear-history", "Chicago", "Fire", "--account", "Stephanie"}, nil, `Error: unexpected argument "Fire": give each title its own --clear-history, quoted if it has spaces or a year, e.g. --clear-history "Bluey (2018)" --clear-history Fargo.`},
+		// A second title without its own flag.
+		{[]string{"--clear-history", "Bluey", "Fargo"}, nil, `Error: unexpected argument "Fargo": give each title its own --clear-history, quoted if it has spaces or a year, e.g. --clear-history "Bluey (2018)" --clear-history Fargo.`},
 	} {
 		t.Run(strings.Join(append(tc.env, tc.args...), " "), func(t *testing.T) {
 			out, err := runMainEnv(t, t.TempDir(), t.TempDir(), tc.env, tc.args...)
