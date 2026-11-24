@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -228,7 +229,11 @@ func TestExtractZipCryptoWrongKeyPassingHeaderCheck(t *testing.T) {
 
 func TestWriteEntryRejectsUnsafeNames(t *testing.T) {
 	open := func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("x")), nil }
-	for _, name := range []string{"../evil.txt", "a/../../evil.txt", "", ".", "/abs.txt", `C:\abs.txt`, "NUL"} {
+	names := []string{"../evil.txt", "a/../../evil.txt", "", ".", "/abs.txt"}
+	if runtime.GOOS == "windows" { // elsewhere these are ordinary file names
+		names = append(names, `C:\abs.txt`, "NUL")
+	}
+	for _, name := range names {
 		dest := t.TempDir()
 		if err := writeEntry(dest, name, false, open); err == nil {
 			t.Errorf("%q: accepted, want rejected", name)
