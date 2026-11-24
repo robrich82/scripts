@@ -57,25 +57,29 @@ func splitTitleYear(s string) (string, int) {
 // historyTitleKey folds a show title for comparison: lower case, with the
 // letters, numbers (Ⅱ and ② too), marks (Thai and Indic vowel signs) and
 // symbols (Gintama°, ∀ Gundam and C++ are other series) of every script kept.
-// Punctuation, spaces, and tildes and minus signs, which stand in for dashes,
-// are dropped. titleMatcher keeps only ASCII, which is too loose here:
-// whatever matches gets deleted.
+// Punctuation, spaces, dash lookalikes and modifier letters and symbols are
+// dropped. titleMatcher keeps only ASCII, which is too loose here: whatever
+// matches gets deleted.
 func historyTitleKey(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {
 		if r >= '！' && r <= '～' {
 			r -= '！' - '!' // full width mirrors ASCII: ＢＬＥＡＣＨ is BLEACH
 		}
-		keep := unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) ||
-			(unicode.IsSymbol(r) && !unicode.Is(unicode.Sk, r) && !strings.ContainsRune("~∼−─━➖⁻₋", r))
-		// Modifier letters stand in for apostrophes (Hawaiʻi), as do modifier
-		// symbols (Hawai`i), which aren't kept.
-		if keep && (r < 0x2B0 || r > 0x2FF) {
+		// Modifier letters (U+02B0–02FF) and symbols (Sk) stand in for
+		// apostrophes, as in Hawaiʻi and Hawai`i.
+		modifier := (r >= 0x2B0 && r <= 0x2FF) || unicode.Is(unicode.Sk, r)
+		symbol := unicode.IsSymbol(r) && !strings.ContainsRune(dashLookalikes, r)
+		if !modifier && (unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || symbol) {
 			b.WriteRune(r)
 		}
 	}
 	return b.String()
 }
+
+// dashLookalikes are the symbols that stand in for a dash in titles: tildes,
+// minus signs and box-drawing lines. Dashes proper are punctuation.
+const dashLookalikes = "~∼−─━➖⁻₋"
 
 func parseHistoryTargets(args []string) ([]historyTarget, error) {
 	var targets []historyTarget
@@ -108,8 +112,9 @@ type historyRecord struct {
 	AccountID int            `json:"accountID"`
 	Targets   []string       `json:"targets"`
 	Server    []historyEntry `json:"server"`
-	// Complete is false until the run finishes, so a record left false is
-	// from an interrupted run and some of Server may remain.
+	// Complete is false until the run finishes and the record is rewritten,
+	// so a record left false is from an interrupted run (some of Server may
+	// remain) or one whose final rewrite failed.
 	Complete bool `json:"complete"`
 	// Failed lists the entries not deleted: those whose delete failed, and
 	// those not tried after the run stopped.
@@ -373,32 +378,27 @@ func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 		return cmp.Or(strings.Compare(a.title, b.title), strings.Compare(a.key, b.key))
 	})
 	// Titles are compared as matching folds them, so ones that differ only
-	// in spaces or invisible characters count as one.
-	folded := func(title string) string {
-		t, year := splitTitleYear(title)
-		return historyTitleKey(t) + "\x00" + strconv.Itoa(year)
-	}
+	// in case, spacing, punctuation or invisible characters count as one.
 	perTitle, perLine := make(map[string]int), make(map[string]int)
 	lines, lineIDs := make([]string, len(shows)), make([]string, len(shows))
 	for i, s := range shows {
 		sum := plan.shows[s]
 		last := describeLastWatched(sum.last)
-		// The last episode watched tells apart two shows with one title.
+		t, year := splitTitleYear(s.title)
+		folded := historyTitleKey(t) + "\x00" + strconv.Itoa(year)
 		lines[i] = fmt.Sprintf("  %-40s %d episode(s), last watched %s", s.title, sum.episodes, last)
-		lineIDs[i] = fmt.Sprintf("%s\x00%d\x00%s", folded(s.title), sum.episodes, last)
-		perTitle[folded(s.title)]++
+		lineIDs[i] = fmt.Sprintf("%s\x00%d\x00%s", folded, sum.episodes, last)
+		perTitle[folded]++
 		perLine[lineIDs[i]]++
 	}
-	shared := false
 	for i, line := range lines {
-		shared = shared || perTitle[folded(shows[i].title)] > 1
 		if perLine[lineIDs[i]] > 1 {
 			line += " [" + cmp.Or(shows[i].key, "no key") + "]" // nothing else tells them apart
 		}
 		fmt.Fprintln(out, line)
 	}
-	if shared {
-		fmt.Fprintln(out, "Titles that repeat, or differ only in spacing or punctuation, may be different shows: check each before answering.")
+	if len(perTitle) < len(shows) {
+		fmt.Fprintln(out, "Titles that repeat, or differ only in case, spacing, punctuation or invisible characters, may be different shows: check each before answering.")
 	}
 	if len(plan.yearUnchecked) > 0 {
 		fmt.Fprintf(out, "History doesn't record a show's year, so these matched on title alone: %s\n", strings.Join(plan.yearUnchecked, ", "))
@@ -470,15 +470,16 @@ func leftBehindNote(err, rmErr error) string {
 	if hint == hintLine(err) {
 		hint = ""
 	}
-	return fmt.Sprintf("The unfinished file couldn't be removed: %v\nDelete it, since it lists entries that weren't deleted.\n%s",
+	return fmt.Sprintf("The unfinished file couldn't be removed: %v\nDelete it: it's not a record of deleted entries.\n%s",
 		withoutPaths(rmErr), hint)
 }
 
 // writeNewHistoryRecord writes record to path, never over an earlier one.
 // It creates the file exclusively and writes in place, since a rename could
 // replace a record another run wrote in between. A torn write can only
-// happen before any delete. rmErr is why an unfinished file couldn't be
-// removed; the caller reports it, since withoutPaths keeps only the OS error.
+// happen before any delete. rmErr, set only with err, is why the unfinished
+// file couldn't be removed: it's returned apart from err because withoutPaths
+// would drop a message wrapped around err.
 func writeNewHistoryRecord(path string, record historyRecord) (rmErr, err error) {
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
@@ -495,10 +496,11 @@ func writeNewHistoryRecord(path string, record historyRecord) (rmErr, err error)
 		return nil, err
 	}
 	if err := writeAndClose(f, data); err != nil {
-		if rmErr := os.Remove(path); !errors.Is(rmErr, fs.ErrNotExist) {
-			return rmErr, err
+		rmErr := os.Remove(path)
+		if errors.Is(rmErr, fs.ErrNotExist) {
+			rmErr = nil // already gone: nothing left behind
 		}
-		return nil, err
+		return rmErr, err
 	}
 	return nil, nil
 }

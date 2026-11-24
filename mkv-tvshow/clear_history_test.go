@@ -878,15 +878,52 @@ func TestClearHistory_RecordUpdateRetried(t *testing.T) {
 	}
 }
 
-// A first write that fails partway leaves no file behind, and deletes nothing.
-func TestClearHistory_TornRecordRemoved(t *testing.T) {
+// stubWriteAndClose replaces writeAndClose for one test.
+func stubWriteAndClose(t *testing.T, f func(*os.File, []byte) error) {
 	old := writeAndClose
 	t.Cleanup(func() { writeAndClose = old })
-	writeAndClose = func(f *os.File, data []byte) error {
+	writeAndClose = f
+}
+
+// writeAndClose writes and closes the file, and reports the write's error
+// rather than the close's that follows it.
+func TestWriteAndClose(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "record.json")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAndClose(f, []byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "data" {
+		t.Errorf("file = %q, %v; want data", got, err)
+	}
+	if err := f.Close(); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("second close = %v; want the file closed", err)
+	}
+
+	f, err = os.Open(path) // read-only, so the write fails
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = writeAndClose(f, []byte("more"))
+	var pathErr *fs.PathError
+	if !errors.As(err, &pathErr) || pathErr.Op != "write" {
+		t.Errorf("err = %v; want the write's error", err)
+	}
+	if err := f.Close(); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("second close = %v; want the file closed after a failed write", err)
+	}
+}
+
+// A first write that fails partway leaves no file behind, and deletes nothing.
+func TestClearHistory_TornRecordRemoved(t *testing.T) {
+	stubWriteAndClose(t, func(f *os.File, data []byte) error {
 		_, _ = f.Write(data[:len(data)/2])
 		_ = f.Close()
 		return &fs.PathError{Op: "write", Path: f.Name(), Err: errors.New("disk full")}
-	}
+	})
 	r := newClearHistoryRun(t, "y")
 	err := r.run(t, "", "Bluey (2018)")
 	if err == nil || !strings.Contains(err.Error(), "disk full") || strings.Contains(err.Error(), "couldn't be removed") || !strings.HasSuffix(err.Error(), "Nothing was deleted") {
@@ -904,22 +941,12 @@ func TestClearHistory_TornRecordRemoved(t *testing.T) {
 // A year-less title Plex links to the show titled with the target's year is
 // that show, retitled; one linked elsewhere is another show.
 func TestPlanHistory_RetitledShow(t *testing.T) {
-	targets, err := parseHistoryTargets([]string{"Show (2018)"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var entries []historyEntry
-	for i, s := range []struct{ title, key string }{
-		{"Show (2018)", "/library/metadata/1"},
-		{"Show", "/library/metadata/1"},
-		{"Show", "/library/metadata/2"},
-		{"Show", ""},
-	} {
-		e := episode(i, 1, s.title, "Ep")
-		e.GrandparentKey = s.key
-		entries = append(entries, e)
-	}
-	plan := planHistory(entries, targets)
+	plan := planShows(t, "Show (2018)",
+		historyShow{"Show (2018)", "/library/metadata/1"},
+		historyShow{"Show", "/library/metadata/1"},
+		historyShow{"Show", "/library/metadata/2"},
+		historyShow{"Show", ""},
+	)
 	if got := keysOf(plan.matched); !slices.Equal(got, keys("0", "1")) {
 		t.Errorf("matched %v; want the 2018 show under both titles", got)
 	}
@@ -928,11 +955,17 @@ func TestPlanHistory_RetitledShow(t *testing.T) {
 	}
 }
 
-// stubWriteAndClose replaces the record's first write for one test.
-func stubWriteAndClose(t *testing.T, f func(*os.File, []byte) error) {
-	old := writeAndClose
-	t.Cleanup(func() { writeAndClose = old })
-	writeAndClose = f
+// A year-less title linked both to the target's year and to another year (Plex
+// changed the show's year) is the target's show.
+func TestPlanHistory_YearlessLinkedToBothYears(t *testing.T) {
+	plan := planShows(t, "Show (2018)",
+		historyShow{"Show (2018)", "/library/metadata/1"},
+		historyShow{"Show (2019)", "/library/metadata/1"},
+		historyShow{"Show", "/library/metadata/1"},
+	)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("0", "2")) {
+		t.Errorf("matched %v; want the 2018 title and the year-less one", got)
+	}
 }
 
 // An unfinished file that can't be removed is reported, though withoutPaths
@@ -1072,15 +1105,32 @@ func TestClearHistory_IdenticalShowLinesShowKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := r.out.String()
-	for _, want := range []string{`"Pilot" [/library/metadata/1]`, `"Pilot" [/library/metadata/2]`} {
+	for _, want := range []string{`"Pilot" [/library/metadata/1]`, `"Pilot" [/library/metadata/2]`, "may be different shows"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
 }
 
-// Titles that differ only in spaces or invisible characters, which matching
-// ignores, are listed as one title shared by two shows.
+// Shows whose titles differ, if only by year, aren't flagged as sharing one.
+func TestClearHistory_DistinctTitlesNotFlagged(t *testing.T) {
+	r := newClearHistoryRun(t, "n")
+	if err := r.run(t, "", "Bluey"); err != nil {
+		t.Fatal(err)
+	}
+	out := r.out.String()
+	for _, want := range []string{"Bluey (1992)", "Bluey (2018)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "may be different shows") {
+		t.Errorf("distinct titles flagged as shared:\n%s", out)
+	}
+}
+
+// Titles that differ only in invisible characters, which matching ignores,
+// are flagged as sharing a title and told apart by key.
 func TestClearHistory_InvisiblyDifferentTitlesFlagged(t *testing.T) {
 	r := newClearHistoryRun(t, "n")
 	for i, show := range []string{"Bar", "Bar\u200b"} {
