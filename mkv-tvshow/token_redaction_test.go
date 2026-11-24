@@ -151,7 +151,7 @@ func TestHistoryClients_SendTokenInHeader(t *testing.T) {
 	if err := c.DeleteHistory(historyKeyPrefix + "1"); err != nil {
 		t.Errorf("DeleteHistory: %v", err)
 	}
-	_, _ = newPlexTVClient(srv.URL, secretToken).User() // no username in the reply
+	_, _ = newPlexTVClient(srv.URL, srv.URL, secretToken).User() // no username in the reply
 	if requests != 4 {
 		t.Errorf("server got %d requests, want 4", requests)
 	}
@@ -161,7 +161,7 @@ func TestHistoryClients_TransportErrorOmitsToken(t *testing.T) {
 	c := newHTTPPlexClient(closedServerURL(), secretToken)
 	_, accountsErr := c.Accounts()
 	_, historyErr := c.WatchHistory(1)
-	_, userErr := newPlexTVClient(closedServerURL(), secretToken).User()
+	_, userErr := newPlexTVClient(closedServerURL(), closedServerURL(), secretToken).User()
 	for _, err := range []error{accountsErr, historyErr, c.DeleteHistory(historyKeyPrefix + "1"), userErr} {
 		if err == nil {
 			t.Fatal("expected a connection error")
@@ -173,9 +173,8 @@ func TestHistoryClients_TransportErrorOmitsToken(t *testing.T) {
 }
 
 func TestPlexTVGraphQL_TransportErrorOmitsToken(t *testing.T) {
-	c := newPlexTVClient(closedServerURL(), secretToken)
-	c.communityURL = closedServerURL()
-	_, historyErr := c.CloudHistory("u-1")
+	c := newPlexTVClient(closedServerURL(), closedServerURL(), secretToken)
+	_, historyErr := c.CloudHistoryPage("u-1", "")
 	for _, err := range []error{historyErr, c.RemoveActivity("e1")} {
 		if err == nil {
 			t.Fatal("expected a connection error")
@@ -204,8 +203,7 @@ func TestPlexTVGraphQL_Redirects(t *testing.T) {
 		http.Redirect(w, r, other.URL+"/api", status)
 	}))
 	t.Cleanup(community.Close)
-	c := newPlexTVClient(community.URL, secretToken)
-	c.communityURL = community.URL
+	c := newPlexTVClient(community.URL, community.URL, secretToken)
 
 	if err := c.RemoveActivity("e1"); err != nil {
 		t.Fatalf("307: %v", err)

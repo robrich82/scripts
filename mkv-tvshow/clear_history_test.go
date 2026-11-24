@@ -88,11 +88,12 @@ func (r *clearHistoryRun) records(t *testing.T) []historyRecord {
 	return out
 }
 
-// assertUntouched checks that nothing was deleted or recorded.
+// assertUntouched checks that nothing was deleted, on the server or
+// plex.tv, or recorded.
 func (r *clearHistoryRun) assertUntouched(t *testing.T) {
 	t.Helper()
-	if len(r.pms.deleted) != 0 {
-		t.Errorf("deleted %v", r.pms.deleted)
+	if len(r.pms.deleted) != 0 || len(r.tv.removed) != 0 {
+		t.Errorf("server deleted %v, plex.tv removed %v", r.pms.deleted, r.tv.removed)
 	}
 	if recs := r.records(t); len(recs) != 0 {
 		t.Errorf("wrote %d record files", len(recs))
@@ -341,11 +342,12 @@ func TestClearHistory_NamedAccount(t *testing.T) {
 	if want := keys("8", "9"); !slices.Equal(r.pms.deleted, want) {
 		t.Errorf("deleted %v; want %v", r.pms.deleted, want)
 	}
-	// plex.tv holds only the owner's history, so it's asked who that is, once.
+	// This token reaches only its owner's plex.tv history, so plex.tv is
+	// asked who that is, once.
 	if r.tv.userHits != 1 || r.tv.graphHits != 0 {
 		t.Errorf("asked plex.tv for the owner %d times and the history %d times; want once and never", r.tv.userHits, r.tv.graphHits)
 	}
-	if want := "plex.tv holds only the PLEX_TOKEN owner's (QuienNZ) history, so Stephanie's there isn't cleared."; !strings.Contains(r.out.String(), want) {
+	if want := "This PLEX_TOKEN can clear only its owner's (QuienNZ) plex.tv history, so any Stephanie has there is left alone."; !strings.Contains(r.out.String(), want) {
 		t.Errorf("output lacks %q:\n%s", want, r.out.String())
 	}
 }
@@ -564,7 +566,7 @@ func TestClearHistory_StopsAfterRepeatedFailures(t *testing.T) {
 	if len(recs) != 1 || !slices.Equal(recs[0].Failed, want) || !recs[0].Complete {
 		t.Errorf("records %+v; want one, complete, with all 6 failed in order", recs)
 	}
-	if !strings.Contains(r.out.String(), "Stopped after 3 failures in a row; 3 entries weren't tried.") || strings.Count(r.out.String(), "  failed:") != 3 {
+	if !strings.Contains(r.out.String(), "Stopped after 3 failures in a row on the server; 3 entries there weren't tried.") || strings.Count(r.out.String(), "  failed:") != 3 {
 		t.Errorf("output:\n%s", r.out.String())
 	}
 }
@@ -707,7 +709,8 @@ func TestMain_ClearHistoryFlagErrors(t *testing.T) {
 }
 
 // The whole mode through main(): flags, env, the stdin prompt and the record
-// in the config dir. --account skips plex.tv, which a test can't stand in for.
+// in the config dir. Stephanie's run asks the fake plex.tv only who owns the
+// token.
 func TestMain_ClearHistory(t *testing.T) {
 	newPMS := func() *fakePMS {
 		return &fakePMS{
@@ -717,11 +720,14 @@ func TestMain_ClearHistory(t *testing.T) {
 		}
 	}
 	args := []string{"--clear-history", "Bluey (2018)", "--clear-history", "Chicago Fire", "--account", "Stephanie"}
+	envFor := func(pms *fakePMS) []string {
+		return []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken, "MKV_TVSHOW_TEST_PLEXTV=" + newFakePlexTV(t).serve().URL}
+	}
 
 	t.Run("yes", func(t *testing.T) {
 		pms := newPMS()
 		cfgHome := t.TempDir()
-		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), cfgHome, env, "y\n", args...)
 		if err != nil {
 			t.Fatalf("%v\n%s", err, out)
@@ -736,7 +742,7 @@ func TestMain_ClearHistory(t *testing.T) {
 	})
 	t.Run("no", func(t *testing.T) {
 		pms := newPMS()
-		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "n\n", args...)
 		if err != nil {
 			t.Fatalf("%v\n%s", err, out)
@@ -748,7 +754,7 @@ func TestMain_ClearHistory(t *testing.T) {
 	t.Run("partial failure", func(t *testing.T) {
 		pms := newPMS()
 		pms.failKeys = map[string]bool{historyKeyPrefix + "8": true}
-		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "y\n", args...)
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
@@ -760,11 +766,26 @@ func TestMain_ClearHistory(t *testing.T) {
 	})
 	t.Run("closed stdin", func(t *testing.T) {
 		pms := newPMS()
-		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "", args...)
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 			t.Fatalf("err = %v; want exit status 1:\n%s", err, out)
+		}
+		if len(pms.deleted) != 0 {
+			t.Errorf("deleted %v", pms.deleted)
+		}
+	})
+	// Unless plex.tv refuses the token, a failure to reach it stops the run,
+	// even for another account: otherwise a run for the owner by name would
+	// clear the server alone without saying why.
+	t.Run("plex.tv unreachable", func(t *testing.T) {
+		pms := newPMS()
+		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken} // plex.tv at a closed port
+		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "y\n", args...)
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || !strings.Contains(out, "nothing was deleted") {
+			t.Fatalf("err = %v; want exit status 1 and nothing deleted:\n%s", err, out)
 		}
 		if len(pms.deleted) != 0 {
 			t.Errorf("deleted %v", pms.deleted)

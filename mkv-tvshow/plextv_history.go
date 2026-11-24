@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+// The plex.tv item types of a show. The server's history spells them in
+// lower case.
+const (
+	cloudTypeEpisode = "EPISODE"
+	cloudTypeSeason  = "SEASON"
+	cloudTypeShow    = "SHOW"
+)
+
 // cloudEntry is one item of the token owner's watch history on plex.tv, which
 // the Plex server's history doesn't include.
 type cloudEntry struct {
@@ -18,24 +26,40 @@ type cloudEntry struct {
 	Date  string `json:"date"`
 	Type  string `json:"type"`  // EPISODE, SEASON, SHOW or MOVIE
 	Title string `json:"title"` // the item's own title
-	// Show and Year are the show's title and first year: the item's for a
-	// SHOW, its parent's for a SEASON and its grandparent's for an EPISODE.
+	// ShowID, Show and Year are the show's plex.tv id, title and first year:
+	// the item's for a SHOW, its parent's for a SEASON and its grandparent's
+	// for an EPISODE.
+	ShowID  string `json:"showID,omitempty"`
 	Show    string `json:"show,omitempty"`
 	Year    int    `json:"year,omitempty"`
 	Season  int    `json:"season,omitempty"`
 	Episode int    `json:"episode,omitempty"`
 }
 
+// cloudPage is one page of a plex.tv watch history. Cursor is where the next
+// page starts, when HasNext.
+type cloudPage struct {
+	Entries []cloudEntry
+	HasNext bool
+	Cursor  string
+}
+
 // CloudHistoryClient reads and deletes the token owner's plex.tv watch history.
 type CloudHistoryClient interface {
-	CloudHistory(uuid string) ([]cloudEntry, error)
+	// CloudHistoryPage reads the page of user uuid's history that starts at
+	// cursor after; "" is the first page.
+	CloudHistoryPage(uuid, after string) (cloudPage, error)
 	RemoveActivity(id string) error
 }
 
-// rateLimitError is plex.tv refusing a request until After has passed.
+// rateLimitError is plex.tv refusing a request until After has passed; 0
+// when it didn't say how long.
 type rateLimitError struct{ After time.Duration }
 
 func (e *rateLimitError) Error() string {
+	if e.After <= 0 {
+		return "plex.tv rate limit, with no wait given"
+	}
 	return fmt.Sprintf("plex.tv rate limit: retry after %s", e.After)
 }
 
@@ -47,7 +71,7 @@ const (
 	watchHistoryQuery = `query GetWatchHistoryHub($uuid: ID = "", $first: PaginationInt!, $after: String) {
   user(id: $uuid) {
     watchHistory(first: $first, after: $after) {
-      nodes { id date metadataItem { id title type year index parent { title year index } grandparent { title year } } }
+      nodes { id date metadataItem { id title type year index parent { id title year index } grandparent { id title year } } }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -66,7 +90,9 @@ type graphQLError struct {
 }
 
 // graphQL posts a query to plex.tv's community API and decodes its data into
-// data. A rate-limit error comes back as a *rateLimitError.
+// data. A rate limit, by GraphQL error or HTTP 429, comes back as a
+// *rateLimitError; another status than 2xx as a *plexTVStatusError, with the
+// reply's GraphQL errors.
 func (c *plexTVClient) graphQL(operation, query string, variables map[string]any, data any) error {
 	body, err := json.Marshal(map[string]any{"operationName": operation, "query": query, "variables": variables})
 	if err != nil {
@@ -84,28 +110,29 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		return fmt.Errorf("plex.tv: %s: %w", operation, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return &rateLimitError{After: retryAfterHeader(resp.Header.Get("Retry-After"))}
-	}
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("plex.tv: %s: unexpected status %s", operation, resp.Status)
-	}
 	var reply struct {
 		Data   json.RawMessage `json:"data"`
 		Errors []graphQLError  `json:"errors"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
-		return fmt.Errorf("plex.tv: decode %s: %w", operation, err)
+	decodeErr := json.NewDecoder(resp.Body).Decode(&reply)
+	if limited := rateLimitIn(reply.Errors); limited != nil {
+		return limited
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return &rateLimitError{After: retryAfterHeader(resp.Header.Get("Retry-After"))}
+	}
+	if resp.StatusCode/100 != 2 {
+		statusErr := &plexTVStatusError{what: operation, Status: resp.Status, Code: resp.StatusCode}
+		if len(reply.Errors) > 0 {
+			return fmt.Errorf("%w: %s", statusErr, errorMessages(reply.Errors))
+		}
+		return statusErr
+	}
+	if decodeErr != nil {
+		return fmt.Errorf("plex.tv: decode %s: %w", operation, decodeErr)
 	}
 	if len(reply.Errors) > 0 {
-		var msgs []string
-		for _, e := range reply.Errors {
-			if e.Extensions.Code == "RATE_LIMITED" {
-				return &rateLimitError{After: time.Duration(e.Extensions.RetryAfter * float64(time.Second))}
-			}
-			msgs = append(msgs, cmp.Or(e.Message, e.Extensions.Code, "an unnamed error"))
-		}
-		return fmt.Errorf("plex.tv: %s: %s", operation, strings.Join(msgs, "; "))
+		return fmt.Errorf("plex.tv: %s: %s", operation, errorMessages(reply.Errors))
 	}
 	if len(reply.Data) == 0 || string(reply.Data) == "null" {
 		return fmt.Errorf("plex.tv: %s: no data in the reply", operation)
@@ -114,6 +141,25 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		return fmt.Errorf("plex.tv: decode %s: %w", operation, err)
 	}
 	return nil
+}
+
+// rateLimitIn is the rate limit among errs, or nil.
+func rateLimitIn(errs []graphQLError) *rateLimitError {
+	for _, e := range errs {
+		if e.Extensions.Code == "RATE_LIMITED" {
+			secs := min(max(e.Extensions.RetryAfter, 0), 24*60*60) // a Duration overflows near 292 years
+			return &rateLimitError{After: time.Duration(secs * float64(time.Second))}
+		}
+	}
+	return nil
+}
+
+func errorMessages(errs []graphQLError) string {
+	msgs := make([]string, 0, len(errs))
+	for _, e := range errs {
+		msgs = append(msgs, cmp.Or(e.Message, e.Extensions.Code, "an unnamed error"))
+	}
+	return strings.Join(msgs, "; ")
 }
 
 // retryAfterHeader reads a Retry-After of whole seconds; 0 when absent or a date.
@@ -125,103 +171,83 @@ func retryAfterHeader(v string) time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
+// cloudRef is an item, or its parent or grandparent, in a history node.
+type cloudRef struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Year  int    `json:"year"`
+	Index int    `json:"index"`
+}
+
 type cloudItem struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Type   string `json:"type"`
-	Year   int    `json:"year"`
-	Index  int    `json:"index"`
-	Parent *struct {
-		Title string `json:"title"`
-		Year  int    `json:"year"`
-		Index int    `json:"index"`
-	} `json:"parent"`
-	Grandparent *struct {
-		Title string `json:"title"`
-		Year  int    `json:"year"`
-	} `json:"grandparent"`
+	cloudRef
+	Type        string   `json:"type"`
+	Parent      cloudRef `json:"parent"`
+	Grandparent cloudRef `json:"grandparent"`
 }
 
 // cloudEntryOf flattens a history node, naming the show the item belongs to.
 func cloudEntryOf(id, date string, item cloudItem) cloudEntry {
 	e := cloudEntry{ID: id, Date: date, Type: item.Type, Title: item.Title}
+	var show cloudRef
 	switch item.Type {
-	case "SHOW":
-		e.Show, e.Year = item.Title, item.Year
-	case "SEASON":
+	case cloudTypeShow:
+		show = item.cloudRef
+	case cloudTypeSeason:
 		e.Season = item.Index
-		if item.Parent != nil {
-			e.Show, e.Year = item.Parent.Title, item.Parent.Year
-		}
-	case "EPISODE":
-		e.Episode = item.Index
-		if item.Parent != nil {
-			e.Season = item.Parent.Index
-		}
-		if item.Grandparent != nil {
-			e.Show, e.Year = item.Grandparent.Title, item.Grandparent.Year
-		}
+		show = item.Parent
+	case cloudTypeEpisode:
+		e.Season, e.Episode = item.Parent.Index, item.Index
+		show = item.Grandparent
 	}
+	e.ShowID, e.Show, e.Year = show.ID, show.Title, show.Year
 	return e
 }
 
-// CloudHistory implements CloudHistoryClient: every item in the watch history
-// of the plex.tv user uuid, newest first.
-func (c *plexTVClient) CloudHistory(uuid string) ([]cloudEntry, error) {
+// CloudHistoryPage implements CloudHistoryClient.
+func (c *plexTVClient) CloudHistoryPage(uuid, after string) (cloudPage, error) {
 	if uuid == "" {
-		return nil, errors.New("plex.tv: no user id to read the watch history of")
+		return cloudPage{}, errors.New("plex.tv: no user id to read the watch history of")
 	}
-	var entries []cloudEntry
-	seenCursor := make(map[string]bool)
-	seenID := make(map[string]bool)
-	var after any // null for the first page
-	for {
-		var data struct {
-			User *struct {
-				WatchHistory *struct {
-					Nodes []struct {
-						ID           string    `json:"id"`
-						Date         string    `json:"date"`
-						MetadataItem cloudItem `json:"metadataItem"`
-					} `json:"nodes"`
-					PageInfo struct {
-						HasNextPage bool   `json:"hasNextPage"`
-						EndCursor   string `json:"endCursor"`
-					} `json:"pageInfo"`
-				} `json:"watchHistory"`
-			} `json:"user"`
-		}
-		vars := map[string]any{"uuid": uuid, "first": cloudPageSize, "after": after}
-		if err := c.graphQL("GetWatchHistoryHub", watchHistoryQuery, vars, &data); err != nil {
-			return nil, err
-		}
-		if data.User == nil || data.User.WatchHistory == nil {
-			return nil, errors.New("plex.tv: GetWatchHistoryHub: no watch history in the reply")
-		}
-		wh := data.User.WatchHistory
-		for _, n := range wh.Nodes {
-			if n.ID == "" {
-				return nil, errors.New("plex.tv: a watch history item has no id")
-			}
-			if !seenID[n.ID] {
-				seenID[n.ID] = true
-				entries = append(entries, cloudEntryOf(n.ID, n.Date, n.MetadataItem))
-			}
-		}
-		if !wh.PageInfo.HasNextPage {
-			return entries, nil
-		}
-		cursor := wh.PageInfo.EndCursor
-		if cursor == "" || seenCursor[cursor] {
-			return nil, errors.New("plex.tv: the watch history's next page repeats or has no cursor, so it can't be read whole")
-		}
-		seenCursor[cursor] = true
-		after = cursor
+	var data struct {
+		User *struct {
+			WatchHistory *struct {
+				Nodes []struct {
+					ID           string    `json:"id"`
+					Date         string    `json:"date"`
+					MetadataItem cloudItem `json:"metadataItem"`
+				} `json:"nodes"`
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+			} `json:"watchHistory"`
+		} `json:"user"`
 	}
+	vars := map[string]any{"uuid": uuid, "first": cloudPageSize, "after": nil}
+	if after != "" {
+		vars["after"] = after
+	}
+	if err := c.graphQL("GetWatchHistoryHub", watchHistoryQuery, vars, &data); err != nil {
+		return cloudPage{}, err
+	}
+	if data.User == nil || data.User.WatchHistory == nil {
+		return cloudPage{}, errors.New("plex.tv: GetWatchHistoryHub: no watch history in the reply")
+	}
+	wh := data.User.WatchHistory
+	page := cloudPage{HasNext: wh.PageInfo.HasNextPage, Cursor: wh.PageInfo.EndCursor}
+	for _, n := range wh.Nodes {
+		if n.ID == "" {
+			return cloudPage{}, errors.New("plex.tv: a watch history item has no id")
+		}
+		page.Entries = append(page.Entries, cloudEntryOf(n.ID, n.Date, n.MetadataItem))
+	}
+	return page, nil
 }
 
 // RemoveActivity implements CloudHistoryClient: it deletes one watch history
-// item. A rate limit comes back as a *rateLimitError for the caller to wait out.
+// item. Only a reply of true counts. A rate limit comes back as a
+// *rateLimitError for the caller to wait out.
 func (c *plexTVClient) RemoveActivity(id string) error {
 	if id == "" {
 		return errors.New("plex.tv: no watch history item id to remove")
@@ -233,7 +259,10 @@ func (c *plexTVClient) RemoveActivity(id string) error {
 	if err := c.graphQL("removeActivity", removeActivityMutation, vars, &data); err != nil {
 		return err
 	}
-	if data.RemoveActivity != nil && !*data.RemoveActivity {
+	switch {
+	case data.RemoveActivity == nil:
+		return errors.New("plex.tv: removeActivity: the reply doesn't say it was removed")
+	case !*data.RemoveActivity:
 		return errors.New("plex.tv: removeActivity: plex.tv didn't remove it")
 	}
 	return nil

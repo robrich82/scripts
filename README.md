@@ -604,7 +604,7 @@ the match. The confirmed ID is saved to `show_cache.json` for future runs.
 | `--all-ids` | false | With `--clean`, also remove ratings and ignores for every show ID not in `show_cache.json` or a `manual_data.json` season override (other than a removed show's). Ignored when `show_cache.json` is empty or missing; when every show folder in it is gone, only those shows' IDs are removed |
 | `--reset-rating <query>` | — | Clear the cached NZ rating for a show and reset the applied state on all its files so the next run re-fetches and re-applies it. `query` is a folder name substring or TMDB ID |
 | `--set-rating <RATING>` | — | Set `RATING` as the NZ rating for **every** show in the current directory, overriding any cached value, then exit (see below) |
-| `--clear-history <show>` | — | Delete a show's Plex watch history, then exit (see below). Repeat for more shows |
+| `--clear-history <show>` | — | Delete a show's Plex watch history, and the token owner's on plex.tv, then exit (see below). Repeat for more shows |
 | `--account <name>` | token owner | With `--clear-history`, the Plex server account whose history to clear |
 
 `--clean`, `--reset-rating`, `--set-rating`, `--clear-history`, `--deband-only`, `--missing`, `--language-only`, `--title-check` and `--ratings-only` each run on their own: setting two of them exits with an error before anything runs.
@@ -657,8 +657,8 @@ rating to Plex.
 ### Clearing watch history (`--clear-history`)
 
 Deletes every episode of a show from a Plex server account's watch history,
-including shows no longer in the library, and from the token owner's watch
-history on plex.tv:
+including shows no longer in the library. When the account is the token
+owner's, it also clears their watch history on plex.tv:
 
 ```sh
 mkv-tvshow --clear-history "Bluey (2018)" --clear-history "Chicago Fire"
@@ -679,16 +679,23 @@ shows with one title, and nothing is deleted until you confirm. Before
 deleting, the entries are written to
 `history-cleared-<UTC time>.json` in the config folder, since Plex can't
 restore them. Its `complete` stays `false` until the run finishes and the file
-is rewritten, and `failed` lists the entries whose delete failed or wasn't
-tried.
+is rewritten. `failed` lists the server entries whose delete failed or wasn't
+tried, and `failedPlextv` the plex.tv items. After 3 failures in a row on
+either, the rest there aren't tried.
 
 plex.tv keeps its own copy of the token owner's history: episodes, and the
-seasons and shows marked watched. It's cleared with the server's when the
-account is the token owner's, with or without `--account`; for anyone else's
-it's left alone, with a note. plex.tv records each show's year, so a year you
-give must match it; the same title with another year is listed and kept. A
-rate-limited delete waits as long as plex.tv asks, up to 5 minutes, and is
-tried up to 5 times.
+seasons and shows marked watched. It's listed and cleared with the server's
+when the account has the token owner's plex.tv username exactly, with or
+without `--account`. For any other account it's left alone with a note, as it
+is when plex.tv refuses the token (401 or 403, as for a server's own token).
+The record's `plextv` lists the items and `plextvSkipped` says why plex.tv was
+left alone. Any other plex.tv failure, such as a timeout, stops the run before
+anything is deleted, on the server too. plex.tv records each show's year, so a
+year you give must match it; the same title with another year is listed and
+kept. A show plex.tv gives no year matches on title alone, unless plex.tv also
+has the title with your year. A rate-limited request waits as long as plex.tv
+asks, a minute if it doesn't say, up to 5 minutes, and is tried up to 5
+times.
 
 ### Missing episode check (`--missing`)
 
@@ -722,7 +729,7 @@ runs. You can ignore a single episode, a whole season, or the entire show.
 - TMDB API (requires `TMDB_API_KEY` environment variable)
 - `mkvpropedit` — applies metadata edits
 - `mkvextract` — reads the existing tags so writing new ones keeps the rest; an episode whose tags it can't read isn't updated (part of MKVToolNix)
-- `PLEX_URL` / `PLEX_TOKEN` — optional (required for `--language-only` and `--clear-history`); used to push NZ ratings, set per-show audio language and clear watch history in Plex
+- `PLEX_URL` / `PLEX_TOKEN` — optional (required for `--language-only` and `--clear-history`); used to push NZ ratings, set per-show audio language and clear watch history in Plex and, for the token's owner, on plex.tv
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; the audio language is set for these accounts too
 
 When Plex is configured, after processing each show the tool:

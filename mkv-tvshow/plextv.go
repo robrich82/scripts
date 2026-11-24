@@ -23,10 +23,10 @@ type plexTVClient struct {
 	httpClient   *http.Client
 }
 
-func newPlexTVClient(baseURL, token string) *plexTVClient {
+func newPlexTVClient(baseURL, communityURL, token string) *plexTVClient {
 	return &plexTVClient{
 		baseURL:      strings.TrimRight(baseURL, "/"),
-		communityURL: strings.TrimRight(plexTVCommunityURL, "/"),
+		communityURL: strings.TrimRight(communityURL, "/"),
 		token:        token,
 		httpClient:   newPlexHTTPClient(),
 	}
@@ -45,6 +45,17 @@ func setPlexTVHeaders(req *http.Request, token string) {
 type plexTVUser struct {
 	Username string `json:"username"`
 	UUID     string `json:"uuid"`
+}
+
+// plexTVStatusError is plex.tv answering with a status other than 2xx.
+type plexTVStatusError struct {
+	what   string // the request, as "get user"
+	Status string
+	Code   int
+}
+
+func (e *plexTVStatusError) Error() string {
+	return fmt.Sprintf("plex.tv: %s: unexpected status %s", e.what, e.Status)
 }
 
 // OwnerLookup finds the account that owns the Plex token.
@@ -66,7 +77,7 @@ func (c *plexTVClient) User() (plexTVUser, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return plexTVUser{}, fmt.Errorf("plex.tv: get user: unexpected status %s", resp.Status)
+		return plexTVUser{}, &plexTVStatusError{what: "get user", Status: resp.Status, Code: resp.StatusCode}
 	}
 	var u plexTVUser
 	if err := json.NewDecoder(resp.Body).Decode(&u); err != nil {
