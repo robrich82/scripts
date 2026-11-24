@@ -8,22 +8,37 @@ import (
 	"strings"
 )
 
-// plexTVBaseURL is plex.tv's account API.
-const plexTVBaseURL = "https://plex.tv"
+// plex.tv's account API and its community API, which holds the watch history.
+// Only tests change them.
+var (
+	plexTVBaseURL      = "https://plex.tv"
+	plexTVCommunityURL = "https://community.plex.tv"
+)
 
 // plexTVClient calls plex.tv as the PLEX_TOKEN owner.
 type plexTVClient struct {
-	baseURL    string
-	token      string
-	httpClient *http.Client
+	baseURL      string
+	communityURL string
+	token        string
+	httpClient   *http.Client
 }
 
 func newPlexTVClient(baseURL, token string) *plexTVClient {
 	return &plexTVClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		token:      token,
-		httpClient: newPlexHTTPClient(),
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		communityURL: strings.TrimRight(plexTVCommunityURL, "/"),
+		token:        token,
+		httpClient:   newPlexHTTPClient(),
 	}
+}
+
+// setPlexTVHeaders authenticates req to plex.tv. The token goes in a header,
+// so transport errors can't print it, and plex.tv refuses requests without a
+// client identifier.
+func setPlexTVHeaders(req *http.Request, token string) {
+	req.Header.Set("X-Plex-Token", token)
+	req.Header.Set("X-Plex-Client-Identifier", "mkv-tvshow")
+	req.Header.Set("X-Plex-Product", "mkv-tvshow")
 }
 
 // plexTVUser is the plex.tv account a token belongs to.
@@ -44,10 +59,7 @@ func (c *plexTVClient) User() (plexTVUser, error) {
 		return plexTVUser{}, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Plex-Token", c.token) // a header, so transport errors can't print it
-	// plex.tv refuses requests without a client identifier.
-	req.Header.Set("X-Plex-Client-Identifier", "mkv-tvshow")
-	req.Header.Set("X-Plex-Product", "mkv-tvshow")
+	setPlexTVHeaders(req, c.token)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return plexTVUser{}, fmt.Errorf("plex.tv: get user: %w", err)

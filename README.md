@@ -657,7 +657,8 @@ rating to Plex.
 ### Clearing watch history (`--clear-history`)
 
 Deletes every episode of a show from a Plex server account's watch history,
-including shows no longer in the library:
+including shows no longer in the library, and from the token owner's watch
+history on plex.tv:
 
 ```sh
 mkv-tvshow --clear-history "Bluey (2018)" --clear-history "Chicago Fire"
@@ -680,6 +681,14 @@ deleting, the entries are written to
 restore them. Its `complete` stays `false` until the run finishes and the file
 is rewritten, and `failed` lists the entries whose delete failed or wasn't
 tried.
+
+plex.tv keeps its own copy of the token owner's history: episodes, and the
+seasons and shows marked watched. It's cleared with the server's when the
+account is the token owner's, with or without `--account`; for anyone else's
+it's left alone, with a note. plex.tv records each show's year, so a year you
+give must match it; the same title with another year is listed and kept. A
+rate-limited delete waits as long as plex.tv asks, up to 5 minutes, and is
+tried up to 5 times.
 
 ### Missing episode check (`--missing`)
 

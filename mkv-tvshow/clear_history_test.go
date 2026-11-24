@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,42 +16,19 @@ import (
 	"time"
 )
 
-// fakePlexTV serves plex.tv's /api/v2/user for username, or status when it
-// isn't 200, and counts requests.
-func fakePlexTV(t *testing.T, username string, status int, requests *int) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*requests++
-		if r.URL.Path != "/api/v2/user" {
-			t.Errorf("unexpected plex.tv request %s", r.URL)
-		}
-		if r.Header.Get("X-Plex-Token") != secretToken || r.Header.Get("X-Plex-Client-Identifier") == "" {
-			t.Errorf("plex.tv request headers: token %q, client id %q", r.Header.Get("X-Plex-Token"), r.Header.Get("X-Plex-Client-Identifier"))
-		}
-		if status != http.StatusOK {
-			w.WriteHeader(status)
-			return
-		}
-		writeJSON(w, map[string]any{"username": username, "uuid": "u-1", "authToken": "not-for-logs"})
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
 var recordTime = time.Date(2026, 11, 22, 9, 30, 0, 0, time.UTC)
 
 type clearHistoryRun struct {
-	pms          *fakePMS
-	ownerName    string // the PLEX_TOKEN owner's plex.tv username
-	plexTVStatus int
-	plexTVHits   int
-	prompter     *scriptedPrompter
-	recordDir    string
-	out          bytes.Buffer
+	pms       *fakePMS
+	tv        *fakePlexTV // plex.tv; the owner is QuienNZ, with no history
+	prompter  *scriptedPrompter
+	recordDir string
+	out       bytes.Buffer
+	slept     []time.Duration
 }
 
 // newClearHistoryRun has an owner "QuienNZ" (id 1) and "Stephanie" (id 5),
-// each with a watch history, behind real HTTP clients.
+// each with a server watch history, behind real HTTP clients.
 func newClearHistoryRun(t *testing.T, answers ...string) *clearHistoryRun {
 	t.Helper()
 	return &clearHistoryRun{
@@ -73,22 +49,24 @@ func newClearHistoryRun(t *testing.T, answers ...string) *clearHistoryRun {
 				episode(10, 1, "Bluey (1992)", "Pilot"),
 			},
 		},
-		ownerName:    "QuienNZ",
-		plexTVStatus: http.StatusOK,
-		prompter:     &scriptedPrompter{answers: answers},
-		recordDir:    filepath.Join(t.TempDir(), "mkv-tvshow"),
+		tv:        newFakePlexTV(t),
+		prompter:  &scriptedPrompter{answers: answers},
+		recordDir: filepath.Join(t.TempDir(), "mkv-tvshow"),
 	}
 }
 
 func (r *clearHistoryRun) run(t *testing.T, account string, shows ...string) error {
 	t.Helper()
+	plexTV := r.tv.client()
 	return clearHistory(shows, account, clearHistoryDeps{
 		server:    newHTTPPlexClient(r.pms.serve().URL, secretToken),
-		owner:     newPlexTVClient(fakePlexTV(t, r.ownerName, r.plexTVStatus, &r.plexTVHits).URL, secretToken),
+		owner:     plexTV,
+		cloud:     plexTV,
 		prompt:    r.prompter,
 		recordDir: r.recordDir,
 		out:       &r.out,
 		now:       func() time.Time { return recordTime },
+		sleep:     func(d time.Duration) { r.slept = append(r.slept, d) },
 	})
 }
 
@@ -363,8 +341,12 @@ func TestClearHistory_NamedAccount(t *testing.T) {
 	if want := keys("8", "9"); !slices.Equal(r.pms.deleted, want) {
 		t.Errorf("deleted %v; want %v", r.pms.deleted, want)
 	}
-	if r.plexTVHits != 0 {
-		t.Errorf("asked plex.tv %d times; a named account doesn't need the owner", r.plexTVHits)
+	// plex.tv holds only the owner's history, so it's asked who that is, once.
+	if r.tv.userHits != 1 || r.tv.graphHits != 0 {
+		t.Errorf("asked plex.tv for the owner %d times and the history %d times; want once and never", r.tv.userHits, r.tv.graphHits)
+	}
+	if want := "plex.tv holds only the PLEX_TOKEN owner's (QuienNZ) history, so Stephanie's there isn't cleared."; !strings.Contains(r.out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, r.out.String())
 	}
 }
 
@@ -405,7 +387,7 @@ func TestClearHistory_DuplicateAccountName(t *testing.T) {
 // A plex.tv reply without a username must not pick the unnamed account.
 func TestClearHistory_OwnerWithoutUsername(t *testing.T) {
 	r := newClearHistoryRun(t, "y")
-	r.ownerName = ""
+	r.tv.username = ""
 	if err := r.run(t, "", "Bluey"); err == nil || !strings.Contains(err.Error(), "no username") {
 		t.Errorf("err = %v; want a missing-username error", err)
 	}
@@ -421,7 +403,7 @@ func TestClearHistory_NoNamedAccounts(t *testing.T) {
 	if err := r.run(t, "", "Bluey"); err == nil || !strings.Contains(err.Error(), "listed no named accounts") {
 		t.Errorf("err = %v; want a no-accounts error", err)
 	}
-	if r.plexTVHits != 0 {
+	if r.tv.userHits != 0 {
 		t.Error("asked plex.tv with no accounts to match")
 	}
 	r.assertUntouched(t)
@@ -488,7 +470,7 @@ func TestClearHistory_OwnerNotOnServer(t *testing.T) {
 // A token plex.tv rejects (a server token) points at --account.
 func TestClearHistory_OwnerLookupFails(t *testing.T) {
 	r := newClearHistoryRun(t)
-	r.plexTVStatus = http.StatusUnauthorized
+	r.tv.userStatus = http.StatusUnauthorized
 	err := r.run(t, "", "Bluey")
 	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "pass --account (one of: QuienNZ, Stephanie)") {
 		t.Errorf("err = %v; want the 401 and a pointer to --account", err)
@@ -786,6 +768,21 @@ func TestMain_ClearHistory(t *testing.T) {
 		}
 		if len(pms.deleted) != 0 {
 			t.Errorf("deleted %v", pms.deleted)
+		}
+	})
+	// Without --account it clears the owner's history on the server and on plex.tv.
+	t.Run("owner with plex.tv", func(t *testing.T) {
+		pms := newPMS()
+		pms.history = append(pms.history, episode(12, 1, "Bluey (2018)", "Hospital"))
+		tv := newFakePlexTV(t)
+		tv.history = []cloudEntry{cloudEpisode("c1", "Bluey", 2018, 1, 1, "Hospital", "2026-11-22T08:00:00.000Z")}
+		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken, "MKV_TVSHOW_TEST_PLEXTV=" + tv.serve().URL}
+		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "y\n", "--clear-history", "Bluey (2018)")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !slices.Equal(pms.deleted, keys("12")) || !slices.Equal(tv.removed, []string{"c1"}) {
+			t.Errorf("server deleted %v, plex.tv removed %v; want 12 and c1:\n%s", pms.deleted, tv.removed, out)
 		}
 	})
 }

@@ -99,25 +99,29 @@ func parseHistoryTargets(args []string) ([]historyTarget, error) {
 type clearHistoryDeps struct {
 	server    HistoryClient
 	owner     OwnerLookup
+	cloud     CloudHistoryClient
 	prompt    Prompter
 	recordDir string // where the record of deleted entries is written
 	out       io.Writer
 	now       func() time.Time
+	sleep     func(time.Duration) // waits out plex.tv's rate limit
 }
 
-// historyRecord is the file written before any entry is deleted: the
-// server can't restore deleted history, so this is the only trace of it.
+// historyRecord is the file written before any entry is deleted: neither
+// the server nor plex.tv can restore deleted history, so this is the only
+// trace of it.
 type historyRecord struct {
 	Account   string         `json:"account"`
 	AccountID int            `json:"accountID"`
 	Targets   []string       `json:"targets"`
 	Server    []historyEntry `json:"server"`
+	PlexTV    []cloudEntry   `json:"plextv,omitempty"`
 	// Complete is false until the run finishes and the record is rewritten,
-	// so a record left false is from an interrupted run (some of Server may
-	// remain) or one whose final rewrite failed.
+	// so a record left false is from an interrupted run (some of Server and
+	// PlexTV may remain) or one whose final rewrite failed.
 	Complete bool `json:"complete"`
-	// Failed lists the entries not deleted: those whose delete failed, and
-	// those not tried after the run stopped.
+	// Failed lists the keys and ids of the entries not deleted: those whose
+	// delete failed, and those not tried after a run of failures.
 	Failed []string `json:"failed,omitempty"`
 }
 
@@ -125,15 +129,40 @@ type historyRecord struct {
 // away, where each delete would wait out the full timeout.
 const maxConsecutiveDeleteFailures = 3
 
+// maxRateLimitTries is how often one plex.tv delete is tried while plex.tv
+// rate-limits it, and maxRateLimitWait the longest it waits between tries.
+const (
+	maxRateLimitTries = 5
+	maxRateLimitWait  = 5 * time.Minute
+)
+
+// cachedOwner looks the PLEX_TOKEN owner up once, however often it's asked.
+type cachedOwner struct {
+	lookup OwnerLookup
+	done   bool
+	user   plexTVUser
+	err    error
+}
+
+func (c *cachedOwner) User() (plexTVUser, error) {
+	if !c.done {
+		c.user, c.err = c.lookup.User()
+		c.done = true
+	}
+	return c.user, c.err
+}
+
 // clearHistory deletes an account's server watch history for the target
-// shows, after listing the matches and asking. account is a server account
+// shows, and the PLEX_TOKEN owner's plex.tv history when that account is
+// theirs, after listing the matches and asking. account is a server account
 // name; "" means the PLEX_TOKEN owner.
 func clearHistory(args []string, account string, d clearHistoryDeps) error {
 	targets, err := parseHistoryTargets(args)
 	if err != nil {
 		return err
 	}
-	acct, err := resolveHistoryAccount(d.server, d.owner, account)
+	owner := &cachedOwner{lookup: d.owner}
+	acct, err := resolveHistoryAccount(d.server, owner, account)
 	if err != nil {
 		return fmt.Errorf("%w; nothing was deleted", err)
 	}
@@ -149,13 +178,32 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 	}
 
 	plan := planHistory(entries, targets)
+	uuid, skipCloud := plexTVAccount(d.server, owner, acct, account)
+	var cloud cloudPlan
+	if skipCloud == "" {
+		cloudEntries, err := d.cloud.CloudHistory(uuid)
+		if err != nil {
+			return fmt.Errorf("%w; nothing was deleted", err)
+		}
+		cloud = planCloud(cloudEntries, targets)
+	}
 	printHistoryPlan(d.out, acct, plan)
-	if len(plan.matched) == 0 {
+	if skipCloud != "" {
+		fmt.Fprintln(d.out, skipCloud)
+	} else {
+		printCloudPlan(d.out, cloud)
+	}
+	total := len(plan.matched) + len(cloud.matched)
+	if total == 0 {
 		fmt.Fprintln(d.out, "Nothing to clear.")
 		return nil
 	}
 
-	ans, err := d.prompt.Ask(fmt.Sprintf("\nDelete these %d history entries for %s (account %d)? This can't be undone. [y/N]: ", len(plan.matched), acct.Name, acct.ID))
+	what := fmt.Sprintf("%d history entries", len(plan.matched))
+	if len(cloud.matched) > 0 {
+		what = fmt.Sprintf("%d server and %d plex.tv history entries", len(plan.matched), len(cloud.matched))
+	}
+	ans, err := d.prompt.Ask(fmt.Sprintf("\nDelete these %s for %s (account %d)? This can't be undone. [y/N]: ", what, acct.Name, acct.ID))
 	if err != nil {
 		return fmt.Errorf("reading the answer: %w; nothing was deleted", err)
 	}
@@ -164,7 +212,7 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		return nil
 	}
 
-	record := historyRecord{Account: acct.Name, AccountID: acct.ID, Server: plan.matched}
+	record := historyRecord{Account: acct.Name, AccountID: acct.ID, Server: plan.matched, PlexTV: cloud.matched}
 	for _, t := range targets {
 		record.Targets = append(record.Targets, t.raw)
 	}
@@ -174,9 +222,12 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 	}
 	fmt.Fprintf(d.out, "Recorded the entries in %s\n", recordPath)
 
-	record.Failed = deleteHistoryEntries(d.server, d.out, plan.matched)
+	record.Failed = deleteEach(d.out, plan.matched, func(e historyEntry) string { return e.HistoryKey },
+		describeHistoryEntry, d.server.DeleteHistory)
+	record.Failed = append(record.Failed, deleteEach(d.out, cloud.matched, func(e cloudEntry) string { return e.ID },
+		describeCloudEntry, func(id string) error { return removeWithRetry(d.cloud, d.out, d.sleep, id) })...)
 	record.Complete = true
-	deleted, total := len(plan.matched)-len(record.Failed), len(plan.matched)
+	deleted := total - len(record.Failed)
 	fmt.Fprintf(d.out, "Deleted %d of %d history entries.\n", deleted, total)
 	if err := updateHistoryRecord(recordPath, record); err != nil {
 		return fmt.Errorf("%d of %d history entries were deleted, but %s couldn't be updated to say so: %v\n%sIts \"complete\" stays false",
@@ -427,19 +478,19 @@ func describeLastWatched(e historyEntry) string {
 	return s
 }
 
-// deleteHistoryEntries deletes each entry and returns the keys of those it
-// didn't. It gives up after maxConsecutiveDeleteFailures failures in a row.
-func deleteHistoryEntries(server HistoryClient, out io.Writer, entries []historyEntry) []string {
+// deleteEach deletes each entry by its id and returns the ids it didn't
+// delete. It gives up after maxConsecutiveDeleteFailures failures in a row.
+func deleteEach[E any](out io.Writer, entries []E, id func(E) string, describe func(E) string, del func(string) error) []string {
 	var failed []string
 	consecutive := 0
 	for i, e := range entries {
-		err := server.DeleteHistory(e.HistoryKey)
+		err := del(id(e))
 		if err == nil {
 			consecutive = 0
 			continue
 		}
-		fmt.Fprintf(out, "  failed: %s: %v\n", describeHistoryEntry(e), err)
-		failed = append(failed, e.HistoryKey)
+		fmt.Fprintf(out, "  failed: %s: %v\n", describe(e), err)
+		failed = append(failed, id(e))
 		consecutive++
 		if consecutive == maxConsecutiveDeleteFailures {
 			rest := entries[i+1:]
@@ -447,12 +498,31 @@ func deleteHistoryEntries(server HistoryClient, out io.Writer, entries []history
 				fmt.Fprintf(out, "Stopped after %d failures in a row; %d entries weren't tried.\n", consecutive, len(rest))
 			}
 			for _, r := range rest {
-				failed = append(failed, r.HistoryKey)
+				failed = append(failed, id(r))
 			}
 			break
 		}
 	}
 	return failed
+}
+
+// removeWithRetry deletes a plex.tv history item, waiting out a rate limit
+// up to maxRateLimitTries times.
+func removeWithRetry(cloud CloudHistoryClient, out io.Writer, sleep func(time.Duration), id string) error {
+	for try := 1; ; try++ {
+		err := cloud.RemoveActivity(id)
+		var limited *rateLimitError
+		if !errors.As(err, &limited) || try == maxRateLimitTries {
+			return err
+		}
+		wait := limited.After
+		if wait <= 0 {
+			wait = time.Minute // what plex.tv usually asks for
+		}
+		wait = min(wait, maxRateLimitWait)
+		fmt.Fprintf(out, "plex.tv rate limit: waiting %s\n", wait.Round(time.Second))
+		sleep(wait)
+	}
 }
 
 func historyRecordPath(dir string, now time.Time) string {
@@ -544,13 +614,16 @@ func runClearHistory(args []string, account string) {
 		fmt.Fprintf(os.Stderr, "Error resolving config dir: %v\n", err)
 		os.Exit(1)
 	}
+	plexTV := newPlexTVClient(plexTVBaseURL, plexToken)
 	err = clearHistory(args, account, clearHistoryDeps{
 		server:    newHTTPPlexClient(plexURL, plexToken),
-		owner:     newPlexTVClient(plexTVBaseURL, plexToken),
+		owner:     plexTV,
+		cloud:     plexTV,
 		prompt:    newStdinPrompter(),
 		recordDir: cfgDir,
 		out:       os.Stdout,
 		now:       time.Now,
+		sleep:     time.Sleep,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

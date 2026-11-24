@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -168,5 +169,52 @@ func TestHistoryClients_TransportErrorOmitsToken(t *testing.T) {
 		if strings.Contains(err.Error(), secretToken) {
 			t.Errorf("error leaks the token: %v", err)
 		}
+	}
+}
+
+func TestPlexTVGraphQL_TransportErrorOmitsToken(t *testing.T) {
+	c := newPlexTVClient(closedServerURL(), secretToken)
+	c.communityURL = closedServerURL()
+	_, historyErr := c.CloudHistory("u-1")
+	for _, err := range []error{historyErr, c.RemoveActivity("e1")} {
+		if err == nil {
+			t.Fatal("expected a connection error")
+		}
+		if strings.Contains(err.Error(), secretToken) {
+			t.Errorf("error leaks the token: %v", err)
+		}
+	}
+}
+
+// A 307 keeps the POST and its body, but not the token on another host; a
+// 302 would resend the mutation as a GET, so it's refused.
+func TestPlexTVGraphQL_Redirects(t *testing.T) {
+	var otherBody string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Plex-Token"); got != "" {
+			t.Errorf("other host got X-Plex-Token %q", got)
+		}
+		b, _ := io.ReadAll(r.Body)
+		otherBody = r.Method + " " + string(b)
+		fmt.Fprint(w, `{"data":{"removeActivity":true}}`)
+	}))
+	t.Cleanup(other.Close)
+	status := http.StatusTemporaryRedirect
+	community := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/api", status)
+	}))
+	t.Cleanup(community.Close)
+	c := newPlexTVClient(community.URL, secretToken)
+	c.communityURL = community.URL
+
+	if err := c.RemoveActivity("e1"); err != nil {
+		t.Fatalf("307: %v", err)
+	}
+	if !strings.HasPrefix(otherBody, "POST ") || !strings.Contains(otherBody, `"id":"e1"`) {
+		t.Errorf("other host got %q; want the POST with its body", otherBody)
+	}
+	status = http.StatusFound
+	if err := c.RemoveActivity("e2"); err == nil || !strings.Contains(err.Error(), "refusing a redirect") {
+		t.Errorf("302: err = %v; want the redirect refused", err)
 	}
 }
