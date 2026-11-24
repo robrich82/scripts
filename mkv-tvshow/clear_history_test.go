@@ -966,6 +966,9 @@ func TestPlanHistory_YearlessLinkedToBothYears(t *testing.T) {
 	if got := keysOf(plan.matched); !slices.Equal(got, keys("0", "2")) {
 		t.Errorf("matched %v; want the 2018 title and the year-less one", got)
 	}
+	if len(plan.yearUnchecked) != 0 {
+		t.Errorf("year unchecked %v; the key ties the year-less title to the show", plan.yearUnchecked)
+	}
 }
 
 // An unfinished file that can't be removed is reported, though withoutPaths

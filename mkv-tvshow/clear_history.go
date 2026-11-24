@@ -57,9 +57,9 @@ func splitTitleYear(s string) (string, int) {
 // historyTitleKey folds a show title for comparison: lower case, with the
 // letters, numbers (Ⅱ and ② too), marks (Thai and Indic vowel signs) and
 // symbols (Gintama°, ∀ Gundam and C++ are other series) of every script kept.
-// Punctuation, spaces, dash lookalikes and modifier letters and symbols are
-// dropped. titleMatcher keeps only ASCII, which is too loose here: whatever
-// matches gets deleted.
+// Punctuation, spaces, dash lookalikes, modifier symbols and the spacing
+// modifier letters (U+02B0–02FF) are dropped. titleMatcher keeps only ASCII,
+// which is too loose here: whatever matches gets deleted.
 func historyTitleKey(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {
@@ -378,7 +378,7 @@ func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 		return cmp.Or(strings.Compare(a.title, b.title), strings.Compare(a.key, b.key))
 	})
 	// Titles are compared as matching folds them, so ones that differ only
-	// in case, spacing, punctuation or invisible characters count as one.
+	// in what matching ignores count as one.
 	perTitle, perLine := make(map[string]int), make(map[string]int)
 	lines, lineIDs := make([]string, len(shows)), make([]string, len(shows))
 	for i, s := range shows {
@@ -398,7 +398,7 @@ func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 		fmt.Fprintln(out, line)
 	}
 	if len(perTitle) < len(shows) {
-		fmt.Fprintln(out, "Titles that repeat, or differ only in case, spacing, punctuation or invisible characters, may be different shows: check each before answering.")
+		fmt.Fprintln(out, "Titles that repeat, or that matching counts as the same, may be different shows: check each before answering.")
 	}
 	if len(plan.yearUnchecked) > 0 {
 		fmt.Fprintf(out, "History doesn't record a show's year, so these matched on title alone: %s\n", strings.Join(plan.yearUnchecked, ", "))

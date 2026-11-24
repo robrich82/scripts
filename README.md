@@ -671,10 +671,11 @@ alone. A title with no year that Plex links to a titled show (it was
 retitled) is that show, matching only when it does; any other is skipped when
 the history also has the title with your year, since it's then a different
 show. Titles match whole, ignoring case, spaces, punctuation, dash
-lookalikes (tildes, minus signs) and modifier symbols like `^`; other symbols,
-like ° or ☆, count. The matching entries are listed per show with the episode
-watched last, which tells apart two shows with one title, and nothing is
-deleted until you confirm. Before deleting, the entries are written to
+lookalikes (tildes, minus signs, box-drawing lines) and modifiers like the ʻ
+in Hawaiʻi or `^`; other symbols, like ° or ☆, count. The matching entries
+are listed per show with the episode watched last, which tells apart two
+shows with one title, and nothing is deleted until you confirm. Before
+deleting, the entries are written to
 `history-cleared-<UTC time>.json` in the config folder, since Plex can't
 restore them. Its `complete` stays `false` until the run finishes and the file
 is rewritten, and `failed` lists the entries whose delete failed or wasn't
