@@ -27,7 +27,7 @@ The tasks are declared in `mise.toml`. Each is a pair of scripts in `tasks/`: `<
 - `mise run tmdb-openapi` — fetch the gitignored `tmdb-openapi.json` for the `tmdb-api` skill (needs network).
 - Single test while iterating: `cd <tool> && go test -run TestName ./...` — still run `mise run test` before committing.
 
-CI (`.github/workflows/ci.yml`) runs on `windows-2025`, one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml`, `mise.lock`, `tasks/` or `.golangci.yml` change). Each job runs `mise run vet`, `vet-linux`, `test` and `vuln` for its module; `vuln` only fails the weekly run.
+CI (`.github/workflows/ci.yml`) runs one job per changed module (every module on the weekly run or a `ci.yml`, `mise.toml`, `mise.lock`, `tasks/` or `.golangci.yml` change) on each of `windows-2025` and `ubuntu-26.04`. Each job runs `mise run vet`, `vet-linux`, `test` and `vuln` for its module, through the `.ps1` scripts on Windows and the `.sh` ones on Linux; `vuln` only fails the weekly run.
 
 Hooks in `.claude/settings.json`, in sessions started at the repo root:
 - Run `gofmt -w` on every edited `.go` file.

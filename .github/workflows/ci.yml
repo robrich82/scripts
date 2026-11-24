@@ -50,13 +50,15 @@ jobs:
   check:
     needs: changes
     if: needs.changes.outputs.modules != '[]'
-    name: ${{ matrix.module }}
-    # The tools target Windows (filetime, process detection), so test there.
-    runs-on: windows-2025
+    name: ${{ matrix.module }} (${{ matrix.os }})
+    # The tools target Windows (filetime, process detection), so test there. Linux runs the
+    # tasks' .sh scripts and the non-Windows code paths.
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         module: ${{ fromJSON(needs.changes.outputs.modules) }}
+        os: [windows-2025, ubuntu-26.04]
     defaults:
       run:
         shell: bash
