@@ -1730,9 +1730,9 @@ checksum = "sha256:302f726d93ad4c113a8f7b8d72b5d1bcf1ad3ff10950ee6161b9978702545
 url = "https://conda.anaconda.org/conda-forge/win-64/bzip2-1.0.8-h0ad9c76_10.conda"
 checksum = "sha256:04767466ee9227c9c57ab2c6503e0149177d34111c7418d2f420297acb1eb229"
 
-[conda-packages.windows-x64."ca-certificates-2026.10.23-h4c7d964_0"]
-url = "https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.23-h4c7d964_0.conda"
-checksum = "sha256:f1d280d2618de987204102090e83733089c092dc2dd45686fd3dcbe809034f6a"
+[conda-packages.windows-x64."ca-certificates-2026.11.20-h4c7d964_0"]
+url = "https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.11.20-h4c7d964_0.conda"
+checksum = "sha256:9e92b9ee484d3042c22db7d6b731f57e821c96f793c05531b37fd714c6041d48"
 
 [conda-packages.windows-x64."cairo-1.18.6-h477c42c_0"]
 url = "https://conda.anaconda.org/conda-forge/win-64/cairo-1.18.6-h477c42c_0.conda"
@@ -1754,9 +1754,9 @@ checksum = "sha256:00925c8c055a2275614b4d983e1df637245e19058d79fc7dd1a93b8d9fb4b
 url = "https://conda.anaconda.org/conda-forge/noarch/font-ttf-ubuntu-0.83-h77eed37_4.conda"
 checksum = "sha256:a7384ac883b1acf492fd1aef27431f0f1a647bbb8b5709a1bfab11b0a765f5e5"
 
-[conda-packages.windows-x64."fontconfig-2.18.3-hd47e2ca_2"]
-url = "https://conda.anaconda.org/conda-forge/win-64/fontconfig-2.18.3-hd47e2ca_2.conda"
-checksum = "sha256:27bdb90f2d70d2068bd3c2e98a3ac6010fd70ed52797a581a842d374929487ba"
+[conda-packages.windows-x64."fontconfig-2.18.4-hbf4c354_0"]
+url = "https://conda.anaconda.org/conda-forge/win-64/fontconfig-2.18.4-hbf4c354_0.conda"
+checksum = "sha256:6c74dfe9537e0b310979a0b7501b0518debb40dccee267ef696d66c3bac8b7eb"
 
 [conda-packages.windows-x64.fonts-conda-ecosystem-1-0]
 url = "https://conda.anaconda.org/conda-forge/noarch/fonts-conda-ecosystem-1-0.tar.bz2"
@@ -1774,17 +1774,17 @@ checksum = "sha256:32f7dd8ffe62fd485e9e6570e871f5be45af74c84fde62241a2417046a373
 url = "https://conda.anaconda.org/conda-forge/win-64/fribidi-1.0.18-hfd05255_0.conda"
 checksum = "sha256:beb4dad871f0e1fcfb088698ec08898bca9f4b0b385053aafafe4eee352654b5"
 
-[conda-packages.windows-x64."gdk-pixbuf-2.44.8-h1f5b9c4_2"]
-url = "https://conda.anaconda.org/conda-forge/win-64/gdk-pixbuf-2.44.8-h1f5b9c4_2.conda"
-checksum = "sha256:c97af0d751d2afb09b1728946dd9ded817ab8a3805da6ac2c0bc55c9894cd2d5"
+[conda-packages.windows-x64."gdk-pixbuf-2.44.8-h0db38d4_3"]
+url = "https://conda.anaconda.org/conda-forge/win-64/gdk-pixbuf-2.44.8-h0db38d4_3.conda"
+checksum = "sha256:d8e70c20055962f3a74bd23beb3768f061c9eb459d3cacb6d2d05a8191d73117"
 
-[conda-packages.windows-x64."glib-2.90.1-h1d002d9_3"]
-url = "https://conda.anaconda.org/conda-forge/win-64/glib-2.90.1-h1d002d9_3.conda"
-checksum = "sha256:1f5f206f500f72d5669230a8a9f37edf28c45d358a9e6335d8783a71233820b8"
+[conda-packages.windows-x64."glib-2.90.1-hac814ba_4"]
+url = "https://conda.anaconda.org/conda-forge/win-64/glib-2.90.1-hac814ba_4.conda"
+checksum = "sha256:7260c9e1c2ef0e262406bf0e2a184e5d365e05d8854edd9d06c516697834dce0"
 
-[conda-packages.windows-x64."glib-tools-2.90.1-h8d9a05b_3"]
-url = "https://conda.anaconda.org/conda-forge/win-64/glib-tools-2.90.1-h8d9a05b_3.conda"
-checksum = "sha256:009affdee7f663306a5b601d4f791909a90fb563475dbbc518d030b574996c3c"
+[conda-packages.windows-x64."glib-tools-2.90.1-h86b4906_4"]
+url = "https://conda.anaconda.org/conda-forge/win-64/glib-tools-2.90.1-h86b4906_4.conda"
+checksum = "sha256:7c613ae619d66e77e0f6e8385e2db2b9573eab91dafb515cd29758083b51122e"
 
 [conda-packages.windows-x64."graphite2-1.3.15-h5112557_1"]
 url = "https://conda.anaconda.org/conda-forge/win-64/graphite2-1.3.15-h5112557_1.conda"
@@ -1814,13 +1814,13 @@ checksum = "sha256:55a5c6ed5b70f92abee4761462b79179ddfd8aed79594bcc7dfd1e7eb6db6
 url = "https://conda.anaconda.org/conda-forge/win-64/libbrotlienc-1.2.1-he2a975b_1.conda"
 checksum = "sha256:09fb371c65cea8a0b81870dd08d012b5280ce85ef614293641dd0c748897bdc1"
 
-[conda-packages.windows-x64."libdav1d-1.5.4-h11686cb_4"]
-url = "https://conda.anaconda.org/conda-forge/win-64/libdav1d-1.5.4-h11686cb_4.conda"
-checksum = "sha256:5dd8437e1c74d0e15599da918aec11624a3be664b3d0e81fcc0675c902d6337d"
+[conda-packages.windows-x64."libdav1d-1.5.5-h11686cb_0"]
+url = "https://conda.anaconda.org/conda-forge/win-64/libdav1d-1.5.5-h11686cb_0.conda"
+checksum = "sha256:7fc991114ecb0201408c5cc111e84544d9762d6fffdd226b16b1948fb0685a5a"
 
-[conda-packages.windows-x64."libdav1d7-1.5.4-h6a83c73_4"]
-url = "https://conda.anaconda.org/conda-forge/win-64/libdav1d7-1.5.4-h6a83c73_4.conda"
-checksum = "sha256:8c4514f16f22eabec86afaf737285efded4b09633e0e4fb50d58e51830b3471e"
+[conda-packages.windows-x64."libdav1d7-1.5.5-h7a3f0e1_0"]
+url = "https://conda.anaconda.org/conda-forge/win-64/libdav1d7-1.5.5-h7a3f0e1_0.conda"
+checksum = "sha256:51e0bb208b7a2209b74e3169eb28fd3c2ccc7748f9c8e636769f0e509180f23f"
 
 [conda-packages.windows-x64."libdeflate-1.26-h1a1d4e4_0"]
 url = "https://conda.anaconda.org/conda-forge/win-64/libdeflate-1.26-h1a1d4e4_0.conda"
@@ -1842,9 +1842,9 @@ checksum = "sha256:d794d7fddb6eea50e18a62fa27ab3819f40d51bad00b90cf4ca591fb0d400
 url = "https://conda.anaconda.org/conda-forge/win-64/libfreetype6-2.14.3-hdbac1cb_2.conda"
 checksum = "sha256:cbc650854003e434d4ff6c7b1a2667e38a4242ad8a391a1c5ff89721624065ce"
 
-[conda-packages.windows-x64."libglib-2.90.1-h8c856d3_3"]
-url = "https://conda.anaconda.org/conda-forge/win-64/libglib-2.90.1-h8c856d3_3.conda"
-checksum = "sha256:fc62a1106d8b72559bbb2bb68e56f3637869ee19ad934d058c24e7e3d5d08e23"
+[conda-packages.windows-x64."libglib-2.90.1-h7c262e9_4"]
+url = "https://conda.anaconda.org/conda-forge/win-64/libglib-2.90.1-h7c262e9_4.conda"
+checksum = "sha256:26ac2dd6188675e9c78ef6b94123fe3d25e04c8d1ddee0d0427f7b2cc1bccf09"
 
 [conda-packages.windows-x64."libharfbuzz-15.0.0-h03b5201_0"]
 url = "https://conda.anaconda.org/conda-forge/win-64/libharfbuzz-15.0.0-h03b5201_0.conda"
@@ -2035,16 +2035,16 @@ url = "https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_7.conda
 checksum = "sha256:ca7daae4f218a11fab82cc2857f0ea518ec3f46acec60490485347a4c22c6b3e"
 
 [[tools.ffmpeg]]
-version = "9.0.2"
+version = "9.1.0"
 backend = "conda:ffmpeg"
-specifiers = ["9.0.2"]
+specifiers = ["9.1.0"]
 
 [tools.ffmpeg.options]
 channel = "conda-forge"
 
 [tools.ffmpeg."platforms.linux-arm64"]
-checksum = "sha256:36fd2c96ef1790d34408926feddd70efb94bac1ebbe42d6e0fc47d71046e3780"
-url = "https://conda.anaconda.org/conda-forge/linux-aarch64/ffmpeg-9.0.2-gpl_hc5ff13c_908.conda"
+checksum = "sha256:cd5158ba467954675fef7d6f8b19e8b6c9ca782e9dc80aa572e5f3785395c0c9"
+url = "https://conda.anaconda.org/conda-forge/linux-aarch64/ffmpeg-9.1.0-gpl_hc5ff13c_900.conda"
 conda_deps = [
     "xorg-libx11-1.8.14-h3f04742_0",
     "svt-av1-4.3.0-h4154aff_0",
@@ -2054,7 +2054,9 @@ conda_deps = [
     "libplacebo-7.387.0-hb9d0f90_0",
     "libjxl-0.13.0-h7a31cfc_0",
     "libexpat-2.9.0-h4154aff_0",
+    "libdav1d7-1.5.5-h29ee22c_0",
     "fonts-conda-ecosystem-1-0",
+    "fontconfig-2.18.4-ha4b22b4_0",
     "aom-3.15.3-pl5321h24175d9_0",
     "cairo-1.18.6-hca320e2_0",
     "libharfbuzz-15.0.0-h8f7ccb3_0",
@@ -2086,9 +2088,7 @@ conda_deps = [
     "sdl2-2.32.56-h4125222_1",
     "icu-78.3-py311h3512406_2",
     "bzip2-1.0.8-h4777abc_10",
-    "fontconfig-2.18.4-ha4b22b4_0",
     "gmp-6.3.0-h4d6b352_3",
-    "libdav1d7-1.5.5-h29ee22c_0",
     "libgcc-16.2.0-h205dda4_7",
     "libstdcxx-16.2.0-hef695bb_7",
     "libiconv-1.18-h1ea5142_3",
@@ -2177,8 +2177,8 @@ conda_deps = [
 ]
 
 [tools.ffmpeg."platforms.linux-x64"]
-checksum = "sha256:73ed93688e099e16de63dcf144274e067d38ef6a99c4327e18cde0c65f9a2102"
-url = "https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-9.0.2-gpl_hac98dcb_908.conda"
+checksum = "sha256:e3a957ad108bddfd78bd2b03f7bd67c581520d8a92de1bf48fba4f047de40400"
+url = "https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-9.1.0-gpl_hac98dcb_900.conda"
 conda_deps = [
     "xorg-libx11-1.8.14-hb83e432_0",
     "svt-av1-4.3.0-hd2095e1_0",
@@ -2189,7 +2189,9 @@ conda_deps = [
     "libplacebo-7.387.0-h9669efe_0",
     "libjxl-0.13.0-heb2dce7_0",
     "libexpat-2.9.0-hd2095e1_0",
+    "libdav1d7-1.5.5-hebe6cf0_0",
     "fonts-conda-ecosystem-1-0",
+    "fontconfig-2.18.4-h4db4eae_0",
     "aom-3.15.3-pl5321h57e6904_0",
     "cairo-1.18.6-h3c89d7e_0",
     "libharfbuzz-15.0.0-h23af247_0",
@@ -2227,9 +2229,7 @@ conda_deps = [
     "libxml2-2.15.4-h7df9aa5_1",
     "icu-78.3-py310h44b86e0_2",
     "bzip2-1.0.8-hda65f42_10",
-    "fontconfig-2.18.4-h4db4eae_0",
     "gmp-6.3.0-hfd2156b_3",
-    "libdav1d7-1.5.5-hebe6cf0_0",
     "libgcc-16.2.0-ha9f2e26_7",
     "libstdcxx-16.2.0-h934c35e_7",
     "libiconv-1.18-h0cb94f2_3",
@@ -2321,8 +2321,8 @@ conda_deps = [
 ]
 
 [tools.ffmpeg."platforms.macos-arm64"]
-checksum = "sha256:91eff7ba49e099c483a98ae086034db59b25abc48e985b7b71591905156553fd"
-url = "https://conda.anaconda.org/conda-forge/osx-arm64/ffmpeg-9.0.2-gpl_h3900d2c_108.conda"
+checksum = "sha256:4cf2f9b7098ad4980d800d75e054a0ae1df47fa81673c5d6c88bde90d8a25257"
+url = "https://conda.anaconda.org/conda-forge/osx-arm64/ffmpeg-9.1.0-gpl_h3900d2c_100.conda"
 conda_deps = [
     "svt-av1-4.3.0-h6111c0a_0",
     "openh264-2.7.0-hf8510ef_0",
@@ -2331,7 +2331,9 @@ conda_deps = [
     "libplacebo-7.387.0-hf72289b_0",
     "libjxl-0.13.0-hb9757ac_0",
     "libexpat-2.9.0-h6111c0a_0",
+    "libdav1d7-1.5.5-h602ebc4_0",
     "fonts-conda-ecosystem-1-0",
+    "fontconfig-2.18.4-he47a414_0",
     "aom-3.15.3-pl5321h204ab31_0",
     "cairo-1.18.6-h580cee5_0",
     "libharfbuzz-15.0.0-hcda0f7c_0",
@@ -2364,10 +2366,8 @@ conda_deps = [
     "libxml2-2.15.4-h550178d_1",
     "icu-78.3-py310h579977c_2",
     "bzip2-1.0.8-h4e30115_10",
-    "fontconfig-2.18.4-he47a414_0",
     "gmp-6.3.0-hf5e55b1_3",
     "libcxx-23.1.6-hc645fd0_0",
-    "libdav1d7-1.5.5-h602ebc4_0",
     "libiconv-1.18-he4c29f2_3",
     "openssl-3.6.5-h55eecbc_0",
     "x264-1!164.3095-pl5321h4df14c8_3",
@@ -2418,8 +2418,8 @@ conda_deps = [
 ]
 
 [tools.ffmpeg."platforms.macos-x64"]
-checksum = "sha256:36f7a3207f8d816dbd826a022511cf60df6639ff716f7c4428b7b6dfb6369faa"
-url = "https://conda.anaconda.org/conda-forge/osx-64/ffmpeg-9.0.2-gpl_h5b0e0b6_108.conda"
+checksum = "sha256:dbc005f41f6194f0984c87dbf0f25e40fe9356f155b377ee166a9313a7516152"
+url = "https://conda.anaconda.org/conda-forge/osx-64/ffmpeg-9.1.0-gpl_h5b0e0b6_100.conda"
 conda_deps = [
     "svt-av1-4.3.0-h6e061ac_0",
     "openh264-2.7.0-h29fea0d_0",
@@ -2428,7 +2428,9 @@ conda_deps = [
     "libplacebo-7.387.0-h5c0a6cf_0",
     "libjxl-0.13.0-hfeac7ea_0",
     "libexpat-2.9.0-h6e061ac_0",
+    "libdav1d7-1.5.5-h9ec13f6_0",
     "fonts-conda-ecosystem-1-0",
+    "fontconfig-2.18.4-h0555eca_0",
     "aom-3.15.3-pl5321h8f6c6dd_0",
     "cairo-1.18.6-h5791faa_0",
     "libharfbuzz-15.0.0-h2974713_0",
@@ -2448,10 +2450,8 @@ conda_deps = [
     "libxml2-2.15.4-hb56241c_1",
     "icu-78.3-py313hbf1d544_2",
     "bzip2-1.0.8-h374f1ed_10",
-    "fontconfig-2.18.4-h0555eca_0",
     "gmp-6.3.0-h65442b7_3",
     "libcxx-23.1.6-h88b51c2_0",
-    "libdav1d7-1.5.5-h9ec13f6_0",
     "libiconv-1.18-h4ae439b_3",
     "openssl-3.6.5-h332eb6d_0",
     "x264-1!164.3095-pl5321h892666e_3",
@@ -2497,20 +2497,22 @@ conda_deps = [
 ]
 
 [tools.ffmpeg."platforms.windows-x64"]
-checksum = "sha256:b07f3117866ce158a5933512855912fa0f656906dc0dd7475a64d0089220836e"
-url = "https://conda.anaconda.org/conda-forge/win-64/ffmpeg-9.0.2-gpl_h666c9b3_908.conda"
+checksum = "sha256:6442af3523333eff79d2a1994a2098acbec64201df6a62ac24d86357081123a9"
+url = "https://conda.anaconda.org/conda-forge/win-64/ffmpeg-9.1.0-gpl_h8daf787_900.conda"
 conda_deps = [
     "svt-av1-4.3.0-hac47afa_0",
     "openh264-2.7.0-h1eab103_0",
     "librsvg-2.62.4-h5506a08_0",
     "libjxl-0.13.0-h932607e_0",
     "libexpat-2.9.0-hac47afa_0",
+    "libdav1d7-1.5.5-h7a3f0e1_0",
+    "libdav1d-1.5.5-h11686cb_0",
     "fonts-conda-ecosystem-1-0",
+    "fontconfig-2.18.4-hbf4c354_0",
     "aom-3.15.3-pl5321h06fc181_0",
     "cairo-1.18.6-h477c42c_0",
     "libharfbuzz-15.0.0-h03b5201_0",
     "libpng-1.6.59-hdc8cecf_0",
-    "fontconfig-2.18.3-hd47e2ca_2",
     "lame-4.0-h0c5f640_1",
     "libfreetype-2.14.3-h57928b3_2",
     "libfreetype6-2.14.3-hdbac1cb_2",
@@ -2525,8 +2527,6 @@ conda_deps = [
     "x265-3.5-h3ee6617_4",
     "icu-78.3-h5112557_2",
     "bzip2-1.0.8-h0ad9c76_10",
-    "libdav1d-1.5.4-h11686cb_4",
-    "libdav1d7-1.5.4-h6a83c73_4",
     "libxml2-2.15.4-he095d88_1",
     "libxml2-16-2.15.4-h3cfd58e_1",
     "openssl-3.6.5-hf411b9b_0",
@@ -2539,32 +2539,32 @@ conda_deps = [
     "fonts-conda-forge-1-hc364b38_1",
     "font-ttf-dejavu-sans-mono-2.37-hab24e00_0",
     "mpg123-1.33.7-ha58212f_1",
-    "libglib-2.90.1-h8c856d3_3",
+    "libglib-2.90.1-h7c262e9_4",
     "pcre2-10.49-h8466c1e_0",
     "graphite2-1.3.15-h5112557_1",
     "libhwy-1.4.0-h2419aca_2",
     "libbrotlienc-1.2.1-he2a975b_1",
     "libbrotlicommon-1.2.1-hf02afa3_1",
     "libbrotlidec-1.2.1-h84f9c24_1",
-    "gdk-pixbuf-2.44.8-h1f5b9c4_2",
+    "gdk-pixbuf-2.44.8-h0db38d4_3",
+    "libjpeg-turbo-3.2.1-hfd05255_0",
     "pango-1.58.2-h4350c2a_3",
     "libpango-devel-1.58.2-h7637d1b_3",
     "libpango-1.58.2-h02b4fad_3",
     "libharfbuzz-devel-15.0.0-h03b5201_0",
     "freetype-2.14.3-h57928b3_2",
-    "glib-2.90.1-h1d002d9_3",
+    "glib-2.90.1-hac814ba_4",
     "zlib-1.3.2-hfd05255_3",
     "libintl-devel-0.22.5-h5728263_4",
-    "glib-tools-2.90.1-h8d9a05b_3",
+    "glib-tools-2.90.1-h86b4906_4",
     "libogg-1.3.5-h2466b09_1",
-    "ca-certificates-2026.10.23-h4c7d964_0",
+    "ca-certificates-2026.11.20-h4c7d964_0",
     "sdl3-3.4.20-h5112557_2",
     "font-ttf-ubuntu-0.83-h77eed37_4",
     "font-ttf-inconsolata-3.000-h77eed37_0",
     "font-ttf-source-code-pro-2.038-h77eed37_0",
     "pixman-0.46.4-h5112557_3",
     "libffi-3.7.0-h3d046cb_1",
-    "libjpeg-turbo-3.2.1-hfd05255_0",
     "libtiff-4.7.2-hef6d50c_2",
     "libdeflate-1.26-h1a1d4e4_0",
     "lerc-4.3.0-hd936e49_0",
