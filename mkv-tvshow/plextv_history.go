@@ -64,13 +64,27 @@ func (e *rateLimitError) Error() string {
 	return fmt.Sprintf("plex.tv rate limit: retry after %s", e.After)
 }
 
+// unconfirmedError is a 2xx reply from plex.tv that doesn't say what it did:
+// one that can't be read, or a removal not answered true. Re-reading the
+// history afterwards tells whether a removal took.
+type unconfirmedError struct{ msg string }
+
+func (e *unconfirmedError) Error() string { return e.msg }
+
+// isUnconfirmed reports whether err is an *unconfirmedError.
+func isUnconfirmed(err error) bool {
+	var u *unconfirmedError
+	return errors.As(err, &u)
+}
+
 // cloudPageSize is how many history items each plex.tv request asks for.
 const cloudPageSize = 100
 
-// The plex.tv web app's history query, and the removal mutation as an
-// open-source cleanup script sends it; introspection is disabled, so neither
-// can be checked against a schema. The mutation's reply on success hasn't been
-// seen live, so clearHistory re-reads the history afterwards.
+// The watch history query and the removal mutation, named as
+// github.com/martadams89/plex-community-watch-history-cleanup sends them.
+// plex.tv's introspection is disabled, so neither can be checked against a
+// schema, and clearHistory re-reads the history rather than trust the
+// mutation's reply.
 const (
 	watchHistoryQuery = `query GetWatchHistoryHub($uuid: ID = "", $first: PaginationInt!, $after: String) {
   user(id: $uuid) {
@@ -96,7 +110,8 @@ type graphQLError struct {
 // graphQL posts a query to plex.tv's community API and decodes its data into
 // data. A rate limit, by GraphQL error or HTTP 429, comes back as a
 // *rateLimitError; another status than 2xx as a *plexTVStatusError, with the
-// reply's GraphQL errors.
+// reply's GraphQL errors; a 2xx reply with no errors and no readable data as
+// an *unconfirmedError.
 func (c *plexTVClient) graphQL(operation, query string, variables map[string]any, data any) error {
 	body, err := json.Marshal(map[string]any{"operationName": operation, "query": query, "variables": variables})
 	if err != nil {
@@ -109,7 +124,7 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	setPlexTVHeaders(req, c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doPlexTV(req)
 	if err != nil {
 		return fmt.Errorf("plex.tv: %s: %w", operation, err)
 	}
@@ -135,16 +150,16 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		return statusErr
 	}
 	if decodeErr != nil {
-		return fmt.Errorf("plex.tv: decode %s: %w", operation, decodeErr)
+		return &unconfirmedError{fmt.Sprintf("plex.tv: decode %s: %v", operation, decodeErr)}
 	}
 	if len(reply.Errors) > 0 {
 		return fmt.Errorf("plex.tv: %s: %s", operation, errorMessages(reply.Errors))
 	}
 	if len(reply.Data) == 0 || string(reply.Data) == "null" {
-		return fmt.Errorf("plex.tv: %s: no data in the reply", operation)
+		return &unconfirmedError{fmt.Sprintf("plex.tv: %s: no data in the reply", operation)}
 	}
 	if err := json.Unmarshal(reply.Data, data); err != nil {
-		return fmt.Errorf("plex.tv: decode %s: %w", operation, err)
+		return &unconfirmedError{fmt.Sprintf("plex.tv: decode %s: %v", operation, err)}
 	}
 	return nil
 }
@@ -257,9 +272,8 @@ func (c *plexTVClient) CloudHistoryPage(uuid, after string) (cloudPage, error) {
 }
 
 // RemoveActivity implements CloudHistoryClient: it deletes one watch history
-// item. Only a reply of true counts, an assumption no live delete has
-// checked yet. A rate limit comes back as a *rateLimitError for the caller to
-// wait out.
+// item. A reply other than true is an *unconfirmedError, and a rate limit a
+// *rateLimitError for the caller to wait out.
 func (c *plexTVClient) RemoveActivity(id string) error {
 	if id == "" {
 		return errors.New("plex.tv: no watch history item id to remove")
@@ -273,9 +287,9 @@ func (c *plexTVClient) RemoveActivity(id string) error {
 	}
 	switch {
 	case data.RemoveActivity == nil:
-		return errors.New("plex.tv: removeActivity: the reply doesn't say it was removed")
+		return &unconfirmedError{"plex.tv: removeActivity: the reply doesn't say it was removed"}
 	case !*data.RemoveActivity:
-		return errors.New("plex.tv: removeActivity: plex.tv didn't remove it")
+		return &unconfirmedError{"plex.tv: removeActivity: plex.tv replied false"}
 	}
 	return nil
 }

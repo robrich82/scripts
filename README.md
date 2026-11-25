@@ -681,27 +681,36 @@ deleting, the entries are written to
 restore them. Its `complete` stays `false` until the run finishes and the file
 is rewritten. `failed` lists the server entries whose delete failed or wasn't
 tried. After 3 failures in a row on the server or on plex.tv, the rest there
-aren't tried.
+aren't tried; a plex.tv reply that doesn't say whether it removed the item
+isn't a failure here. A run that leaves anything behind, or can't check
+plex.tv's deletes or rewrite the file, exits 1.
 
 plex.tv keeps its own copy of the token owner's history: episodes, and the
 seasons and shows marked watched. It's listed and cleared with the server's
 when the account has the token owner's plex.tv username exactly, with or
 without `--account`. For any other account it's left alone with a note, and
-so is plex.tv when `--account` is given and plex.tv refuses the token (401 or
-403, as for a server's own token); without `--account` that's an error, since
-the owner can't be found. Any other plex.tv failure, such as a timeout, stops
-the run before anything is deleted, on the server too. After deleting, the
-plex.tv history is read again: the record's `failedPlexTV` lists the items
-still there, and a later run clears them. The record's `plexTV` lists the
-items, or is `null` when plex.tv was left alone and `plexTVSkipped` says why;
-`plexTVUnchecked` says why plex.tv couldn't be read again.
+so is plex.tv when `--account` is given and plex.tv refuses the token with a
+401 or 403, as it does a Plex server's own token; without `--account` that's
+an error, since the owner can't be found. Any other plex.tv failure, such as a
+timeout, stops the run before anything is deleted, on the server too.
+
+After deleting, the plex.tv history is read again, since its replies to a
+removal aren't trusted, and once more after 10 seconds if it still lists
+removed items. The record's `failedPlexTV` lists the items it still lists,
+and those whose removal failed with an error; a later run clears them. Items
+of the shows that weren't there to plan, such as an episode watched during the
+run, are counted and left for a later run. The re-read must still list every
+item that wasn't to be removed; if it can't be read, or doesn't, the deletes
+are unchecked: `plexTVUnchecked` says why, and `failedPlexTV` lists the items
+plex.tv didn't reply true for. The record's `plexTV` lists the matched items,
+or is `null` when plex.tv was left alone and `plexTVSkipped` says why.
 
 plex.tv records each show's year (taken from a "(Year)" in its title when
 plex.tv gives none), so a year you give must match it; the same title with
-another year is listed and kept. A show plex.tv gives no year matches on title
-alone, unless plex.tv also has the title with a year: it's then listed and
-kept. A rate-limited request waits as long as plex.tv asks, a minute if it
-doesn't say, up to 5 minutes, and is tried up to 5 times.
+another year is listed and kept. A show plex.tv gives no year is treated as
+on the server. A rate-limited history read or removal waits as long as
+plex.tv asks, a minute if it doesn't say, up to 5 minutes, and is tried up to
+5 times; the owner lookup isn't retried.
 
 ### Missing episode check (`--missing`)
 

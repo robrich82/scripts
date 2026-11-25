@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -25,11 +26,12 @@ type plexTVClient struct {
 
 func newPlexTVClient(baseURL, communityURL, token string) *plexTVClient {
 	httpClient := newPlexHTTPClient()
-	// plex.tv's API doesn't redirect. Following one would send a removal on
-	// without its token, where a reply of true proves nothing, or turn a lost
-	// token into a 401 that reads as plex.tv refusing it.
+	// plex.tv's API doesn't redirect. Following one would send a request on
+	// to wherever it points, where even a reply of true to a removal proves
+	// nothing, or turn a lost token into a 401 that reads as plex.tv refusing
+	// it.
 	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		return fmt.Errorf("plex.tv redirected %s %s to %s; refusing to follow it", via[0].Method, via[0].URL.Path, req.URL.Redacted())
+		return fmt.Errorf("plex.tv redirected %s %s to %s; refusing to follow it", via[0].Method, via[0].URL.Path, queryless(req.URL.String()))
 	}
 	return &plexTVClient{
 		baseURL:      strings.TrimRight(baseURL, "/"),
@@ -37,6 +39,28 @@ func newPlexTVClient(baseURL, communityURL, token string) *plexTVClient {
 		token:        token,
 		httpClient:   httpClient,
 	}
+}
+
+// queryless is raw without its query or user info, either of which could
+// carry a token.
+func queryless(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		s, _, _ := strings.Cut(raw, "?")
+		return s
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+}
+
+// doPlexTV sends req. A transport error's *url.Error names the URL it failed
+// on, which after a refused redirect is the target's: it's cut to queryless.
+func (c *plexTVClient) doPlexTV(req *http.Request) (*http.Response, error) {
+	resp, err := c.httpClient.Do(req)
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		ue.URL = queryless(ue.URL)
+	}
+	return resp, err
 }
 
 // setPlexTVHeaders authenticates req to plex.tv. The token goes in a header,
@@ -65,6 +89,16 @@ func (e *plexTVStatusError) Error() string {
 	return fmt.Sprintf("plex.tv: %s: unexpected status %s", e.what, e.Status)
 }
 
+// tokenRefused is err's plex.tv 401 or 403, which a server's own token gets
+// too, or nil.
+func tokenRefused(err error) *plexTVStatusError {
+	var status *plexTVStatusError
+	if errors.As(err, &status) && (status.Code == http.StatusUnauthorized || status.Code == http.StatusForbidden) {
+		return status
+	}
+	return nil
+}
+
 // OwnerLookup finds the account that owns the Plex token.
 type OwnerLookup interface {
 	User() (plexTVUser, error)
@@ -78,7 +112,7 @@ func (c *plexTVClient) User() (plexTVUser, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	setPlexTVHeaders(req, c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doPlexTV(req)
 	if err != nil {
 		return plexTVUser{}, fmt.Errorf("plex.tv: get user: %w", err)
 	}

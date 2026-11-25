@@ -25,6 +25,7 @@ type clearHistoryRun struct {
 	recordDir string
 	out       bytes.Buffer
 	slept     []time.Duration
+	onSleep   func() // runs after each wait is recorded
 }
 
 // newClearHistoryRun has an owner "QuienNZ" (id 1) and "Stephanie" (id 5),
@@ -66,7 +67,12 @@ func (r *clearHistoryRun) run(t *testing.T, account string, shows ...string) err
 		recordDir: r.recordDir,
 		out:       &r.out,
 		now:       func() time.Time { return recordTime },
-		sleep:     func(d time.Duration) { r.slept = append(r.slept, d) },
+		sleep: func(d time.Duration) {
+			r.slept = append(r.slept, d)
+			if r.onSleep != nil {
+				r.onSleep()
+			}
+		},
 	})
 }
 
@@ -470,6 +476,20 @@ func TestClearHistory_OwnerNotOnServer(t *testing.T) {
 	}
 	if len(r.pms.pageStarts) != 0 {
 		t.Error("fetched history without an account")
+	}
+}
+
+// Any other owner lookup failure doesn't point at --account: plex.tv is
+// asked for the owner with it too, so it would fail the same way.
+func TestClearHistory_OwnerLookupFails_NoAccountHint(t *testing.T) {
+	r := newClearHistoryRun(t)
+	r.tv.userStatus = http.StatusInternalServerError
+	err := r.run(t, "", "Bluey")
+	if err == nil || !strings.Contains(err.Error(), "500") || strings.Contains(err.Error(), "--account") {
+		t.Errorf("err = %v; want the 500 without a pointer to --account", err)
+	}
+	if err != nil && strings.Count(err.Error(), "nothing was deleted") != 1 {
+		t.Errorf("err = %v; want \"nothing was deleted\" once", err)
 	}
 }
 

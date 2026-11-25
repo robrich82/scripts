@@ -196,14 +196,19 @@ func TestPlexTVClient_RefusesRedirects(t *testing.T) {
 	t.Cleanup(other.Close)
 	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect, http.StatusFound, http.StatusMovedPermanently} {
 		plexTV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, other.URL+r.URL.Path, status)
+			http.Redirect(w, r, other.URL+r.URL.Path+"?X-Plex-Token="+secretToken, status)
 		}))
 		c := newPlexTVClient(plexTV.URL, plexTV.URL, secretToken)
 		if err := c.RemoveActivity("e1"); err == nil || !strings.Contains(err.Error(), "refusing to follow it") || strings.Contains(err.Error(), "PLEX_URL") {
 			t.Errorf("%d: RemoveActivity err = %v; want the redirect refused", status, err)
+		} else if strings.Contains(err.Error(), secretToken) {
+			t.Errorf("%d: RemoveActivity err = %v; prints the token from the redirect's query", status, err)
 		}
-		if _, err := c.User(); err == nil || !strings.Contains(err.Error(), "refusing to follow it") {
-			t.Errorf("%d: User err = %v; want the redirect refused, not a 401", status, err)
+		if _, err := c.CloudHistoryPage("u-1", ""); err == nil || !strings.Contains(err.Error(), "refusing to follow it") {
+			t.Errorf("%d: CloudHistoryPage err = %v; want the redirect refused", status, err)
+		}
+		if _, err := c.User(); err == nil || !strings.Contains(err.Error(), "refusing to follow it") || strings.Contains(err.Error(), secretToken) {
+			t.Errorf("%d: User err = %v; want the redirect refused, not a 401, without the token", status, err)
 		}
 		plexTV.Close()
 	}
