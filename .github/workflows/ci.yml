@@ -94,7 +94,7 @@ jobs:
         env:
           MISE_CACHE_DIR: ${{ runner.temp }}/mise-cache
         with:
-          version: 2026.11.12
+          version: 2026.11.13
           cache: false
           install_args: >-
             --locked
