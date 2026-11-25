@@ -24,11 +24,18 @@ type plexTVClient struct {
 }
 
 func newPlexTVClient(baseURL, communityURL, token string) *plexTVClient {
+	httpClient := newPlexHTTPClient()
+	// plex.tv's API doesn't redirect. Following one would send a removal on
+	// without its token, where a reply of true proves nothing, or turn a lost
+	// token into a 401 that reads as plex.tv refusing it.
+	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return fmt.Errorf("plex.tv redirected %s %s to %s; refusing to follow it", via[0].Method, via[0].URL.Path, req.URL.Redacted())
+	}
 	return &plexTVClient{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		communityURL: strings.TrimRight(communityURL, "/"),
 		token:        token,
-		httpClient:   newPlexHTTPClient(),
+		httpClient:   httpClient,
 	}
 }
 

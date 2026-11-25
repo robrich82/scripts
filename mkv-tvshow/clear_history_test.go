@@ -289,6 +289,10 @@ func TestClearHistory_Confirmed_DeletesOnlyMatches(t *testing.T) {
 	if !recs[0].Complete || recs[0].Failed != nil {
 		t.Errorf("record complete %v, failed %v; want complete with none failed", recs[0].Complete, recs[0].Failed)
 	}
+	// plex.tv was read and had none of these: [], not null, which means skipped.
+	if recs[0].PlexTV == nil || len(recs[0].PlexTV) != 0 {
+		t.Errorf("record plexTV %v; want empty, not null", recs[0].PlexTV)
+	}
 	if len(r.prompter.asked) != 1 || !strings.Contains(r.prompter.asked[0], "Delete these 3 history entries for QuienNZ (account 1)?") {
 		t.Errorf("asked %q", r.prompter.asked)
 	}

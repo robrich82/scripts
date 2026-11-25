@@ -107,8 +107,8 @@ type plexShowItem struct {
 	GuidLower string          `json:"guid"` // legacy lowercase plain-string guid
 }
 
-// newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
-// server's host: Go only strips Authorization and Cookie on its own. It
+// newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the
+// request's host: Go only strips Authorization and Cookie on its own. It
 // refuses a redirect that would change the request's method.
 func newPlexHTTPClient() *http.Client {
 	return &http.Client{

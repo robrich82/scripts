@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -66,7 +67,10 @@ func (e *rateLimitError) Error() string {
 // cloudPageSize is how many history items each plex.tv request asks for.
 const cloudPageSize = 100
 
-// The plex.tv web app's queries; the API's introspection is disabled.
+// The plex.tv web app's history query, and the removal mutation as an
+// open-source cleanup script sends it; introspection is disabled, so neither
+// can be checked against a schema. The mutation's reply on success hasn't been
+// seen live, so clearHistory re-reads the history afterwards.
 const (
 	watchHistoryQuery = `query GetWatchHistoryHub($uuid: ID = "", $first: PaginationInt!, $after: String) {
   user(id: $uuid) {
@@ -115,11 +119,13 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		Errors []graphQLError  `json:"errors"`
 	}
 	decodeErr := json.NewDecoder(resp.Body).Decode(&reply)
+	header := retryAfterHeader(resp.Header.Get("Retry-After"))
 	if limited := rateLimitIn(reply.Errors); limited != nil {
+		limited.After = cmp.Or(limited.After, header)
 		return limited
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return &rateLimitError{After: retryAfterHeader(resp.Header.Get("Retry-After"))}
+		return &rateLimitError{After: header}
 	}
 	if resp.StatusCode/100 != 2 {
 		statusErr := &plexTVStatusError{what: operation, Status: resp.Status, Code: resp.StatusCode}
@@ -147,7 +153,7 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 func rateLimitIn(errs []graphQLError) *rateLimitError {
 	for _, e := range errs {
 		if e.Extensions.Code == "RATE_LIMITED" {
-			secs := min(max(e.Extensions.RetryAfter, 0), 24*60*60) // a Duration overflows near 292 years
+			secs := min(max(e.Extensions.RetryAfter, 0), maxRetryAfter)
 			return &rateLimitError{After: time.Duration(secs * float64(time.Second))}
 		}
 	}
@@ -162,14 +168,19 @@ func errorMessages(errs []graphQLError) string {
 	return strings.Join(msgs, "; ")
 }
 
-// retryAfterHeader reads a Retry-After of whole seconds; 0 when absent or a date.
+// retryAfterHeader reads a Retry-After of whole seconds, up to a day; 0 when
+// absent, negative or a date.
 func retryAfterHeader(v string) time.Duration {
-	var secs int
-	if _, err := fmt.Sscanf(v, "%d", &secs); err != nil || secs < 0 {
+	secs, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || secs < 0 {
 		return 0
 	}
-	return time.Duration(secs) * time.Second
+	return time.Duration(min(secs, maxRetryAfter)) * time.Second
 }
+
+// maxRetryAfter is the longest wait, in seconds, a rate limit is read as: a
+// Duration overflows near 292 years.
+const maxRetryAfter = 24 * 60 * 60
 
 // cloudRef is an item, or its parent or grandparent, in a history node.
 type cloudRef struct {
@@ -246,8 +257,9 @@ func (c *plexTVClient) CloudHistoryPage(uuid, after string) (cloudPage, error) {
 }
 
 // RemoveActivity implements CloudHistoryClient: it deletes one watch history
-// item. Only a reply of true counts. A rate limit comes back as a
-// *rateLimitError for the caller to wait out.
+// item. Only a reply of true counts, an assumption no live delete has
+// checked yet. A rate limit comes back as a *rateLimitError for the caller to
+// wait out.
 func (c *plexTVClient) RemoveActivity(id string) error {
 	if id == "" {
 		return errors.New("plex.tv: no watch history item id to remove")

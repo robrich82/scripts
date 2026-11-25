@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -185,34 +184,30 @@ func TestPlexTVGraphQL_TransportErrorOmitsToken(t *testing.T) {
 	}
 }
 
-// A 307 keeps the POST and its body, but not the token on another host; a
-// 302 would resend the mutation as a GET, so it's refused.
-func TestPlexTVGraphQL_Redirects(t *testing.T) {
-	var otherBody string
+// plex.tv's API doesn't redirect, so its client follows no redirect: a 307
+// would resend the removal to another host without its token, where a reply
+// of true proves nothing, and a 302 would resend it as a GET.
+func TestPlexTVClient_RefusesRedirects(t *testing.T) {
+	otherHits := 0
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("X-Plex-Token"); got != "" {
-			t.Errorf("other host got X-Plex-Token %q", got)
-		}
-		b, _ := io.ReadAll(r.Body)
-		otherBody = r.Method + " " + string(b)
+		otherHits++
 		fmt.Fprint(w, `{"data":{"removeActivity":true}}`)
 	}))
 	t.Cleanup(other.Close)
-	status := http.StatusTemporaryRedirect
-	community := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, other.URL+"/api", status)
-	}))
-	t.Cleanup(community.Close)
-	c := newPlexTVClient(community.URL, community.URL, secretToken)
-
-	if err := c.RemoveActivity("e1"); err != nil {
-		t.Fatalf("307: %v", err)
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect, http.StatusFound, http.StatusMovedPermanently} {
+		plexTV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, other.URL+r.URL.Path, status)
+		}))
+		c := newPlexTVClient(plexTV.URL, plexTV.URL, secretToken)
+		if err := c.RemoveActivity("e1"); err == nil || !strings.Contains(err.Error(), "refusing to follow it") || strings.Contains(err.Error(), "PLEX_URL") {
+			t.Errorf("%d: RemoveActivity err = %v; want the redirect refused", status, err)
+		}
+		if _, err := c.User(); err == nil || !strings.Contains(err.Error(), "refusing to follow it") {
+			t.Errorf("%d: User err = %v; want the redirect refused, not a 401", status, err)
+		}
+		plexTV.Close()
 	}
-	if !strings.HasPrefix(otherBody, "POST ") || !strings.Contains(otherBody, `"id":"e1"`) {
-		t.Errorf("other host got %q; want the POST with its body", otherBody)
-	}
-	status = http.StatusFound
-	if err := c.RemoveActivity("e2"); err == nil || !strings.Contains(err.Error(), "refusing a redirect") {
-		t.Errorf("302: err = %v; want the redirect refused", err)
+	if otherHits != 0 {
+		t.Errorf("the redirect target got %d requests", otherHits)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -24,24 +25,27 @@ type fakePlexTV struct {
 	userHits   int
 	graphHits  int
 
-	history           []cloudEntry
-	pageSize          int     // 0: the size asked for
-	repeatCursor      bool    // every page's endCursor is the same
-	emptyCursor       bool    // every page's endCursor is ""
-	endless           bool    // every page is empty, with more to come at a new cursor
-	historyErr        string  // a GraphQL error for GetWatchHistoryHub
-	historyStatus     int     // with historyErr, the HTTP status; 0 is 200
-	historyRateLimits int     // GetWatchHistoryHub calls refused with RATE_LIMITED before the rest
-	pagesRead         []int   // the start of each page served
-	retryAfter        float64 // seconds, in RATE_LIMITED refusals
+	history           []cloudEntry // a removal takes its item out
+	pageSize          int          // 0: the size asked for
+	staleCursor       bool         // every page's endCursor is "c1"
+	emptyCursor       bool         // every page's endCursor is ""
+	endless           bool         // every page is empty, with more to come at a new cursor
+	historyErr        string       // a GraphQL error for GetWatchHistoryHub
+	historyStatus     int          // with historyErr, the HTTP status; 0 is 200
+	historyRateLimits int          // GetWatchHistoryHub calls refused with RATE_LIMITED before the rest
+	pagesRead         []int        // the start of each page served
+	retryAfter        float64      // seconds, in RATE_LIMITED refusals
 
-	removed      []string
-	rateLimits   int // removeActivity calls refused with RATE_LIMITED before the rest
-	failRemove   map[string]bool
-	removeResult any            // removeActivity's value
-	onRemove     func()         // runs before each removal is answered
-	removeHTTP   int            // with failRemove, the HTTP status; 0 is 200
-	removeExtra  []graphQLError // more errors beside failRemove's
+	removed       []string
+	ignoreRemove  bool // removals reply as asked but leave the history as it was
+	failReadAfter bool // once something is removed, GetWatchHistoryHub fails
+	rateLimits    int  // removeActivity calls refused with RATE_LIMITED before the rest
+	failRemove    map[string]bool
+	removeResult  any            // removeActivity's value
+	onRemove      func()         // runs before each removal is answered
+	removeHTTP    int            // with failRemove, the HTTP status; 0 is 200
+	retryHeader   string         // with failRemove, a Retry-After header
+	removeExtra   []graphQLError // more errors beside failRemove's
 }
 
 func newFakePlexTV(t *testing.T) *fakePlexTV {
@@ -78,12 +82,16 @@ func (f *fakePlexTV) graphQL(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
 		f.t.Errorf("GraphQL request %s with content type %q", r.Method, r.Header.Get("Content-Type"))
 	}
+	body, _ := io.ReadAll(r.Body)
+	if r.URL.RawQuery != "" || strings.Contains(string(body), secretToken) {
+		f.t.Errorf("the token or a query string went outside the header: %s?%s %s", r.URL.Path, r.URL.RawQuery, body)
+	}
 	var req struct {
 		OperationName string         `json:"operationName"`
 		Query         string         `json:"query"`
 		Variables     map[string]any `json:"variables"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		f.t.Errorf("GraphQL body: %v", err)
 		return
 	}
@@ -93,13 +101,23 @@ func (f *fakePlexTV) graphQL(w http.ResponseWriter, r *http.Request) {
 			errs = append(errs, e)
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if f.retryHeader != "" {
+			w.Header().Set("Retry-After", f.retryHeader)
+		}
 		w.WriteHeader(max(status, http.StatusOK))
 		_ = json.NewEncoder(w).Encode(map[string]any{"errors": errs})
 	}
 	switch req.OperationName {
 	case "GetWatchHistoryHub":
-		if !strings.Contains(req.Query, "watchHistory(first: $first, after: $after)") || !strings.Contains(req.Query, "grandparent { id title year }") {
-			f.t.Errorf("history query %q", req.Query)
+		// The fake sends every field, so check the query asks for each one
+		// plex.tv would otherwise leave out.
+		for _, field := range []string{
+			"watchHistory(first: $first, after: $after)", "nodes { id date metadataItem { id title type year index ",
+			"parent { id title year index }", "grandparent { id title year }", "pageInfo { hasNextPage endCursor }",
+		} {
+			if !strings.Contains(req.Query, field) {
+				f.t.Errorf("history query lacks %q: %q", field, req.Query)
+			}
 		}
 		if req.Variables["uuid"] != f.uuid {
 			f.t.Errorf("history asked for user %v; want %s", req.Variables["uuid"], f.uuid)
@@ -107,6 +125,10 @@ func (f *fakePlexTV) graphQL(w http.ResponseWriter, r *http.Request) {
 		if f.historyRateLimits > 0 {
 			f.historyRateLimits--
 			gqlErr(0, "Too many requests", "RATE_LIMITED", f.retryAfter)
+			return
+		}
+		if f.failReadAfter && len(f.removed) > 0 {
+			gqlErr(0, "read after removal failed", "", 0)
 			return
 		}
 		if f.historyErr != "" {
@@ -135,8 +157,8 @@ func (f *fakePlexTV) graphQL(w http.ResponseWriter, r *http.Request) {
 		}
 		cursor, hasNext := "c"+strconv.Itoa(end), end < len(f.history)
 		switch {
-		case f.repeatCursor:
-			cursor = "c0"
+		case f.staleCursor:
+			cursor = "c1"
 		case f.emptyCursor:
 			cursor = ""
 		case f.endless:
@@ -163,6 +185,9 @@ func (f *fakePlexTV) graphQL(w http.ResponseWriter, r *http.Request) {
 			gqlErr(f.removeHTTP, "boom", "", 0, f.removeExtra...)
 		default:
 			f.removed = append(f.removed, id)
+			if !f.ignoreRemove {
+				f.history = slices.DeleteFunc(f.history, func(e cloudEntry) bool { return e.ID == id })
+			}
 			writeJSON(w, map[string]any{"data": map[string]any{"removeActivity": f.removeResult}})
 		}
 	default:
@@ -262,23 +287,28 @@ func TestReadCloudHistory_DuplicateIDs(t *testing.T) {
 }
 
 // Paging that can't move on would loop forever, or read part of the history
-// as all of it.
+// as all of it. Each guard stops it at the first page that shows it; the
+// pages before each stop added new items, so only that guard could.
 func TestReadCloudHistory_StuckPaging(t *testing.T) {
-	for name, stick := range map[string]func(*fakePlexTV){
-		"repeated cursor": func(f *fakePlexTV) { f.repeatCursor = true },
-		"no cursor":       func(f *fakePlexTV) { f.emptyCursor = true },
-		"nothing new":     func(f *fakePlexTV) { f.endless = true },
+	for _, tc := range []struct {
+		name  string
+		stick func(*fakePlexTV)
+		pages int
+	}{
+		{"no cursor", func(f *fakePlexTV) { f.emptyCursor = true }, 1},
+		{"repeated cursor", func(f *fakePlexTV) { f.staleCursor = true }, 2},
+		{"nothing new", func(f *fakePlexTV) { f.endless = true }, 4},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newFakePlexTV(t)
 			f.pageSize = 1
 			f.history = []cloudEntry{cloudShowItem("a", "A", 0, ""), cloudShowItem("b", "B", 0, ""), cloudShowItem("c", "C", 0, "")}
-			stick(f)
+			tc.stick(f)
 			if _, err := readCloudHistory(f.client(), "u-1", noRetry); err == nil || !strings.Contains(err.Error(), "can't be read whole") {
 				t.Errorf("err = %v; want a stuck-paging error", err)
 			}
-			if f.graphHits > len(f.history)+1 {
-				t.Errorf("%d requests; want it to stop at the first page that doesn't move on", f.graphHits)
+			if f.graphHits != tc.pages {
+				t.Errorf("%d requests; want %d", f.graphHits, tc.pages)
 			}
 		})
 	}
@@ -319,6 +349,37 @@ func TestCloudHistoryPage_StatusKeepsErrors(t *testing.T) {
 	var status *plexTVStatusError
 	if !errors.As(err, &status) || status.Code != http.StatusBadRequest || !strings.Contains(err.Error(), "Variable $first is invalid") {
 		t.Errorf("err = %v; want the 400 with plex.tv's message", err)
+	}
+}
+
+// Replies missing what the run needs stop it, rather than reading as an
+// empty history or passing an empty id on to a removal.
+func TestCloudHistoryPage_MalformedReplies(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{`{"data":null}`, "no data in the reply"},
+		{`{}`, "no data in the reply"},
+		{`{"data":{"user":null}}`, "no watch history in the reply"},
+		{`{"data":{"user":{"watchHistory":null}}}`, "no watch history in the reply"},
+		{`{"data":{"user":{"watchHistory":{"nodes":[{"id":"","date":"","metadataItem":null}],"pageInfo":{}}}}}`, "has no id"},
+		{`not json`, "decode GetWatchHistoryHub"},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tc.body) }))
+		_, err := newPlexTVClient(srv.URL, srv.URL, secretToken).CloudHistoryPage("u-1", "")
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v; want %q", tc.body, err, tc.want)
+		}
+	}
+}
+
+func TestRetryAfterHeader(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"30": 30 * time.Second, " 30 ": 30 * time.Second, "": 0, "-5": 0, "30abc": 0, "1.5": 0,
+		"Wed, 21 Oct 2026 07:28:00 GMT": 0, "99999999999999": 24 * time.Hour,
+	} {
+		if got := retryAfterHeader(in); got != want {
+			t.Errorf("retryAfterHeader(%q) = %s; want %s", in, got, want)
+		}
 	}
 }
 
@@ -366,19 +427,22 @@ func TestRemoveActivity(t *testing.T) {
 // errors come with it.
 func TestRemoveActivity_RateLimited(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		after float64
-		http  int
-		want  time.Duration
+		name   string
+		after  float64
+		http   int
+		header string
+		want   time.Duration
 	}{
-		{"with a wait", 42, 0, 42 * time.Second},
-		{"under a 400", 7, http.StatusBadRequest, 7 * time.Second},
-		{"no wait", 0, 0, 0},
-		{"past a Duration", 1e300, 0, 24 * time.Hour},
+		{"with a wait", 42, 0, "", 42 * time.Second},
+		{"under a 400", 7, http.StatusBadRequest, "", 7 * time.Second},
+		{"no wait", 0, 0, "", 0},
+		{"past a Duration", 1e300, 0, "", 24 * time.Hour},
+		{"wait in the 429's header", 0, http.StatusTooManyRequests, "120", 2 * time.Minute},
+		{"body's wait over the header's", 9, http.StatusTooManyRequests, "120", 9 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakePlexTV(t)
-			f.failRemove, f.removeHTTP = map[string]bool{"e1": true}, tc.http
+			f.failRemove, f.removeHTTP, f.retryHeader = map[string]bool{"e1": true}, tc.http, tc.header
 			var limit graphQLError
 			limit.Extensions.Code, limit.Extensions.RetryAfter = "RATE_LIMITED", tc.after
 			f.removeExtra = []graphQLError{limit}
@@ -388,6 +452,17 @@ func TestRemoveActivity_RateLimited(t *testing.T) {
 				t.Errorf("err = %v; want a %s rate limit", err, tc.want)
 			}
 		})
+	}
+}
+
+// A request still rate-limited after maxRateLimitTries says it gave up,
+// so the error doesn't read like a single refusal.
+func TestWaitOutRateLimit_GivesUp(t *testing.T) {
+	tries := 0
+	err := waitOutRateLimit(io.Discard, func(time.Duration) {}, func() error { tries++; return &rateLimitError{After: time.Second} })
+	var limited *rateLimitError
+	if tries != maxRateLimitTries || !errors.As(err, &limited) || !strings.Contains(err.Error(), fmt.Sprintf("gave up after %d tries", maxRateLimitTries)) {
+		t.Errorf("%d tries, err = %v; want %d and a gave-up rate limit", tries, err, maxRateLimitTries)
 	}
 }
 
