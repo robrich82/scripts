@@ -497,3 +497,54 @@ func TestRemoveActivity_HTTP429(t *testing.T) {
 		t.Errorf("err = %v; want a 30s rate limit", err)
 	}
 }
+
+// A 2xx removal reply that isn't the JSON asked for is unconfirmed; one cut
+// off, or with a failing status, is an error like any other.
+func TestRemoveActivity_UnreadableReplies(t *testing.T) {
+	for _, tc := range []struct {
+		name, body  string
+		status      int
+		cut         bool
+		unconfirmed bool
+	}{
+		{"not json", `not json`, 200, false, true},
+		{"empty object", `{}`, 200, false, true},
+		{"null data", `{"data":null}`, 200, false, true},
+		{"500 not json", `not json`, 500, false, false},
+		{"cut off", `{"data":{"remo`, 200, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.cut {
+					w.Header().Set("Content-Length", "100")
+				}
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, tc.body)
+				if tc.cut {
+					conn, _, _ := w.(http.Hijacker).Hijack()
+					conn.Close()
+				}
+			}))
+			defer srv.Close()
+			err := newPlexTVClient(srv.URL, srv.URL, secretToken).RemoveActivity("e1")
+			if err == nil || isUnconfirmed(err) != tc.unconfirmed {
+				t.Errorf("err = %v, unconfirmed %v; want unconfirmed %v", err, isUnconfirmed(err), tc.unconfirmed)
+			}
+		})
+	}
+}
+
+func TestQueryless(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://plex.tv/api?X-Plex-Token=t": "https://plex.tv/api",
+		"https://user:pw@plex.tv/api#frag":   "https://plex.tv/api",
+		"/relative/path?t=1":                 "/relative/path",
+		"https://plex.tv/%zz?X-Plex-Token=t": "an address that can't be read",
+		"https://[::1]:8080/p?t=1":           "https://[::1]:8080/p",
+		"":                                   "",
+	} {
+		if got := queryless(in); got != want {
+			t.Errorf("queryless(%q) = %q; want %q", in, got, want)
+		}
+	}
+}

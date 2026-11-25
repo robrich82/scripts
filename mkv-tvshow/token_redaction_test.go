@@ -216,3 +216,19 @@ func TestPlexTVClient_RefusesRedirects(t *testing.T) {
 		t.Errorf("the redirect target got %d requests", otherHits)
 	}
 }
+
+// A Location plex.tv's client can't parse is never printed, query and all.
+func TestPlexTVClient_UnparseableRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://elsewhere.example/%zz?X-Plex-Token="+secretToken)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+	c := newPlexTVClient(srv.URL, srv.URL, secretToken)
+	_, userErr := c.User()
+	for name, err := range map[string]error{"User": userErr, "RemoveActivity": c.RemoveActivity("e1")} {
+		if err == nil || !strings.Contains(err.Error(), "refusing to follow it") || strings.Contains(err.Error(), secretToken) {
+			t.Errorf("%s err = %v; want the redirect refused without the token", name, err)
+		}
+	}
+}

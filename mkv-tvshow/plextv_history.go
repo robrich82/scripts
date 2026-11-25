@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -64,9 +65,9 @@ func (e *rateLimitError) Error() string {
 	return fmt.Sprintf("plex.tv rate limit: retry after %s", e.After)
 }
 
-// unconfirmedError is a 2xx reply from plex.tv that doesn't say what it did:
-// one that can't be read, or a removal not answered true. Re-reading the
-// history afterwards tells whether a removal took.
+// unconfirmedError is a 2xx reply from plex.tv that doesn't confirm what it
+// did: one that isn't the JSON asked for, or a removal answered anything but
+// true. Re-reading the history afterwards tells whether a removal took.
 type unconfirmedError struct{ msg string }
 
 func (e *unconfirmedError) Error() string { return e.msg }
@@ -110,8 +111,8 @@ type graphQLError struct {
 // graphQL posts a query to plex.tv's community API and decodes its data into
 // data. A rate limit, by GraphQL error or HTTP 429, comes back as a
 // *rateLimitError; another status than 2xx as a *plexTVStatusError, with the
-// reply's GraphQL errors; a 2xx reply with no errors and no readable data as
-// an *unconfirmedError.
+// reply's GraphQL errors; a 2xx reply read whole, with no errors and no
+// readable data, as an *unconfirmedError.
 func (c *plexTVClient) graphQL(operation, query string, variables map[string]any, data any) error {
 	body, err := json.Marshal(map[string]any{"operationName": operation, "query": query, "variables": variables})
 	if err != nil {
@@ -124,16 +125,22 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	setPlexTVHeaders(req, c.token)
-	resp, err := c.doPlexTV(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("plex.tv: %s: %w", operation, err)
 	}
 	defer resp.Body.Close()
+	// A body cut off or timed out isn't plex.tv answering: that's an error
+	// like any other, not an unconfirmed reply.
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("plex.tv: %s: reading the reply: %w", operation, err)
+	}
 	var reply struct {
 		Data   json.RawMessage `json:"data"`
 		Errors []graphQLError  `json:"errors"`
 	}
-	decodeErr := json.NewDecoder(resp.Body).Decode(&reply)
+	decodeErr := json.Unmarshal(raw, &reply)
 	header := retryAfterHeader(resp.Header.Get("Retry-After"))
 	if limited := rateLimitIn(reply.Errors); limited != nil {
 		limited.After = cmp.Or(limited.After, header)

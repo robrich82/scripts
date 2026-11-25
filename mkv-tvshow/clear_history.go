@@ -105,7 +105,7 @@ type clearHistoryDeps struct {
 	recordDir string // where the record of deleted entries is written
 	out       io.Writer
 	now       func() time.Time
-	sleep     func(time.Duration) // waits out plex.tv's rate limit
+	sleep     func(time.Duration) // waits out plex.tv's rate limit, and for it to show removals
 }
 
 // historyRecord is the file written before any entry is deleted: neither
@@ -277,6 +277,8 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 	if failed := len(record.Failed) + len(record.FailedPlexTV); failed > 0 {
 		where := fmt.Sprintf("%s lists them under %s", recordPath, failedFields(record))
 		if updateErr != nil {
+			// The record can't list them, and untried ones haven't been named.
+			printNotDeleted(d.out, record, server.matched, cloud)
 			where = "the lines above name them"
 		}
 		problems = append(problems, fmt.Errorf("%d history entries were not deleted; %s", failed, where))
@@ -288,6 +290,21 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		problems = append(problems, fmt.Errorf("plex.tv now lists %d more matching item(s); run again to clear them", added))
 	}
 	return errors.Join(problems...)
+}
+
+// printNotDeleted names the entries of r.Failed and r.FailedPlexTV.
+func printNotDeleted(out io.Writer, r historyRecord, server []historyEntry, cloud cloudPlan) {
+	fmt.Fprintln(out, "Not deleted:")
+	for _, e := range server {
+		if slices.Contains(r.Failed, e.HistoryKey) {
+			fmt.Fprintf(out, "  %s\n", describeHistoryEntry(e))
+		}
+	}
+	for _, e := range cloud.matched {
+		if slices.Contains(r.FailedPlexTV, e.ID) {
+			fmt.Fprintf(out, "  %s\n", cloud.describe(e))
+		}
+	}
 }
 
 // deletedCounts is "2 of 3 history entries", or with plex.tv items
@@ -555,8 +572,8 @@ func describeLastWatched(e historyEntry) string {
 }
 
 // deleteResult is what deleteEach left: the ids not deleted, in order, and
-// among them those never tried and those whose reply alone failed
-// (isUnconfirmed).
+// among them those never tried and those whose reply didn't confirm the
+// delete (isUnconfirmed).
 type deleteResult struct {
 	failed      []string
 	untried     map[string]bool

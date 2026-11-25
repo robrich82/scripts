@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -495,14 +496,16 @@ func TestClearHistory_OwnerLookupFails_NoAccountHint(t *testing.T) {
 
 // A token plex.tv rejects (a server token) points at --account.
 func TestClearHistory_OwnerLookupFails(t *testing.T) {
-	r := newClearHistoryRun(t)
-	r.tv.userStatus = http.StatusUnauthorized
-	err := r.run(t, "", "Bluey")
-	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "pass --account (one of: QuienNZ, Stephanie)") {
-		t.Errorf("err = %v; want the 401 and a pointer to --account", err)
-	}
-	if len(r.pms.pageStarts) != 0 {
-		t.Error("fetched history without an account")
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		r := newClearHistoryRun(t)
+		r.tv.userStatus = status
+		err := r.run(t, "", "Bluey")
+		if err == nil || !strings.Contains(err.Error(), strconv.Itoa(status)) || !strings.Contains(err.Error(), "pass --account (one of: QuienNZ, Stephanie)") {
+			t.Errorf("%d: err = %v; want the status and a pointer to --account", status, err)
+		}
+		if len(r.pms.pageStarts) != 0 {
+			t.Errorf("%d: fetched history without an account", status)
+		}
 	}
 }
 

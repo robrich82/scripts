@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -502,6 +504,8 @@ func TestClearHistory_PlexTV_UnconfirmedAndListed(t *testing.T) {
 	if strings.Contains(r.out.String(), "said it removed") {
 		t.Errorf("an unconfirmed removal is reported as one plex.tv said it made:\n%s", r.out.String())
 	}
+	assertContains(t, r.out.String(), "plex.tv still lists 4 of the items whose removal it didn't confirm:\n",
+		"  still listed: plex.tv Bluey (2018) the show on 2026-11-19")
 }
 
 // An item whose removal failed with an error stays failed though plex.tv no
@@ -520,6 +524,9 @@ func TestClearHistory_PlexTV_ErrorNotOverruled(t *testing.T) {
 	}
 	if recs := r.records(t); len(recs) != 1 || !slices.Equal(recs[0].FailedPlexTV, []string{"c3"}) || recs[0].PlexTVUnchecked != "" {
 		t.Errorf("records %+v; want c3 failed, checked", recs)
+	}
+	if len(r.slept) != 0 {
+		t.Errorf("waited %v for an item whose removal failed with an error", r.slept)
 	}
 }
 
@@ -728,7 +735,7 @@ func TestPlanCloud_YearlessBesideTargetYear(t *testing.T) {
 	assertContains(t, out.String(), "Not deleting these, which plex.tv gives no year while the title is there with the year asked for: Bluey")
 }
 
-// As on the server, a year-less show beside only another year's matches on
+// A year-less show beside only another year's matches on
 // title alone: the other year's show can't be the target, the year-less one can.
 func TestPlanCloud_YearlessBesideAnotherYear(t *testing.T) {
 	lost := cloudEpisode("b1", "Bluey", 0, 1, 1, "Ep", "")
@@ -800,5 +807,143 @@ func TestCloudPlanDescribe_UntitledItem(t *testing.T) {
 	plan := planCloudFor(t, []cloudEntry{cloudEpisode("a1", "Bluey", 2018, 1, 1, "Ep", ""), untitled}, "Bluey")
 	if got := plan.describe(untitled); got != "plex.tv Bluey (2018) season 1" {
 		t.Errorf("describe = %q; want the grouped show's name", got)
+	}
+}
+
+// A year-less show the plan kept beside the target's year stays kept when
+// the run checks for new items, though the dated show's items are gone.
+func TestClearHistory_PlexTV_KeptYearlessNotNew(t *testing.T) {
+	r := newCloudRun(t, "y")
+	other := cloudEpisode("b1", "Bluey", 0, 1, 1, "Other", "2026-11-15T10:00:00.000Z")
+	other.ShowID = ""
+	r.tv.history = append(r.tv.history, other)
+	if err := r.run(t, "", "Bluey (2018)"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.out.String(), "didn't have") || slices.Contains(r.tv.removed, "b1") {
+		t.Errorf("the kept show is reported new or removed:\n%s", r.out.String())
+	}
+}
+
+// An episode of that kept show watched during the run isn't reported either:
+// planned with the first read, its show is still beside the target's year.
+func TestClearHistory_PlexTV_KeptYearlessNewEpisodeNotNew(t *testing.T) {
+	r := newCloudRun(t, "y")
+	other := cloudEpisode("b1", "Bluey", 0, 1, 1, "Other", "2026-11-15T10:00:00.000Z")
+	other.ShowID = ""
+	r.tv.history = append(r.tv.history, other)
+	r.tv.onRemove = func() {
+		if !slices.ContainsFunc(r.tv.history, func(e cloudEntry) bool { return e.ID == "b2" }) {
+			ep := cloudEpisode("b2", "Bluey", 0, 1, 2, "Another", "2026-11-22T11:00:00.000Z")
+			ep.ShowID = ""
+			r.tv.history = append([]cloudEntry{ep}, r.tv.history...)
+		}
+	}
+	if err := r.run(t, "", "Bluey (2018)"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.out.String(), "didn't have") {
+		t.Errorf("the kept show's new episode is reported:\n%s", r.out.String())
+	}
+}
+
+// With nothing older than an item still listed, the re-read can't show it
+// went: an unconfirmed removal of it stays failed, a confirmed one stands.
+func TestClearHistory_PlexTV_UnreachedItems(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		reply      any
+		wantFailed []string
+	}{
+		{"unconfirmed", nil, []string{"c1", "c2", "c3", "c4"}},
+		{"confirmed", true, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newCloudRun(t, "y")
+			r.tv.history = r.tv.history[:4] // only the target show
+			r.tv.removeResult, r.tv.ignoreRemove = tc.reply, true
+			r.tv.onRemove = func() { r.tv.history = nil } // the re-read comes back empty
+			err := r.run(t, "", "Bluey (2018)")
+			recs := r.records(t)
+			if len(recs) != 1 || !slices.Equal(recs[0].FailedPlexTV, tc.wantFailed) || recs[0].PlexTVUnchecked != "" {
+				t.Fatalf("records %+v; want failed %v, checked", recs, tc.wantFailed)
+			}
+			if tc.wantFailed == nil {
+				if err != nil {
+					t.Errorf("err = %v; want none", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted") {
+				t.Errorf("err = %v; want all 4 not deleted", err)
+			}
+			assertContains(t, r.out.String(), "plex.tv lists nothing older than 4 of the items whose removal it didn't confirm")
+			if strings.Contains(r.out.String(), "no longer lists") {
+				t.Errorf("output takes the empty read as removals:\n%s", r.out.String())
+			}
+		})
+	}
+}
+
+// When the read after the wait fails or comes back short, the first re-read,
+// which showed the items still there, stands.
+func TestClearHistory_PlexTV_SettleReadFails(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		after func(*clearHistoryRun)
+	}{
+		{"error", func(r *clearHistoryRun) { r.tv.failReadAfter = true }},
+		{"short", func(r *clearHistoryRun) { r.tv.history = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newCloudRun(t, "y")
+			r.tv.ignoreRemove = true
+			r.onSleep = func() { tc.after(r) }
+			err := r.run(t, "", "Bluey (2018)")
+			if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted") || strings.Contains(err.Error(), "couldn't be checked") {
+				t.Fatalf("err = %v; want 4 not deleted, checked", err)
+			}
+			assertContains(t, r.out.String(), "so the first read stands.", "Deleted 2 of 2 server and 0 of 4 plex.tv history entries.")
+			if recs := r.records(t); len(recs) != 1 || !slices.Equal(recs[0].FailedPlexTV, []string{"c1", "c2", "c3", "c4"}) {
+				t.Errorf("records %+v; want c1–c4 failed", recs)
+			}
+		})
+	}
+}
+
+// When the record can't be rewritten, entries not tried are named too.
+func TestClearHistory_PlexTV_RecordUpdateFailsNamesUntried(t *testing.T) {
+	setBeforeFinalSave(t, func() {})
+	r := newCloudRun(t, "y")
+	r.blockRecordOnDelete(t)
+	r.tv.failRemove = map[string]bool{"c1": true, "c2": true, "c3": true}
+	err := r.run(t, "", "Bluey (2018)")
+	if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted; the lines above name them") {
+		t.Fatalf("err = %v; want 4 not deleted, named above", err)
+	}
+	assertContains(t, r.out.String(), "Not deleted:\n", "\n  plex.tv Bluey (2018) the show on 2026-11-19\n")
+}
+
+// Unconfirmed replies are plex.tv answering, so they break a run of failures.
+func TestDeleteEach_UnconfirmedBreaksRun(t *testing.T) {
+	boom, odd := errors.New("boom"), &unconfirmedError{"odd"}
+	errs := []error{boom, boom, odd, boom, boom, nil}
+	var tried []string
+	ids := []string{"a", "b", "c", "d", "e", "f"}
+	res := deleteEach(io.Discard, "plex.tv", ids, func(s string) string { return s }, func(s string) string { return s },
+		func(id string) error { tried = append(tried, id); return errs[len(tried)-1] })
+	if !slices.Equal(tried, ids) || len(res.untried) != 0 || !res.unconfirmed["c"] {
+		t.Errorf("tried %v, untried %v, unconfirmed %v; want all tried and c unconfirmed", tried, res.untried, res.unconfirmed)
+	}
+}
+
+// A target with a year and one without, of one title: the year-less one
+// takes the year-less show, which isn't then listed as kept.
+func TestPlanCloud_DatedAndUndatedTargets(t *testing.T) {
+	other := cloudEpisode("b1", "Bluey", 0, 1, 1, "Ep", "")
+	other.ShowID = ""
+	plan := planCloudFor(t, []cloudEntry{cloudEpisode("a1", "Bluey", 2018, 1, 1, "Ep", ""), other}, "Bluey (2018)", "Bluey")
+	if got := matchedIDs(plan); !slices.Equal(got, []string{"a1", "b1"}) || plan.yearless != nil || plan.yearUnchecked != nil {
+		t.Errorf("matched %v, kept %v, unchecked %v; want both matched, nothing kept or unchecked", got, plan.yearless, plan.yearUnchecked)
 	}
 }

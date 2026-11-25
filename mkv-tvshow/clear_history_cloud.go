@@ -78,19 +78,22 @@ const settleWait = 10 * time.Second
 
 // cloudCheck is what re-reading plex.tv after the deletes found.
 type cloudCheck struct {
-	failed    []string // matched ids not deleted: still listed, or whose removal failed with an error
+	failed    []string // matched ids not deleted, by the history where it can tell, else by the reply
 	unchecked string   // why the history couldn't be read again, or trusted; failed is then the replies'
 	added     int      // matching items the plan didn't have, for another run
 }
 
 // checkCloudRemoved re-reads the plex.tv history after the deletes to see
 // which removals took, since its history, not its replies, says so. An item
-// it no longer lists counts as removed when plex.tv answered true or answered
-// without saying; one whose removal failed with an error stays failed.
+// it still lists isn't deleted. One it no longer lists is deleted when plex.tv
+// answered anything but an error, as long as the re-read reached past it;
+// one whose removal failed with an error, or wasn't tried, stays failed.
 //
 // A history read short would pass for removals that took, so the re-read must
 // still list every item of the first read that wasn't to be removed, or
-// wasn't tried; otherwise the deletes are unchecked.
+// wasn't tried (the anchors); otherwise the deletes are unchecked. An item
+// with no anchor after it in the first read may be past where the re-read
+// stopped, so only its reply counts.
 func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p clearPlan, targets []historyTarget, res deleteResult) cloudCheck {
 	matched := make(map[string]bool, len(p.cloud.matched))
 	for _, e := range p.cloud.matched {
@@ -99,6 +102,12 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 	failed := make(map[string]bool, len(res.failed))
 	for _, id := range res.failed {
 		failed[id] = true
+	}
+	anchor := func(id string) bool { return !matched[id] || res.untried[id] }
+	reached := make(map[string]bool) // ids with an anchor after them in the first read
+	for i, seen := len(p.cloudRead)-1, false; i >= 0; i-- {
+		reached[p.cloudRead[i].ID] = seen
+		seen = seen || anchor(p.cloudRead[i].ID)
 	}
 	read := func() ([]cloudEntry, map[string]bool, error) {
 		after, err := readCloudHistory(d.cloud, p.owner.UUID, retry)
@@ -111,7 +120,7 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 		}
 		lost := 0
 		for _, e := range p.cloudRead {
-			if (!matched[e.ID] || res.untried[e.ID]) && !listed[e.ID] {
+			if anchor(e.ID) && !listed[e.ID] {
 				lost++
 			}
 		}
@@ -132,48 +141,73 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 	}
 
 	after, listed, err := read()
-	if n := pending(listed); err == nil && n > 0 {
-		fmt.Fprintf(d.out, "plex.tv still lists %d item(s) it was asked to remove; checking again in %s.\n", n, settleWait)
-		d.sleep(settleWait)
-		after, listed, err = read()
-	}
 	if err != nil {
 		fmt.Fprintf(d.out, "Couldn't check the plex.tv deletes: %v\n", err)
 		return cloudCheck{failed: res.failed, unchecked: err.Error()}
 	}
+	if n := pending(listed); n > 0 {
+		fmt.Fprintf(d.out, "plex.tv still lists %d item(s) it was asked to remove; checking again in %s.\n", n, settleWait)
+		d.sleep(settleWait)
+		if again, againListed, err := read(); err != nil {
+			fmt.Fprintf(d.out, "Couldn't read plex.tv again (%v), so the first read stands.\n", err)
+		} else {
+			after, listed = again, againListed
+		}
+	}
 
 	var check cloudCheck
-	var claimed []cloudEntry
-	recovered := 0
+	var claimed, unconfirmed []cloudEntry
+	recovered, unreached := 0, 0
 	for _, e := range p.cloud.matched {
 		switch {
 		case listed[e.ID]:
 			check.failed = append(check.failed, e.ID)
-			if !failed[e.ID] {
+			switch {
+			case !failed[e.ID]:
 				claimed = append(claimed, e)
+			case res.unconfirmed[e.ID]:
+				unconfirmed = append(unconfirmed, e)
 			}
+		case res.unconfirmed[e.ID] && !reached[e.ID]:
+			check.failed = append(check.failed, e.ID)
+			unreached++
 		case res.unconfirmed[e.ID]:
 			recovered++
 		case failed[e.ID]:
 			check.failed = append(check.failed, e.ID) // an error isn't overruled
 		}
 	}
-	if len(claimed) > 0 {
-		fmt.Fprintf(d.out, "plex.tv still lists %d of the items it said it removed:\n", len(claimed))
-		for _, e := range claimed {
+	printStillListed := func(what string, entries []cloudEntry) {
+		if len(entries) == 0 {
+			return
+		}
+		fmt.Fprintf(d.out, "plex.tv still lists %d of the items %s:\n", len(entries), what)
+		for _, e := range entries {
 			fmt.Fprintf(d.out, "  still listed: %s\n", p.cloud.describe(e))
 		}
 	}
+	printStillListed("it said it removed", claimed)
+	printStillListed("whose removal it didn't confirm", unconfirmed)
 	if recovered > 0 {
 		fmt.Fprintf(d.out, "plex.tv no longer lists %d of the items whose removal it didn't confirm.\n", recovered)
 	}
-	for _, e := range planCloud(after, targets).matched {
+	if unreached > 0 {
+		fmt.Fprintf(d.out, "plex.tv lists nothing older than %d of the items whose removal it didn't confirm, so its history can't show they went: they count as not deleted.\n", unreached)
+	}
+	// Planned with the first read too, so a show kept beside the target's
+	// year is still kept once that year's items are gone.
+	firstRead := make(map[string]bool, len(p.cloudRead))
+	for _, e := range p.cloudRead {
+		firstRead[e.ID] = true
+	}
+	both := append(slices.Clip(p.cloudRead), slices.DeleteFunc(slices.Clone(after), func(e cloudEntry) bool { return firstRead[e.ID] })...)
+	for _, e := range planCloud(both, targets).matched {
 		if !matched[e.ID] {
 			check.added++
 		}
 	}
 	if check.added > 0 {
-		fmt.Fprintf(d.out, "plex.tv now lists %d more item(s) of these shows that weren't there to plan; run again to clear them.\n", check.added)
+		fmt.Fprintf(d.out, "plex.tv now lists %d item(s) of these shows that the plan didn't have; run again to clear them.\n", check.added)
 	}
 	return check
 }
@@ -259,8 +293,9 @@ type cloudPlan struct {
 // planCloud picks the plex.tv items of the target shows: episodes, seasons
 // and the shows themselves. A target's year must equal the show's, and a show
 // with another year is listed, not deleted. A show plex.tv gives no year
-// matches on title alone, as on the server, unless the title is there with
-// the target's year: it's then another show, listed and kept.
+// matches on title alone, unless the title is there with the target's year:
+// it's then another show, listed and kept. (The server's link from a
+// year-less title to a retitled show is plex.tv's grouping by show id.)
 func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 	shows := cloudShowsOf(entries)
 	plan := cloudPlan{shows: make(map[string]*cloudSummary)}

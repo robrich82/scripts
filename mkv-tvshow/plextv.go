@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,13 +27,7 @@ type plexTVClient struct {
 
 func newPlexTVClient(baseURL, communityURL, token string) *plexTVClient {
 	httpClient := newPlexHTTPClient()
-	// plex.tv's API doesn't redirect. Following one would send a request on
-	// to wherever it points, where even a reply of true to a removal proves
-	// nothing, or turn a lost token into a 401 that reads as plex.tv refusing
-	// it.
-	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		return fmt.Errorf("plex.tv redirected %s %s to %s; refusing to follow it", via[0].Method, via[0].URL.Path, queryless(req.URL.String()))
-	}
+	httpClient.Transport = refuseRedirects{cmp.Or[http.RoundTripper](httpClient.Transport, http.DefaultTransport)}
 	return &plexTVClient{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		communityURL: strings.TrimRight(communityURL, "/"),
@@ -41,26 +36,35 @@ func newPlexTVClient(baseURL, communityURL, token string) *plexTVClient {
 	}
 }
 
-// queryless is raw without its query or user info, either of which could
-// carry a token.
+// refuseRedirects turns every redirect from plex.tv into an error, before
+// the client reads its Location. plex.tv's API doesn't redirect. Following
+// one would send a request on to wherever it points, where even a reply of
+// true to a removal proves nothing, or turn a lost token into a 401 that
+// reads as plex.tv refusing it. And the client's own errors would print the
+// Location whole, where a query could carry a token.
+type refuseRedirects struct{ next http.RoundTripper }
+
+func (t refuseRedirects) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.next.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	switch resp.StatusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		resp.Body.Close()
+		return nil, fmt.Errorf("plex.tv redirected %s %s to %s; refusing to follow it", req.Method, req.URL.Path, queryless(resp.Header.Get("Location")))
+	}
+	return resp, nil
+}
+
+// queryless is a URL without its query, fragment or user info, any of which
+// could carry a token; one that can't be parsed isn't shown.
 func queryless(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
-		s, _, _ := strings.Cut(raw, "?")
-		return s
+		return "an address that can't be read"
 	}
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
-}
-
-// doPlexTV sends req. A transport error's *url.Error names the URL it failed
-// on, which after a refused redirect is the target's: it's cut to queryless.
-func (c *plexTVClient) doPlexTV(req *http.Request) (*http.Response, error) {
-	resp, err := c.httpClient.Do(req)
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		ue.URL = queryless(ue.URL)
-	}
-	return resp, err
 }
 
 // setPlexTVHeaders authenticates req to plex.tv. The token goes in a header,
@@ -112,7 +116,7 @@ func (c *plexTVClient) User() (plexTVUser, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	setPlexTVHeaders(req, c.token)
-	resp, err := c.doPlexTV(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return plexTVUser{}, fmt.Errorf("plex.tv: get user: %w", err)
 	}
