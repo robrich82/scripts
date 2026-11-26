@@ -150,7 +150,7 @@ func TestHistoryClients_SendTokenInHeader(t *testing.T) {
 	if err := c.DeleteHistory(historyKeyPrefix + "1"); err != nil {
 		t.Errorf("DeleteHistory: %v", err)
 	}
-	_, _ = newPlexTVClient(srv.URL, secretToken).User() // no username in the reply
+	_, _ = newPlexTVClient(srv.URL, srv.URL, secretToken).User() // no username in the reply
 	if requests != 4 {
 		t.Errorf("server got %d requests, want 4", requests)
 	}
@@ -160,13 +160,96 @@ func TestHistoryClients_TransportErrorOmitsToken(t *testing.T) {
 	c := newHTTPPlexClient(closedServerURL(), secretToken)
 	_, accountsErr := c.Accounts()
 	_, historyErr := c.WatchHistory(1)
-	_, userErr := newPlexTVClient(closedServerURL(), secretToken).User()
+	_, userErr := newPlexTVClient(closedServerURL(), closedServerURL(), secretToken).User()
 	for _, err := range []error{accountsErr, historyErr, c.DeleteHistory(historyKeyPrefix + "1"), userErr} {
 		if err == nil {
 			t.Fatal("expected a connection error")
 		}
 		if strings.Contains(err.Error(), secretToken) {
 			t.Errorf("error leaks the token: %v", err)
+		}
+	}
+}
+
+func TestPlexTVGraphQL_TransportErrorOmitsToken(t *testing.T) {
+	c := newPlexTVClient(closedServerURL(), closedServerURL(), secretToken)
+	_, historyErr := c.CloudHistoryPage("u-1", "")
+	for _, err := range []error{historyErr, c.RemoveActivity("e1")} {
+		if err == nil {
+			t.Fatal("expected a connection error")
+		}
+		if strings.Contains(err.Error(), secretToken) {
+			t.Errorf("error leaks the token: %v", err)
+		}
+	}
+}
+
+// plex.tv's API doesn't redirect, so its client follows no redirect: a 307
+// would resend the removal to another host without its token, where a reply
+// of true proves nothing, and a 302 would resend it as a GET.
+func TestPlexTVClient_RefusesRedirects(t *testing.T) {
+	otherHits := 0
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		otherHits++
+		fmt.Fprint(w, `{"data":{"removeActivity":true}}`)
+	}))
+	t.Cleanup(other.Close)
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect, http.StatusFound, http.StatusMovedPermanently} {
+		plexTV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, other.URL+r.URL.Path+"?X-Plex-Token="+secretToken, status)
+		}))
+		c := newPlexTVClient(plexTV.URL, plexTV.URL, secretToken)
+		if err := c.RemoveActivity("e1"); err == nil || !strings.Contains(err.Error(), "refusing to follow it") || strings.Contains(err.Error(), "PLEX_URL") {
+			t.Errorf("%d: RemoveActivity err = %v; want the redirect refused", status, err)
+		} else if strings.Contains(err.Error(), secretToken) {
+			t.Errorf("%d: RemoveActivity err = %v; prints the token from the redirect's query", status, err)
+		}
+		if _, err := c.CloudHistoryPage("u-1", ""); err == nil || !strings.Contains(err.Error(), "refusing to follow it") {
+			t.Errorf("%d: CloudHistoryPage err = %v; want the redirect refused", status, err)
+		}
+		if _, err := c.User(); err == nil || !strings.Contains(err.Error(), "refusing to follow it") || strings.Contains(err.Error(), secretToken) {
+			t.Errorf("%d: User err = %v; want the redirect refused, not a 401, without the token", status, err)
+		}
+		plexTV.Close()
+	}
+	if otherHits != 0 {
+		t.Errorf("the redirect target got %d requests", otherHits)
+	}
+}
+
+// A redirect with no Location, or only a query, says so rather than naming
+// an empty address.
+func TestPlexTVClient_RedirectWithoutAddress(t *testing.T) {
+	for loc, want := range map[string]string{
+		"":                             "/api to no address; refusing to follow it",
+		"?X-Plex-Token=" + secretToken: "/api to an address with only a query, fragment or user info; refusing to follow it",
+	} {
+		plexTV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if loc != "" {
+				w.Header().Set("Location", loc)
+			}
+			w.WriteHeader(http.StatusFound)
+		}))
+		err := newPlexTVClient(plexTV.URL, plexTV.URL, secretToken).RemoveActivity("e1")
+		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), secretToken) {
+			t.Errorf("Location %q: err = %v; want %q", loc, err, want)
+		}
+		plexTV.Close()
+	}
+}
+
+// A Location plex.tv's client can't parse is never printed, query and all.
+func TestPlexTVClient_UnparseableRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://elsewhere.example/%zz?X-Plex-Token="+secretToken)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+	c := newPlexTVClient(srv.URL, srv.URL, secretToken)
+	_, userErr := c.User()
+	for name, err := range map[string]error{"User": userErr, "RemoveActivity": c.RemoveActivity("e1")} {
+		if err == nil || !strings.Contains(err.Error(), "refusing to follow it") || strings.Contains(err.Error(), secretToken) {
+			t.Errorf("%s err = %v; want the redirect refused without the token", name, err)
 		}
 	}
 }

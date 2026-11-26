@@ -7,52 +7,30 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
-// fakePlexTV serves plex.tv's /api/v2/user for username, or status when it
-// isn't 200, and counts requests.
-func fakePlexTV(t *testing.T, username string, status int, requests *int) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*requests++
-		if r.URL.Path != "/api/v2/user" {
-			t.Errorf("unexpected plex.tv request %s", r.URL)
-		}
-		if r.Header.Get("X-Plex-Token") != secretToken || r.Header.Get("X-Plex-Client-Identifier") == "" {
-			t.Errorf("plex.tv request headers: token %q, client id %q", r.Header.Get("X-Plex-Token"), r.Header.Get("X-Plex-Client-Identifier"))
-		}
-		if status != http.StatusOK {
-			w.WriteHeader(status)
-			return
-		}
-		writeJSON(w, map[string]any{"username": username, "uuid": "u-1", "authToken": "not-for-logs"})
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
 var recordTime = time.Date(2026, 11, 22, 9, 30, 0, 0, time.UTC)
 
 type clearHistoryRun struct {
-	pms          *fakePMS
-	ownerName    string // the PLEX_TOKEN owner's plex.tv username
-	plexTVStatus int
-	plexTVHits   int
-	prompter     *scriptedPrompter
-	recordDir    string
-	out          bytes.Buffer
+	pms       *fakePMS
+	tv        *fakePlexTV // plex.tv; the owner is QuienNZ, with no history
+	prompter  *scriptedPrompter
+	recordDir string
+	out       bytes.Buffer
+	slept     []time.Duration
+	onSleep   func() // runs after each wait is recorded
 }
 
 // newClearHistoryRun has an owner "QuienNZ" (id 1) and "Stephanie" (id 5),
-// each with a watch history, behind real HTTP clients.
+// each with a server watch history, behind real HTTP clients.
 func newClearHistoryRun(t *testing.T, answers ...string) *clearHistoryRun {
 	t.Helper()
 	return &clearHistoryRun{
@@ -73,22 +51,29 @@ func newClearHistoryRun(t *testing.T, answers ...string) *clearHistoryRun {
 				episode(10, 1, "Bluey (1992)", "Pilot"),
 			},
 		},
-		ownerName:    "QuienNZ",
-		plexTVStatus: http.StatusOK,
-		prompter:     &scriptedPrompter{answers: answers},
-		recordDir:    filepath.Join(t.TempDir(), "mkv-tvshow"),
+		tv:        newFakePlexTV(t),
+		prompter:  &scriptedPrompter{answers: answers},
+		recordDir: filepath.Join(t.TempDir(), "mkv-tvshow"),
 	}
 }
 
 func (r *clearHistoryRun) run(t *testing.T, account string, shows ...string) error {
 	t.Helper()
+	plexTV := r.tv.client()
 	return clearHistory(shows, account, clearHistoryDeps{
 		server:    newHTTPPlexClient(r.pms.serve().URL, secretToken),
-		owner:     newPlexTVClient(fakePlexTV(t, r.ownerName, r.plexTVStatus, &r.plexTVHits).URL, secretToken),
+		owner:     plexTV,
+		cloud:     plexTV,
 		prompt:    r.prompter,
 		recordDir: r.recordDir,
 		out:       &r.out,
 		now:       func() time.Time { return recordTime },
+		sleep: func(d time.Duration) {
+			r.slept = append(r.slept, d)
+			if r.onSleep != nil {
+				r.onSleep()
+			}
+		},
 	})
 }
 
@@ -110,11 +95,12 @@ func (r *clearHistoryRun) records(t *testing.T) []historyRecord {
 	return out
 }
 
-// assertUntouched checks that nothing was deleted or recorded.
+// assertUntouched checks that nothing was deleted, on the server or
+// plex.tv, or recorded.
 func (r *clearHistoryRun) assertUntouched(t *testing.T) {
 	t.Helper()
-	if len(r.pms.deleted) != 0 {
-		t.Errorf("deleted %v", r.pms.deleted)
+	if len(r.pms.deleted) != 0 || len(r.tv.removed) != 0 {
+		t.Errorf("server deleted %v, plex.tv removed %v", r.pms.deleted, r.tv.removed)
 	}
 	if recs := r.records(t); len(recs) != 0 {
 		t.Errorf("wrote %d record files", len(recs))
@@ -310,6 +296,10 @@ func TestClearHistory_Confirmed_DeletesOnlyMatches(t *testing.T) {
 	if !recs[0].Complete || recs[0].Failed != nil {
 		t.Errorf("record complete %v, failed %v; want complete with none failed", recs[0].Complete, recs[0].Failed)
 	}
+	// plex.tv was read and had none of these: [], not null, which means skipped.
+	if recs[0].PlexTV == nil || len(recs[0].PlexTV) != 0 {
+		t.Errorf("record plexTV %v; want empty, not null", recs[0].PlexTV)
+	}
 	if len(r.prompter.asked) != 1 || !strings.Contains(r.prompter.asked[0], "Delete these 3 history entries for QuienNZ (account 1)?") {
 		t.Errorf("asked %q", r.prompter.asked)
 	}
@@ -363,8 +353,13 @@ func TestClearHistory_NamedAccount(t *testing.T) {
 	if want := keys("8", "9"); !slices.Equal(r.pms.deleted, want) {
 		t.Errorf("deleted %v; want %v", r.pms.deleted, want)
 	}
-	if r.plexTVHits != 0 {
-		t.Errorf("asked plex.tv %d times; a named account doesn't need the owner", r.plexTVHits)
+	// This token reaches only its owner's plex.tv history, so plex.tv is
+	// asked who that is, once.
+	if r.tv.userHits != 1 || r.tv.graphHits != 0 {
+		t.Errorf("asked plex.tv for the owner %d times and the history %d times; want once and never", r.tv.userHits, r.tv.graphHits)
+	}
+	if want := "This PLEX_TOKEN can clear only its owner's (QuienNZ) plex.tv history, so any Stephanie has there is left alone."; !strings.Contains(r.out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, r.out.String())
 	}
 }
 
@@ -405,7 +400,7 @@ func TestClearHistory_DuplicateAccountName(t *testing.T) {
 // A plex.tv reply without a username must not pick the unnamed account.
 func TestClearHistory_OwnerWithoutUsername(t *testing.T) {
 	r := newClearHistoryRun(t, "y")
-	r.ownerName = ""
+	r.tv.username = ""
 	if err := r.run(t, "", "Bluey"); err == nil || !strings.Contains(err.Error(), "no username") {
 		t.Errorf("err = %v; want a missing-username error", err)
 	}
@@ -421,7 +416,7 @@ func TestClearHistory_NoNamedAccounts(t *testing.T) {
 	if err := r.run(t, "", "Bluey"); err == nil || !strings.Contains(err.Error(), "listed no named accounts") {
 		t.Errorf("err = %v; want a no-accounts error", err)
 	}
-	if r.plexTVHits != 0 {
+	if r.tv.userHits != 0 {
 		t.Error("asked plex.tv with no accounts to match")
 	}
 	r.assertUntouched(t)
@@ -485,16 +480,32 @@ func TestClearHistory_OwnerNotOnServer(t *testing.T) {
 	}
 }
 
+// Any other owner lookup failure doesn't point at --account: plex.tv is
+// asked for the owner with it too, so it would fail the same way.
+func TestClearHistory_OwnerLookupFails_NoAccountHint(t *testing.T) {
+	r := newClearHistoryRun(t)
+	r.tv.userStatus = http.StatusInternalServerError
+	err := r.run(t, "", "Bluey")
+	if err == nil || !strings.Contains(err.Error(), "500") || strings.Contains(err.Error(), "--account") {
+		t.Errorf("err = %v; want the 500 without a pointer to --account", err)
+	}
+	if err != nil && strings.Count(err.Error(), "nothing was deleted") != 1 {
+		t.Errorf("err = %v; want \"nothing was deleted\" once", err)
+	}
+}
+
 // A token plex.tv rejects (a server token) points at --account.
 func TestClearHistory_OwnerLookupFails(t *testing.T) {
-	r := newClearHistoryRun(t)
-	r.plexTVStatus = http.StatusUnauthorized
-	err := r.run(t, "", "Bluey")
-	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "pass --account (one of: QuienNZ, Stephanie)") {
-		t.Errorf("err = %v; want the 401 and a pointer to --account", err)
-	}
-	if len(r.pms.pageStarts) != 0 {
-		t.Error("fetched history without an account")
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		r := newClearHistoryRun(t)
+		r.tv.userStatus = status
+		err := r.run(t, "", "Bluey")
+		if err == nil || !strings.Contains(err.Error(), strconv.Itoa(status)) || !strings.Contains(err.Error(), "pass --account (one of: QuienNZ, Stephanie)") {
+			t.Errorf("%d: err = %v; want the status and a pointer to --account", status, err)
+		}
+		if len(r.pms.pageStarts) != 0 {
+			t.Errorf("%d: fetched history without an account", status)
+		}
 	}
 }
 
@@ -582,7 +593,7 @@ func TestClearHistory_StopsAfterRepeatedFailures(t *testing.T) {
 	if len(recs) != 1 || !slices.Equal(recs[0].Failed, want) || !recs[0].Complete {
 		t.Errorf("records %+v; want one, complete, with all 6 failed in order", recs)
 	}
-	if !strings.Contains(r.out.String(), "Stopped after 3 failures in a row; 3 entries weren't tried.") || strings.Count(r.out.String(), "  failed:") != 3 {
+	if !strings.Contains(r.out.String(), "Stopped after 3 failures in a row on the server; 3 entries there weren't tried.") || strings.Count(r.out.String(), "  failed:") != 3 {
 		t.Errorf("output:\n%s", r.out.String())
 	}
 }
@@ -725,7 +736,8 @@ func TestMain_ClearHistoryFlagErrors(t *testing.T) {
 }
 
 // The whole mode through main(): flags, env, the stdin prompt and the record
-// in the config dir. --account skips plex.tv, which a test can't stand in for.
+// in the config dir. Stephanie's run asks the fake plex.tv only who owns the
+// token.
 func TestMain_ClearHistory(t *testing.T) {
 	newPMS := func() *fakePMS {
 		return &fakePMS{
@@ -735,11 +747,14 @@ func TestMain_ClearHistory(t *testing.T) {
 		}
 	}
 	args := []string{"--clear-history", "Bluey (2018)", "--clear-history", "Chicago Fire", "--account", "Stephanie"}
+	envFor := func(pms *fakePMS) []string {
+		return []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken, "MKV_TVSHOW_TEST_PLEXTV=" + newFakePlexTV(t).serve().URL}
+	}
 
 	t.Run("yes", func(t *testing.T) {
 		pms := newPMS()
 		cfgHome := t.TempDir()
-		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), cfgHome, env, "y\n", args...)
 		if err != nil {
 			t.Fatalf("%v\n%s", err, out)
@@ -754,7 +769,7 @@ func TestMain_ClearHistory(t *testing.T) {
 	})
 	t.Run("no", func(t *testing.T) {
 		pms := newPMS()
-		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "n\n", args...)
 		if err != nil {
 			t.Fatalf("%v\n%s", err, out)
@@ -766,7 +781,7 @@ func TestMain_ClearHistory(t *testing.T) {
 	t.Run("partial failure", func(t *testing.T) {
 		pms := newPMS()
 		pms.failKeys = map[string]bool{historyKeyPrefix + "8": true}
-		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "y\n", args...)
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
@@ -778,7 +793,7 @@ func TestMain_ClearHistory(t *testing.T) {
 	})
 	t.Run("closed stdin", func(t *testing.T) {
 		pms := newPMS()
-		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken}
+		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "", args...)
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
@@ -786,6 +801,36 @@ func TestMain_ClearHistory(t *testing.T) {
 		}
 		if len(pms.deleted) != 0 {
 			t.Errorf("deleted %v", pms.deleted)
+		}
+	})
+	// Unless plex.tv refuses the token, a failure to reach it stops the run,
+	// even for another account: otherwise a run for the owner by name would
+	// clear the server alone without saying why.
+	t.Run("plex.tv unreachable", func(t *testing.T) {
+		pms := newPMS()
+		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken} // plex.tv at a closed port
+		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "y\n", args...)
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || !strings.Contains(out, "nothing was deleted") {
+			t.Fatalf("err = %v; want exit status 1 and nothing deleted:\n%s", err, out)
+		}
+		if len(pms.deleted) != 0 {
+			t.Errorf("deleted %v", pms.deleted)
+		}
+	})
+	// Without --account it clears the owner's history on the server and on plex.tv.
+	t.Run("owner with plex.tv", func(t *testing.T) {
+		pms := newPMS()
+		pms.history = append(pms.history, episode(12, 1, "Bluey (2018)", "Hospital"))
+		tv := newFakePlexTV(t)
+		tv.history = []cloudEntry{cloudEpisode("c1", "Bluey", 2018, 1, 1, "Hospital", "2026-11-22T08:00:00.000Z")}
+		env := []string{"PLEX_URL=" + pms.serve().URL, "PLEX_TOKEN=" + secretToken, "MKV_TVSHOW_TEST_PLEXTV=" + tv.serve().URL}
+		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "y\n", "--clear-history", "Bluey (2018)")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !slices.Equal(pms.deleted, keys("12")) || !slices.Equal(tv.removed, []string{"c1"}) {
+			t.Errorf("server deleted %v, plex.tv removed %v; want 12 and c1:\n%s", pms.deleted, tv.removed, out)
 		}
 	})
 }

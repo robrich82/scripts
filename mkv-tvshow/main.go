@@ -25,7 +25,7 @@ func main() {
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a show and reset its applied state (folder substring or TMDB ID), then exit.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every show in the current directory, overriding any cached value, then exit.")
 	var clearHistoryShows stringList
-	flag.Var(&clearHistoryShows, "clear-history", `Delete a show's Plex watch history, given as "Title" or "Title (Year)"; repeat for more shows. Lists the entries and asks first, then exits.`)
+	flag.Var(&clearHistoryShows, "clear-history", `Delete a show's Plex watch history, and on plex.tv too when the account is the token owner's, given as "Title" or "Title (Year)"; repeat for more shows. Lists the entries and asks first, then exits.`)
 	historyAccount := flag.String("account", "", "With --clear-history, the Plex server account whose history to clear, by name. Defaults to the PLEX_TOKEN owner.")
 	flag.Parse()
 
