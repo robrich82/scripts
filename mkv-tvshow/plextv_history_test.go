@@ -42,11 +42,12 @@ type fakePlexTV struct {
 	failReadAfter bool            // once something is removed, GetWatchHistoryHub fails
 	rateLimits    int             // removeActivity calls refused with RATE_LIMITED before the rest
 	failRemove    map[string]bool
-	removeResult  any            // removeActivity's value
-	onRemove      func()         // runs before each removal is answered
-	removeHTTP    int            // with failRemove, the HTTP status; 0 is 200
-	retryHeader   string         // with failRemove, a Retry-After header
-	removeExtra   []graphQLError // more errors beside failRemove's
+	removeResult  any             // removeActivity's value
+	onRemove      func()          // runs before each removal is answered
+	removeHTTP    int             // with failRemove, the HTTP status; 0 is 200
+	retryHeader   string          // with failRemove, a Retry-After header
+	removeExtra   []graphQLError  // more errors beside failRemove's
+	cutRemove     map[string]bool // these items' removals take, but the reply is cut off
 }
 
 func newFakePlexTV(t *testing.T) *fakePlexTV {
@@ -195,10 +196,25 @@ func (f *fakePlexTV) graphQL(w http.ResponseWriter, r *http.Request) {
 			if !f.ignoreRemove && !f.keepListed[id] {
 				f.history = slices.DeleteFunc(f.history, func(e cloudEntry) bool { return e.ID == id })
 			}
+			if f.cutRemove[id] {
+				cutReply(w, http.StatusOK, `{"data":{"remo`)
+				return
+			}
 			writeJSON(w, map[string]any{"data": map[string]any{"removeActivity": f.removeResult}})
 		}
 	default:
 		f.t.Errorf("unexpected GraphQL operation %q", req.OperationName)
+	}
+}
+
+// cutReply sends the start of body with status, and closes the connection
+// before the rest its Content-Length promises.
+func cutReply(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Length", "100")
+	w.WriteHeader(status)
+	fmt.Fprint(w, body)
+	if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+		conn.Close()
 	}
 }
 
@@ -498,37 +514,73 @@ func TestRemoveActivity_HTTP429(t *testing.T) {
 	}
 }
 
-// A 2xx removal reply that isn't the JSON asked for is unconfirmed; one cut
-// off, or with a failing status, is an error like any other.
+// A 2xx removal reply cut off, or that isn't the JSON asked for, is
+// unconfirmed, and only the cut-off one counts toward a run of failures. One
+// with a failing status is an error named by it, cut off or not.
 func TestRemoveActivity_UnreadableReplies(t *testing.T) {
 	for _, tc := range []struct {
 		name, body  string
 		status      int
 		cut         bool
 		unconfirmed bool
+		want        string // in the error
 	}{
-		{"not json", `not json`, 200, false, true},
-		{"empty object", `{}`, 200, false, true},
-		{"null data", `{"data":null}`, 200, false, true},
-		{"500 not json", `not json`, 500, false, false},
-		{"cut off", `{"data":{"remo`, 200, true, false},
+		{"not json", `not json`, 200, false, true, "decode removeActivity"},
+		{"empty object", `{}`, 200, false, true, "no data"},
+		{"null data", `{"data":null}`, 200, false, true, "no data"},
+		{"500 not json", `not json`, 500, false, false, "500"},
+		{"cut off", `{"data":{"remo`, 200, true, true, "cut off"},
+		{"500 cut off", `{"errors":[{"mess`, 500, true, false, "status 500 Internal Server Error (reading the reply"},
+		{"401 cut off", `{"err`, 401, true, false, "status 401 Unauthorized (reading the reply"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tc.cut {
-					w.Header().Set("Content-Length", "100")
+					cutReply(w, tc.status, tc.body)
+					return
 				}
 				w.WriteHeader(tc.status)
 				fmt.Fprint(w, tc.body)
-				if tc.cut {
-					conn, _, _ := w.(http.Hijacker).Hijack()
-					conn.Close()
-				}
 			}))
 			defer srv.Close()
 			err := newPlexTVClient(srv.URL, srv.URL, secretToken).RemoveActivity("e1")
-			if err == nil || isUnconfirmed(err) != tc.unconfirmed {
-				t.Errorf("err = %v, unconfirmed %v; want unconfirmed %v", err, isUnconfirmed(err), tc.unconfirmed)
+			var u *unconfirmedError
+			if err == nil || errors.As(err, &u) != tc.unconfirmed || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, unconfirmed %v; want unconfirmed %v, naming %q", err, u != nil, tc.unconfirmed, tc.want)
+			}
+			if u != nil && u.cut != tc.cut {
+				t.Errorf("cut = %v; want %v", u.cut, tc.cut)
+			}
+		})
+	}
+}
+
+// A 429 is a rate limit though its body is cut off.
+func TestRemoveActivity_HTTP429CutOff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		cutReply(w, http.StatusTooManyRequests, `{"errors":[`)
+	}))
+	defer srv.Close()
+	var limited *rateLimitError
+	if err := newPlexTVClient(srv.URL, srv.URL, secretToken).RemoveActivity("e1"); !errors.As(err, &limited) || limited.After != 30*time.Second {
+		t.Errorf("err = %v; want a 30s rate limit", err)
+	}
+}
+
+// Anything after the reply's JSON is ignored, as plex.tv's replies were read
+// before.
+func TestRemoveActivity_TrailingData(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"removed", `{"data":{"removeActivity":true}}` + "\n<junk>", ""},
+		{"rate limited", `{"errors":[{"message":"slow","extensions":{"code":"RATE_LIMITED","retryAfter":7}}]} junk`, "retry after 7s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tc.body) }))
+			defer srv.Close()
+			err := newPlexTVClient(srv.URL, srv.URL, secretToken).RemoveActivity("e1")
+			if (tc.want == "" && err != nil) || (tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want))) {
+				t.Errorf("err = %v; want %q", err, tc.want)
 			}
 		})
 	}

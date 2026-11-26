@@ -66,9 +66,13 @@ func (e *rateLimitError) Error() string {
 }
 
 // unconfirmedError is a 2xx reply from plex.tv that doesn't confirm what it
-// did: one that isn't the JSON asked for, or a removal answered anything but
-// true. Re-reading the history afterwards tells whether a removal took.
-type unconfirmedError struct{ msg string }
+// did: one cut off, one that isn't the JSON asked for, or a removal answered
+// anything but true. Re-reading the history afterwards tells whether a
+// removal took. cut is a reply cut off, which may mean plex.tv went away.
+type unconfirmedError struct {
+	msg string
+	cut bool
+}
 
 func (e *unconfirmedError) Error() string { return e.msg }
 
@@ -111,7 +115,7 @@ type graphQLError struct {
 // graphQL posts a query to plex.tv's community API and decodes its data into
 // data. A rate limit, by GraphQL error or HTTP 429, comes back as a
 // *rateLimitError; another status than 2xx as a *plexTVStatusError, with the
-// reply's GraphQL errors; a 2xx reply read whole, with no errors and no
+// reply's GraphQL errors; a 2xx reply cut off, or with no errors and no
 // readable data, as an *unconfirmedError.
 func (c *plexTVClient) graphQL(operation, query string, variables map[string]any, data any) error {
 	body, err := json.Marshal(map[string]any{"operationName": operation, "query": query, "variables": variables})
@@ -130,17 +134,17 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		return fmt.Errorf("plex.tv: %s: %w", operation, err)
 	}
 	defer resp.Body.Close()
-	// A body cut off or timed out isn't plex.tv answering: that's an error
-	// like any other, not an unconfirmed reply.
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("plex.tv: %s: reading the reply: %w", operation, err)
-	}
+	// The status says what it can even when the body is cut off.
+	raw, readErr := io.ReadAll(resp.Body)
 	var reply struct {
 		Data   json.RawMessage `json:"data"`
 		Errors []graphQLError  `json:"errors"`
 	}
-	decodeErr := json.Unmarshal(raw, &reply)
+	var decodeErr error
+	if readErr == nil {
+		// The first JSON value; anything after it is ignored.
+		decodeErr = json.NewDecoder(bytes.NewReader(raw)).Decode(&reply)
+	}
 	header := retryAfterHeader(resp.Header.Get("Retry-After"))
 	if limited := rateLimitIn(reply.Errors); limited != nil {
 		limited.After = cmp.Or(limited.After, header)
@@ -151,22 +155,28 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 	}
 	if resp.StatusCode/100 != 2 {
 		statusErr := &plexTVStatusError{what: operation, Status: resp.Status, Code: resp.StatusCode}
-		if len(reply.Errors) > 0 {
+		switch {
+		case len(reply.Errors) > 0:
 			return fmt.Errorf("%w: %s", statusErr, errorMessages(reply.Errors))
+		case readErr != nil:
+			return fmt.Errorf("%w (reading the reply: %v)", statusErr, readErr)
 		}
 		return statusErr
 	}
+	if readErr != nil {
+		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: the reply was cut off: %v", operation, readErr), cut: true}
+	}
 	if decodeErr != nil {
-		return &unconfirmedError{fmt.Sprintf("plex.tv: decode %s: %v", operation, decodeErr)}
+		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: decode %s: %v", operation, decodeErr)}
 	}
 	if len(reply.Errors) > 0 {
 		return fmt.Errorf("plex.tv: %s: %s", operation, errorMessages(reply.Errors))
 	}
 	if len(reply.Data) == 0 || string(reply.Data) == "null" {
-		return &unconfirmedError{fmt.Sprintf("plex.tv: %s: no data in the reply", operation)}
+		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: no data in the reply", operation)}
 	}
 	if err := json.Unmarshal(reply.Data, data); err != nil {
-		return &unconfirmedError{fmt.Sprintf("plex.tv: decode %s: %v", operation, err)}
+		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: decode %s: %v", operation, err)}
 	}
 	return nil
 }
@@ -294,9 +304,9 @@ func (c *plexTVClient) RemoveActivity(id string) error {
 	}
 	switch {
 	case data.RemoveActivity == nil:
-		return &unconfirmedError{"plex.tv: removeActivity: the reply doesn't say it was removed"}
+		return &unconfirmedError{msg: "plex.tv: removeActivity: the reply doesn't say it was removed"}
 	case !*data.RemoveActivity:
-		return &unconfirmedError{"plex.tv: removeActivity: plex.tv replied false"}
+		return &unconfirmedError{msg: "plex.tv: removeActivity: plex.tv replied false"}
 	}
 	return nil
 }

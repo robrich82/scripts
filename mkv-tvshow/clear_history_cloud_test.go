@@ -656,7 +656,7 @@ func TestClearHistory_PlexTV_RecordUpdateFails(t *testing.T) {
 	r.tv.keepListed = map[string]bool{"c2": true}
 	err := r.run(t, "", "Bluey (2018)")
 	if err == nil || !strings.Contains(err.Error(), "couldn't be updated to say so") ||
-		!strings.Contains(err.Error(), "1 history entries were not deleted; the lines above name them") {
+		!strings.Contains(err.Error(), "1 history entries were not deleted; the output above names them") {
 		t.Fatalf("err = %v; want the rewrite failure and the item not deleted", err)
 	}
 	assertContains(t, r.out.String(), `  still listed: plex.tv Bluey (2018) S02E05 "Hospital"`)
@@ -847,8 +847,9 @@ func TestClearHistory_PlexTV_KeptYearlessNewEpisodeNotNew(t *testing.T) {
 	}
 }
 
-// With nothing older than an item still listed, the re-read can't show it
-// went: an unconfirmed removal of it stays failed, a confirmed one stands.
+// With nothing after an item in the first read still listed, the re-read
+// can't show it went: an unconfirmed removal of it stays failed, a confirmed
+// one stands, and the output says it's by the reply.
 func TestClearHistory_PlexTV_UnreachedItems(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -872,12 +873,16 @@ func TestClearHistory_PlexTV_UnreachedItems(t *testing.T) {
 				if err != nil {
 					t.Errorf("err = %v; want none", err)
 				}
+				assertContains(t, r.out.String(), "The re-read of plex.tv lists nothing past 4 of the items it said it removed, so those count as deleted by its replies.")
 				return
 			}
 			if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted") {
 				t.Errorf("err = %v; want all 4 not deleted", err)
 			}
-			assertContains(t, r.out.String(), "plex.tv lists nothing older than 4 of the items whose removal it didn't confirm")
+			assertContains(t, r.out.String(), "The re-read of plex.tv lists nothing past 4 of the items whose removal it didn't confirm")
+			if strings.Contains(r.out.String(), "by its replies") {
+				t.Errorf("unconfirmed items are counted by their replies:\n%s", r.out.String())
+			}
 			if strings.Contains(r.out.String(), "no longer lists") {
 				t.Errorf("output takes the empty read as removals:\n%s", r.out.String())
 			}
@@ -918,7 +923,7 @@ func TestClearHistory_PlexTV_RecordUpdateFailsNamesUntried(t *testing.T) {
 	r.blockRecordOnDelete(t)
 	r.tv.failRemove = map[string]bool{"c1": true, "c2": true, "c3": true}
 	err := r.run(t, "", "Bluey (2018)")
-	if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted; the lines above name them") {
+	if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted; the output above names them") {
 		t.Fatalf("err = %v; want 4 not deleted, named above", err)
 	}
 	assertContains(t, r.out.String(), "Not deleted:\n", "\n  plex.tv Bluey (2018) the show on 2026-11-19\n")
@@ -926,7 +931,7 @@ func TestClearHistory_PlexTV_RecordUpdateFailsNamesUntried(t *testing.T) {
 
 // Unconfirmed replies are plex.tv answering, so they break a run of failures.
 func TestDeleteEach_UnconfirmedBreaksRun(t *testing.T) {
-	boom, odd := errors.New("boom"), &unconfirmedError{"odd"}
+	boom, odd := errors.New("boom"), &unconfirmedError{msg: "odd"}
 	errs := []error{boom, boom, odd, boom, boom, nil}
 	var tried []string
 	ids := []string{"a", "b", "c", "d", "e", "f"}
@@ -934,6 +939,101 @@ func TestDeleteEach_UnconfirmedBreaksRun(t *testing.T) {
 		func(id string) error { tried = append(tried, id); return errs[len(tried)-1] })
 	if !slices.Equal(tried, ids) || len(res.untried) != 0 || !res.unconfirmed["c"] {
 		t.Errorf("tried %v, untried %v, unconfirmed %v; want all tried and c unconfirmed", tried, res.untried, res.unconfirmed)
+	}
+}
+
+// A reply cut off is unconfirmed, but may be plex.tv going away, so it
+// counts toward a run of failures.
+func TestDeleteEach_CutOffCountsTowardStop(t *testing.T) {
+	boom, cut := errors.New("boom"), &unconfirmedError{msg: "cut off", cut: true}
+	errs := []error{boom, boom, cut, nil, nil}
+	var tried []string
+	ids := []string{"a", "b", "c", "d", "e"}
+	res := deleteEach(io.Discard, "plex.tv", ids, func(s string) string { return s }, func(s string) string { return s },
+		func(id string) error { tried = append(tried, id); return errs[len(tried)-1] })
+	if !slices.Equal(tried, ids[:3]) || !res.untried["d"] || !res.untried["e"] || !res.unconfirmed["c"] {
+		t.Errorf("tried %v, untried %v, unconfirmed %v; want a–c tried, c unconfirmed, d and e untried", tried, res.untried, res.unconfirmed)
+	}
+}
+
+// A removal that took, whose reply was cut off, counts once the re-read
+// shows it gone.
+func TestClearHistory_PlexTV_CutOffReplyRecovered(t *testing.T) {
+	r := newCloudRun(t, "y")
+	r.tv.cutRemove = map[string]bool{"c2": true}
+	if err := r.run(t, "", "Bluey (2018)"); err != nil {
+		t.Fatalf("%v\n%s", err, r.out.String())
+	}
+	assertContains(t, r.out.String(), `  unconfirmed: plex.tv Bluey (2018) S02E05 "Hospital" on 2026-11-22: plex.tv: removeActivity: the reply was cut off`,
+		"plex.tv no longer lists 1 of the items whose removal it didn't confirm.",
+		"Deleted 2 of 2 server and 4 of 4 plex.tv history entries.")
+	if recs := r.records(t); len(recs) != 1 || recs[0].FailedPlexTV != nil {
+		t.Errorf("records %+v; want nothing failed", recs)
+	}
+}
+
+// When the read after the wait stops short of items the first re-read still
+// listed, they stay failed: the first read is the only one that saw them.
+func TestClearHistory_PlexTV_SecondReadStopsShort(t *testing.T) {
+	r := newCloudRun(t, "y")
+	film := cloudEntry{ID: "m0", Date: "2026-11-23T10:00:00.000Z", Type: "MOVIE", Title: "Film"}
+	r.tv.history = append([]cloudEntry{film}, r.tv.history[:4]...) // the target show is the oldest
+	r.tv.ignoreRemove = true
+	r.onSleep = func() { r.tv.history = []cloudEntry{film} }
+	err := r.run(t, "", "Bluey (2018)")
+	if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted") {
+		t.Fatalf("err = %v; want all 4 not deleted", err)
+	}
+	assertContains(t, r.out.String(), "The second read of plex.tv stopped before 4 item(s) the first still listed, so they count as not deleted.",
+		"Deleted 2 of 2 server and 0 of 4 plex.tv history entries.")
+	if strings.Contains(r.out.String(), "by its replies") {
+		t.Errorf("output counts them by their replies:\n%s", r.out.String())
+	}
+	if recs := r.records(t); len(recs) != 1 || !slices.Equal(recs[0].FailedPlexTV, []string{"c1", "c2", "c3", "c4"}) {
+		t.Errorf("records %+v; want c1–c4 failed", recs)
+	}
+}
+
+// An item to be removed that's still listed shows the re-read reached past
+// the items before it, so their unconfirmed removals count once they're gone.
+func TestClearHistory_PlexTV_ListedItemShowsReach(t *testing.T) {
+	r := newCloudRun(t, "y")
+	r.tv.history = r.tv.history[:4] // only the target show
+	r.tv.removeResult, r.tv.keepListed = nil, map[string]bool{"c4": true}
+	err := r.run(t, "", "Bluey (2018)")
+	if err == nil || !strings.Contains(err.Error(), "1 history entries were not deleted") {
+		t.Fatalf("err = %v; want only c4 not deleted", err)
+	}
+	assertContains(t, r.out.String(), "plex.tv no longer lists 3 of the items whose removal it didn't confirm.",
+		"  still listed: plex.tv Bluey (2018) the show on 2026-11-19")
+	if strings.Contains(r.out.String(), "lists nothing past") {
+		t.Errorf("output says the re-read didn't reach them:\n%s", r.out.String())
+	}
+	if recs := r.records(t); len(recs) != 1 || !slices.Equal(recs[0].FailedPlexTV, []string{"c4"}) {
+		t.Errorf("records %+v; want c4 failed", recs)
+	}
+}
+
+// An item the first read gave no show title, which the re-read titles as a
+// target show, is reported for another run: the re-read's titles win.
+func TestClearHistory_PlexTV_RereadTitlesWin(t *testing.T) {
+	r := newCloudRun(t, "y")
+	untitled := cloudEpisode("c8", "", 0, 3, 3, "Untitled", "2026-11-15T10:00:00.000Z")
+	untitled.ShowID = "sh-other"
+	r.tv.history = append(r.tv.history, untitled)
+	r.tv.onRemove = func() {
+		for i := range r.tv.history {
+			if r.tv.history[i].ID == "c8" {
+				r.tv.history[i].Show, r.tv.history[i].Year = "Bluey", 2018
+			}
+		}
+	}
+	err := r.run(t, "", "Bluey (2018)")
+	if err == nil || !strings.Contains(err.Error(), "plex.tv now lists 1 more matching item(s)") {
+		t.Fatalf("err = %v; want c8 reported", err)
+	}
+	if slices.Contains(r.tv.removed, "c8") {
+		t.Error("removed the item the plan didn't have")
 	}
 }
 

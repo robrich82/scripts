@@ -128,9 +128,11 @@ type historyRecord struct {
 	Complete bool `json:"complete"`
 	// Failed lists the server keys of the entries not deleted: those whose
 	// delete failed, and those not tried after a run of failures.
-	// FailedPlexTV lists the plex.tv ids that plex.tv still lists after the
-	// deletes, or whose removal failed with an error; when PlexTVUnchecked is
-	// set, those whose removal wasn't tried or didn't reply true.
+	// FailedPlexTV lists the plex.tv ids not deleted: those plex.tv still
+	// lists after the deletes, those whose removal failed with an error or
+	// wasn't tried, and those it didn't reply true for that the re-read can't
+	// show went. When PlexTVUnchecked is set, it's by the replies alone: every
+	// id not replied true for.
 	Failed       []string `json:"failed,omitempty"`
 	FailedPlexTV []string `json:"failedPlexTV,omitempty"`
 }
@@ -279,7 +281,7 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		if updateErr != nil {
 			// The record can't list them, and untried ones haven't been named.
 			printNotDeleted(d.out, record, server.matched, cloud)
-			where = "the lines above name them"
+			where = "the output above names them"
 		}
 		problems = append(problems, fmt.Errorf("%d history entries were not deleted; %s", failed, where))
 	}
@@ -582,7 +584,8 @@ type deleteResult struct {
 
 // deleteEach deletes each entry by its id from where (the server or plex.tv).
 // It gives up after maxConsecutiveDeleteFailures failures in a row; an
-// unconfirmed reply isn't one, since plex.tv answered it.
+// unconfirmed reply isn't one, since plex.tv answered it, unless it was cut
+// off.
 func deleteEach[E any](out io.Writer, where string, entries []E, id func(E) string, describe func(E) string, del func(string) error) deleteResult {
 	res := deleteResult{untried: make(map[string]bool), unconfirmed: make(map[string]bool)}
 	consecutive := 0
@@ -593,13 +596,17 @@ func deleteEach[E any](out io.Writer, where string, entries []E, id func(E) stri
 			continue
 		}
 		res.failed = append(res.failed, id(e))
-		if isUnconfirmed(err) {
+		var u *unconfirmedError
+		if errors.As(err, &u) {
 			fmt.Fprintf(out, "  unconfirmed: %s: %v\n", describe(e), err)
 			res.unconfirmed[id(e)] = true
-			consecutive = 0
-			continue
+			if !u.cut {
+				consecutive = 0
+				continue
+			}
+		} else {
+			fmt.Fprintf(out, "  failed: %s: %v\n", describe(e), err)
 		}
-		fmt.Fprintf(out, "  failed: %s: %v\n", describe(e), err)
 		consecutive++
 		if consecutive == maxConsecutiveDeleteFailures {
 			rest := entries[i+1:]

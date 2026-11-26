@@ -217,6 +217,18 @@ func TestPlexTVClient_RefusesRedirects(t *testing.T) {
 	}
 }
 
+// A redirect with no Location says so, rather than naming an empty address.
+func TestPlexTVClient_RedirectWithoutLocation(t *testing.T) {
+	plexTV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(plexTV.Close)
+	err := newPlexTVClient(plexTV.URL, plexTV.URL, secretToken).RemoveActivity("e1")
+	if err == nil || !strings.Contains(err.Error(), "/api to no address; refusing to follow it") {
+		t.Errorf("err = %v; want the redirect refused, to no address", err)
+	}
+}
+
 // A Location plex.tv's client can't parse is never printed, query and all.
 func TestPlexTVClient_UnparseableRedirect(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

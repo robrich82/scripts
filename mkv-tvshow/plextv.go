@@ -52,7 +52,7 @@ func (t refuseRedirects) RoundTrip(req *http.Request) (*http.Response, error) {
 	switch resp.StatusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
 		resp.Body.Close()
-		return nil, fmt.Errorf("plex.tv redirected %s %s to %s; refusing to follow it", req.Method, req.URL.Path, queryless(resp.Header.Get("Location")))
+		return nil, fmt.Errorf("plex.tv redirected %s %s to %s; refusing to follow it", req.Method, req.URL.Path, cmp.Or(queryless(resp.Header.Get("Location")), "no address"))
 	}
 	return resp, nil
 }

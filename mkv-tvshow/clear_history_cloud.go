@@ -91,9 +91,10 @@ type cloudCheck struct {
 //
 // A history read short would pass for removals that took, so the re-read must
 // still list every item of the first read that wasn't to be removed, or
-// wasn't tried (the anchors); otherwise the deletes are unchecked. An item
-// with no anchor after it in the first read may be past where the re-read
-// stopped, so only its reply counts.
+// wasn't tried (the anchors); otherwise the deletes are unchecked. It reached
+// past an item when it lists anything after it in the first read. An item it
+// didn't reach past may be where it stopped, so only a true reply counts it
+// deleted, and only if no read after the deletes listed it.
 func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p clearPlan, targets []historyTarget, res deleteResult) cloudCheck {
 	matched := make(map[string]bool, len(p.cloud.matched))
 	for _, e := range p.cloud.matched {
@@ -104,11 +105,6 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 		failed[id] = true
 	}
 	anchor := func(id string) bool { return !matched[id] || res.untried[id] }
-	reached := make(map[string]bool) // ids with an anchor after them in the first read
-	for i, seen := len(p.cloudRead)-1, false; i >= 0; i-- {
-		reached[p.cloudRead[i].ID] = seen
-		seen = seen || anchor(p.cloudRead[i].ID)
-	}
 	read := func() ([]cloudEntry, map[string]bool, error) {
 		after, err := readCloudHistory(d.cloud, p.owner.UUID, retry)
 		if err != nil {
@@ -145,19 +141,25 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 		fmt.Fprintf(d.out, "Couldn't check the plex.tv deletes: %v\n", err)
 		return cloudCheck{failed: res.failed, unchecked: err.Error()}
 	}
+	firstListed := listed
 	if n := pending(listed); n > 0 {
 		fmt.Fprintf(d.out, "plex.tv still lists %d item(s) it was asked to remove; checking again in %s.\n", n, settleWait)
 		d.sleep(settleWait)
 		if again, againListed, err := read(); err != nil {
-			fmt.Fprintf(d.out, "Couldn't read plex.tv again (%v), so the first read stands.\n", err)
+			fmt.Fprintf(d.out, "The second read of plex.tv can't be used (%v), so the first read stands.\n", err)
 		} else {
 			after, listed = again, againListed
 		}
 	}
+	reached := make(map[string]bool) // ids with something after them in the first read still listed
+	for i, seen := len(p.cloudRead)-1, false; i >= 0; i-- {
+		reached[p.cloudRead[i].ID] = seen
+		seen = seen || listed[p.cloudRead[i].ID]
+	}
 
 	var check cloudCheck
 	var claimed, unconfirmed []cloudEntry
-	recovered, unreached := 0, 0
+	recovered, unreached, cutShort, byReply := 0, 0, 0, 0
 	for _, e := range p.cloud.matched {
 		switch {
 		case listed[e.ID]:
@@ -168,13 +170,19 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 			case res.unconfirmed[e.ID]:
 				unconfirmed = append(unconfirmed, e)
 			}
-		case res.unconfirmed[e.ID] && !reached[e.ID]:
+		case failed[e.ID] && !res.unconfirmed[e.ID]:
+			check.failed = append(check.failed, e.ID) // an error isn't overruled
+		case reached[e.ID] && res.unconfirmed[e.ID]:
+			recovered++
+		case reached[e.ID]:
+		case firstListed[e.ID]: // the second read stopped short of an item the first still listed
+			check.failed = append(check.failed, e.ID)
+			cutShort++
+		case res.unconfirmed[e.ID]:
 			check.failed = append(check.failed, e.ID)
 			unreached++
-		case res.unconfirmed[e.ID]:
-			recovered++
-		case failed[e.ID]:
-			check.failed = append(check.failed, e.ID) // an error isn't overruled
+		default:
+			byReply++
 		}
 	}
 	printStillListed := func(what string, entries []cloudEntry) {
@@ -191,16 +199,23 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 	if recovered > 0 {
 		fmt.Fprintf(d.out, "plex.tv no longer lists %d of the items whose removal it didn't confirm.\n", recovered)
 	}
+	if cutShort > 0 {
+		fmt.Fprintf(d.out, "The second read of plex.tv stopped before %d item(s) the first still listed, so they count as not deleted.\n", cutShort)
+	}
 	if unreached > 0 {
-		fmt.Fprintf(d.out, "plex.tv lists nothing older than %d of the items whose removal it didn't confirm, so its history can't show they went: they count as not deleted.\n", unreached)
+		fmt.Fprintf(d.out, "The re-read of plex.tv lists nothing past %d of the items whose removal it didn't confirm, so it can't show they went: they count as not deleted.\n", unreached)
 	}
-	// Planned with the first read too, so a show kept beside the target's
-	// year is still kept once that year's items are gone.
-	firstRead := make(map[string]bool, len(p.cloudRead))
-	for _, e := range p.cloudRead {
-		firstRead[e.ID] = true
+	if byReply > 0 {
+		fmt.Fprintf(d.out, "The re-read of plex.tv lists nothing past %d of the items it said it removed, so those count as deleted by its replies.\n", byReply)
 	}
-	both := append(slices.Clip(p.cloudRead), slices.DeleteFunc(slices.Clone(after), func(e cloudEntry) bool { return firstRead[e.ID] })...)
+	// Planned with the first read's items too, so a show kept beside the
+	// target's year is still kept once that year's items are gone. The
+	// re-read's come first, so its titles and years win for items in both.
+	inAfter := make(map[string]bool, len(after))
+	for _, e := range after {
+		inAfter[e.ID] = true
+	}
+	both := append(slices.Clip(after), slices.DeleteFunc(slices.Clone(p.cloudRead), func(e cloudEntry) bool { return inAfter[e.ID] })...)
 	for _, e := range planCloud(both, targets).matched {
 		if !matched[e.ID] {
 			check.added++
