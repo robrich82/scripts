@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -38,7 +39,13 @@ type MKVRunner interface {
 	// ExtractTags returns all Matroska tags XML for filePath, per-track included.
 	// Returns ("", nil) when the file has no tags.
 	ExtractTags(filePath string) (string, error)
+	// ReadTitle returns the file's segment title, "" when it has none, or
+	// errNoMKVMerge when mkvmerge isn't in PATH.
+	ReadTitle(filePath string) (string, error)
 }
+
+// errNoMKVMerge is ReadTitle's error when mkvmerge isn't in PATH.
+var errNoMKVMerge = errors.New("mkvmerge not found in PATH")
 
 // realMKVRunner is the production MKVRunner.
 type realMKVRunner struct {
@@ -187,6 +194,50 @@ func (r *realMKVRunner) ExtractTags(filePath string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func (r *realMKVRunner) ReadTitle(filePath string) (string, error) {
+	if r.mkvmerge == "" {
+		return "", errNoMKVMerge
+	}
+	out, err := exec.Command(r.mkvmerge, "-J", filePath).Output()
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		return "", err
+	}
+	// mkvmerge -J reports a file it can't read in its JSON, which names the cause.
+	title, parseErr := parseContainerTitle(out)
+	if parseErr != nil {
+		return "", parseErr
+	}
+	// Exit code 1 means warnings only.
+	if err != nil && exitErr.ExitCode() > 1 {
+		return "", fmt.Errorf("mkvmerge -J: %w", err)
+	}
+	return title, nil
+}
+
+// parseContainerTitle returns the container title from mkvmerge -J output.
+func parseContainerTitle(data []byte) (string, error) {
+	var info struct {
+		Container struct {
+			Recognized bool `json:"recognized"`
+			Properties struct {
+				Title string `json:"title"`
+			} `json:"properties"`
+		} `json:"container"`
+		Errors []string `json:"errors"`
+	}
+	if err := json.Unmarshal(data, &info); err != nil {
+		return "", fmt.Errorf("mkvmerge -J output: %w", err)
+	}
+	if !info.Container.Recognized {
+		if len(info.Errors) > 0 {
+			return "", fmt.Errorf("mkvmerge: %s", strings.Join(info.Errors, "; "))
+		}
+		return "", errors.New("mkvmerge didn't recognise the file")
+	}
+	return info.Container.Properties.Title, nil
 }
 
 // emptyTagsDoc is a tags document with no tags. mkvpropedit rejects an empty

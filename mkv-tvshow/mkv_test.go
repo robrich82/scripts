@@ -23,6 +23,8 @@ type fakeMKVRunner struct {
 	extractTagsXML string
 	extractTagsErr error
 	writtenXML     []string
+	titles         map[string]string // ReadTitle's answer by path; nil → errNoMKVMerge
+	readTitleErr   error
 }
 
 type applyCall struct {
@@ -59,6 +61,16 @@ func (f *fakeMKVRunner) Cleanup(paths ...string) {
 
 func (f *fakeMKVRunner) ExtractTags(_ string) (string, error) {
 	return f.extractTagsXML, f.extractTagsErr
+}
+
+func (f *fakeMKVRunner) ReadTitle(filePath string) (string, error) {
+	switch {
+	case f.readTitleErr != nil:
+		return "", f.readTitleErr
+	case f.titles == nil:
+		return "", errNoMKVMerge
+	}
+	return f.titles[filePath], nil
 }
 
 // --- buildTagXML tests ---

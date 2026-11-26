@@ -38,6 +38,7 @@ type TitleChecker struct {
 	timer      FileTimer
 	retryList  *RetryList // nil → a rename leaves the retry list alone
 	moved      bool       // a rename moved a retry entry since the last save
+	noMKVMerge bool       // the missing-mkvmerge warning was printed
 	LostSaves  int        // set by Run: how many caches' changes couldn't be saved
 }
 
@@ -295,8 +296,9 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 
 // applyFullTitle sets the MKV title metadata to fullTitle and caches the result.
 // The file's original timestamps are preserved so the normal processing mode's
-// cutoff filter is not affected. Does nothing when the title is already
-// current or mkvpropedit is absent.
+// cutoff filter is not affected. Does nothing when the file already has the
+// title, or when mkvpropedit is absent. A title that can't be read is taken
+// from the title cache instead.
 func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 	if fullTitle == "" {
 		return
@@ -304,8 +306,22 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 	if tc.mkv == nil || !tc.mkv.Available() {
 		return
 	}
-	// Already up to date — skip the mkvpropedit call.
-	if cached, ok := tc.titleCache.Get(path); ok && cached == fullTitle {
+	current, err := tc.mkv.ReadTitle(path)
+	switch {
+	case err == nil:
+		if current == fullTitle {
+			tc.titleCache.Set(path, fullTitle) // so a normal run keeps it
+			return
+		}
+	case errors.Is(err, errNoMKVMerge):
+		if !tc.noMKVMerge {
+			fmt.Println("[!] mkvmerge not in PATH: can't read MKV titles, so trusting title_cache.json for them.")
+			tc.noMKVMerge = true
+		}
+	default:
+		fmt.Printf("  [!] Can't read the MKV title, so trusting title_cache.json for it: %v\n", err)
+	}
+	if cached, ok := tc.titleCache.Get(path); err != nil && ok && cached == fullTitle {
 		return
 	}
 
