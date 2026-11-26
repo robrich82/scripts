@@ -53,7 +53,7 @@ func (t refuseRedirects) RoundTrip(req *http.Request) (*http.Response, error) {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
 		resp.Body.Close()
 		loc := resp.Header.Get("Location")
-		to := cmp.Or(queryless(loc), "an address with only a query or fragment")
+		to := cmp.Or(queryless(loc), "an address with only a query, fragment or user info")
 		if loc == "" {
 			to = "no address"
 		}

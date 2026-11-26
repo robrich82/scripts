@@ -704,8 +704,8 @@ unchecked: `plexTVUnchecked` says why, and `failedPlexTV` lists the items
 plex.tv didn't reply true for. If the second can't be read, or doesn't, the
 first stands. Otherwise `failedPlexTV` lists the items the last read still
 lists, those whose removal failed with an error or wasn't tried, and those
-plex.tv didn't reply true for when no read lists anything after them (in the
-first read) to show it was read that far; a later run clears them. An item
+plex.tv didn't reply true for when the last read lists nothing after them (in
+the first read) to show it was read that far; a later run clears them. An item
 plex.tv did reply true for, with nothing after it listed, counts as deleted by
 that reply, and the output says so. Matching items the plan didn't have, such
 as an episode watched during the run, are counted and left for a later run.

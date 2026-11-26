@@ -132,8 +132,8 @@ type historyRecord struct {
 	// delete failed, and those not tried after a run of failures.
 	// FailedPlexTV lists the plex.tv ids not deleted: those the last read
 	// after the deletes still lists, those whose removal failed with an error
-	// or wasn't tried, and those it didn't reply true for that no read can
-	// show went. When PlexTVUnchecked is set, it's by the replies alone: every
+	// or wasn't tried, and those it didn't reply true for that the last read
+	// can't show went. When PlexTVUnchecked is set, it's by the replies alone: every
 	// id not replied true for.
 	Failed       []string `json:"failed,omitempty"`
 	FailedPlexTV []string `json:"failedPlexTV,omitempty"`

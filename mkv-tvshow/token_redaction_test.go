@@ -222,7 +222,7 @@ func TestPlexTVClient_RefusesRedirects(t *testing.T) {
 func TestPlexTVClient_RedirectWithoutAddress(t *testing.T) {
 	for loc, want := range map[string]string{
 		"":                             "/api to no address; refusing to follow it",
-		"?X-Plex-Token=" + secretToken: "/api to an address with only a query or fragment; refusing to follow it",
+		"?X-Plex-Token=" + secretToken: "/api to an address with only a query, fragment or user info; refusing to follow it",
 	} {
 		plexTV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if loc != "" {

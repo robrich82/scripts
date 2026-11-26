@@ -139,7 +139,7 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 	if readErr == nil {
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		decodeErr = dec.Decode(&reply)
-		trailing = decodeErr == nil && len(bytes.TrimSpace(raw[dec.InputOffset():])) > 0
+		trailing = decodeErr == nil && len(bytes.Trim(raw[dec.InputOffset():], " \t\r\n")) > 0 // JSON's whitespace
 	}
 	header := retryAfterHeader(resp.Header.Get("Retry-After"))
 	if limited := rateLimitIn(reply.Errors); limited != nil {
@@ -159,7 +159,7 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		}
 		return statusErr
 	}
-	// A body ending mid-JSON was cut off too, when nothing said how long it was.
+	// A body ending mid-JSON was cut off too, even when it's as long as it said.
 	if readErr == nil && errors.Is(decodeErr, io.ErrUnexpectedEOF) {
 		readErr = decodeErr
 	}
@@ -168,10 +168,10 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: the reply was cut off: %v", operation, readErr), cut: true}
 	case errors.Is(decodeErr, io.EOF):
 		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: the reply was empty", operation)}
+	case len(reply.Errors) > 0: // an error is one, though a field of it has an odd type
+		return fmt.Errorf("plex.tv: %s: %s", operation, errorMessages(reply.Errors))
 	case decodeErr != nil:
 		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: decode %s: %v", operation, decodeErr)}
-	case len(reply.Errors) > 0:
-		return fmt.Errorf("plex.tv: %s: %s", operation, errorMessages(reply.Errors))
 	case trailing:
 		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: the reply has more after its JSON", operation)}
 	}

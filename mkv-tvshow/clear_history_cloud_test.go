@@ -873,13 +873,13 @@ func TestClearHistory_PlexTV_UnreachedItems(t *testing.T) {
 				if err != nil {
 					t.Errorf("err = %v; want none", err)
 				}
-				assertContains(t, r.out.String(), "No read of plex.tv after the deletes lists anything past 4 of the items it said it removed, so those count as deleted by its replies.")
+				assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 4 of the items it said it removed, so those count as deleted by its replies.")
 				return
 			}
 			if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted") {
 				t.Errorf("err = %v; want all 4 not deleted", err)
 			}
-			assertContains(t, r.out.String(), "No read of plex.tv after the deletes lists anything past 4 of the items whose removal it didn't confirm")
+			assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 4 of the items whose removal it didn't confirm")
 			if strings.Contains(r.out.String(), "by its replies") {
 				t.Errorf("unconfirmed items are counted by their replies:\n%s", r.out.String())
 			}
@@ -990,16 +990,18 @@ func TestClearHistory_PlexTV_OldestShowSettles(t *testing.T) {
 		t.Fatalf("%v\n%s", err, r.out.String())
 	}
 	assertContains(t, r.out.String(), "plex.tv still lists 4 item(s) it was asked to remove; checking again in 10s.",
-		"No read of plex.tv after the deletes lists anything past 4 of the items it said it removed, so those count as deleted by its replies.",
+		"The last read of plex.tv lists nothing after 4 of the items it said it removed, so those count as deleted by its replies.",
 		"Deleted 2 of 2 server and 4 of 4 plex.tv history entries.")
 	if recs := r.records(t); len(recs) != 1 || recs[0].FailedPlexTV != nil {
 		t.Errorf("records %+v; want nothing failed", recs)
 	}
 }
 
-// What the first read after the deletes showed gone stays shown when the
-// read after the wait no longer lists the items that showed it.
-func TestClearHistory_PlexTV_FirstReadReachKept(t *testing.T) {
+// Only the last read decides how far it reached: the first, read while
+// removals were landing, may have skipped an item, so what it showed past
+// isn't kept once the read after the wait no longer lists the items that
+// showed it.
+func TestClearHistory_PlexTV_LastReadDecidesReach(t *testing.T) {
 	r := newCloudRun(t, "y")
 	h := r.tv.history
 	r.tv.history = append(slices.Clone(h[4:]), h[:4]...) // c5 c6 c7 c1 c2 c3 c4
@@ -1008,14 +1010,18 @@ func TestClearHistory_PlexTV_FirstReadReachKept(t *testing.T) {
 	r.onSleep = func() {
 		r.tv.history = slices.DeleteFunc(r.tv.history, func(e cloudEntry) bool { return e.ID == "c4" })
 	}
-	if err := r.run(t, "", "Bluey (2018)"); err != nil {
-		t.Fatalf("%v\n%s", err, r.out.String())
+	err := r.run(t, "", "Bluey (2018)")
+	if err == nil || !strings.Contains(err.Error(), "1 history entries were not deleted") {
+		t.Fatalf("err = %v; want c1 not deleted\n%s", err, r.out.String())
 	}
-	assertContains(t, r.out.String(), "plex.tv no longer lists 1 of the items whose removal it didn't confirm.",
-		"No read of plex.tv after the deletes lists anything past 1 of the items it said it removed, so those count as deleted by its replies.",
-		"Deleted 2 of 2 server and 4 of 4 plex.tv history entries.")
-	if recs := r.records(t); len(recs) != 1 || recs[0].FailedPlexTV != nil {
-		t.Errorf("records %+v; want nothing failed", recs)
+	assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 1 of the items whose removal it didn't confirm",
+		"The last read of plex.tv lists nothing after 3 of the items it said it removed, so those count as deleted by its replies.",
+		"Deleted 2 of 2 server and 3 of 4 plex.tv history entries.")
+	if strings.Contains(r.out.String(), "no longer lists") {
+		t.Errorf("output takes the first read's reach:\n%s", r.out.String())
+	}
+	if recs := r.records(t); len(recs) != 1 || !slices.Equal(recs[0].FailedPlexTV, []string{"c1"}) {
+		t.Errorf("records %+v; want c1 failed", recs)
 	}
 }
 
@@ -1031,7 +1037,7 @@ func TestClearHistory_PlexTV_ListedItemShowsReach(t *testing.T) {
 	}
 	assertContains(t, r.out.String(), "plex.tv no longer lists 3 of the items whose removal it didn't confirm.",
 		"  still listed: plex.tv Bluey (2018) the show on 2026-11-19")
-	if strings.Contains(r.out.String(), "lists nothing past") {
+	if strings.Contains(r.out.String(), "The last read of plex.tv lists nothing after") {
 		t.Errorf("output says the re-read didn't reach them:\n%s", r.out.String())
 	}
 	if recs := r.records(t); len(recs) != 1 || !slices.Equal(recs[0].FailedPlexTV, []string{"c4"}) {

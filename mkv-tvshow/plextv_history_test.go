@@ -533,7 +533,7 @@ func TestRemoveActivity_UnreadableReplies(t *testing.T) {
 		{"null data", `{"data":null}`, 200, false, true, false, "no data"},
 		{"500 not json", `not json`, 500, false, false, false, "500"},
 		{"cut off", `{"data":{"remo`, 200, true, true, true, "cut off"},
-		{"ends mid-JSON", `{"data":{"remo`, 200, false, true, true, "cut off"}, // no length to fall short of
+		{"ends mid-JSON", `{"data":{"remo`, 200, false, true, true, "cut off"}, // as long as it said, but not whole
 		{"500 cut off", `{"errors":[{"mess`, 500, true, false, false, "status 500 Internal Server Error (reading the reply"},
 		{"401 cut off", `{"err`, 401, true, false, false, "status 401 Unauthorized (reading the reply"},
 	} {
@@ -581,7 +581,9 @@ func TestRemoveActivity_TrailingData(t *testing.T) {
 	}{
 		{"junk", `{"data":{"removeActivity":true}}` + "\n<junk>", "more after its JSON", true},
 		{"errors after", `{"data":{"removeActivity":true}}{"errors":[{"message":"denied"}]}`, "more after its JSON", true},
-		{"whitespace", `{"data":{"removeActivity":true}}` + " \r\n", "", false},
+		{"whitespace", `{"data":{"removeActivity":true}}` + " \t\r\n", "", false},
+		{"other space", `{"data":{"removeActivity":true}}` + " \v", "more after its JSON", true}, // not JSON's whitespace
+		{"error, odd field", `{"data":{"removeActivity":true},"errors":[{"message":"denied","extensions":{"code":5}}]}`, "removeActivity: denied", false},
 		{"rate limited", `{"errors":[{"message":"slow","extensions":{"code":"RATE_LIMITED","retryAfter":7}}]} junk`, "retry after 7s", false},
 		{"error", `{"errors":[{"message":"boom"}]} junk`, "removeActivity: boom", false},
 	} {
