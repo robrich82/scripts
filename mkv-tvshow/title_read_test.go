@@ -66,26 +66,28 @@ func TestTitleCheck_FileHasTitle_CachesWithoutWriting(t *testing.T) {
 }
 
 // Without a readable title the cache decides, as before: a cached full title
-// skips the write, a missing one sets it.
+// skips the write, a missing or different one sets it.
 func TestTitleCheck_UnreadableTitle_TrustsCache(t *testing.T) {
+	const readErrOut = "Can't read the MKV title of Show - S01E02 - New Title.mkv"
 	for _, tt := range []struct {
 		name      string
 		err       error
-		cached    bool
+		cached    string
 		wantCalls int
 		wantOut   string
 	}{
-		{"no mkvmerge, cached", nil, true, 0, "mkvmerge not in PATH"},
-		{"no mkvmerge, not cached", nil, false, 1, "mkvmerge not in PATH"},
-		{"read error, cached", errors.New("boom"), true, 0, "Can't read the MKV title"},
-		{"read error, not cached", errors.New("boom"), false, 1, "Can't read the MKV title"},
+		{"no mkvmerge, cached", errNoMKVMerge, wantFullTitle, 0, "mkvmerge not in PATH"},
+		{"no mkvmerge, not cached", errNoMKVMerge, "", 1, "mkvmerge not in PATH"},
+		{"read error, cached", errors.New("boom"), wantFullTitle, 0, readErrOut},
+		{"read error, not cached", errors.New("boom"), "", 1, readErrOut},
+		{"read error, stale cache", errors.New("boom"), "Show - S01E02 - Old", 1, readErrOut},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			runner := &fakeMKVRunner{avail: true, applyResult: "Done.", readTitleErr: tt.err}
 			titles := newNullTitleCache(t)
 			tc, path := titleCheckLibrary(t, runner, titles)
-			if tt.cached {
-				titles.Set(path, wantFullTitle)
+			if tt.cached != "" {
+				titles.Set(path, tt.cached)
 			}
 
 			out := captureOutput(t, tc.Run)
@@ -115,21 +117,31 @@ func TestTitleCheck_NoMKVMerge_WarnsOnce(t *testing.T) {
 	}
 }
 
-func TestParseContainerTitle(t *testing.T) {
+// The JSON shapes are mkvmerge v103's: an unopenable file has no container
+// key, and one it doesn't recognise exits 0.
+func TestTitleFromIdentify(t *testing.T) {
+	const titled = `{"container":{"recognized":true,"properties":{"title":"Show - S01E01 - A"}},"errors":[]}`
 	for _, tt := range []struct {
-		name, json, want, wantErr string
+		name, json string
+		rc         int
+		want       string
+		wantErr    string
 	}{
-		{"title", `{"container":{"recognized":true,"properties":{"title":"Show - S01E01 - A"}}}`, "Show - S01E01 - A", ""},
-		{"no title", `{"container":{"recognized":true,"properties":{}}}`, "", ""},
-		{"unrecognised", `{"container":{"recognized":false},"errors":["The file could not be opened"]}`, "", "could not be opened"},
-		{"unrecognised, no errors", `{"container":{"recognized":false}}`, "", "didn't recognise"},
-		{"not JSON", `mkvmerge v90`, "", "mkvmerge -J output"},
+		{"title", titled, 0, "Show - S01E01 - A", ""},
+		{"warnings only", titled, 1, "Show - S01E01 - A", ""},
+		{"no title", `{"container":{"recognized":true,"properties":{}},"errors":[]}`, 0, "", ""},
+		{"error exit", titled, 2, "", "exit code 2"},
+		{"killed", titled, -1, "", "exit code -1"},
+		{"unopenable", `{"errors":["The file 'x.mkv' could not be opened for reading: open file error.\n","Second.\n"],"warnings":[]}`, 2,
+			"", "mkvmerge: The file 'x.mkv' could not be opened for reading: open file error.; Second."},
+		{"unrecognised", `{"container":{"recognized":false,"supported":false},"errors":[]}`, 0, "", "didn't recognise"},
+		{"not JSON", `mkvmerge v90`, 2, "", "mkvmerge -J (exit code 2) output"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseContainerTitle([]byte(tt.json))
+			got, err := titleFromIdentify([]byte(tt.json), tt.rc)
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("err = %v; want one containing %q", err, tt.wantErr)
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) || strings.Contains(err.Error(), "\n") {
+					t.Fatalf("err = %q; want one containing %q, on one line", err, tt.wantErr)
 				}
 				return
 			}
@@ -159,15 +171,24 @@ func TestTitleCheck_RealMKV_ReplacesReleaseTitle(t *testing.T) {
 	}
 }
 
+func TestRealMKVRunner_ReadTitle_NoMKVMerge(t *testing.T) {
+	if _, err := (&realMKVRunner{}).ReadTitle("x.mkv"); !errors.Is(err, errNoMKVMerge) {
+		t.Errorf("err = %v; want errNoMKVMerge", err)
+	}
+}
+
 // Against real MKVToolNix: a file with no title reads as "", and a file that
-// isn't Matroska is an error.
+// isn't Matroska or can't be opened is an error.
 func TestRealMKVRunner_ReadTitle(t *testing.T) {
 	dir := t.TempDir()
 	path, runner := muxTestMKV(t, dir, "untitled.mkv")
 	if got, err := runner.ReadTitle(path); err != nil || got != "" {
 		t.Errorf("ReadTitle(untitled) = %q, %v; want \"\", nil", got, err)
 	}
-	if _, err := runner.ReadTitle(debandTestFile(t)); err == nil {
-		t.Error("ReadTitle(non-MKV) succeeded; want an error")
+	if _, err := runner.ReadTitle(debandTestFile(t)); err == nil || !strings.Contains(err.Error(), "didn't recognise") {
+		t.Errorf("ReadTitle(non-MKV) err = %v; want didn't recognise", err)
+	}
+	if _, err := runner.ReadTitle(filepath.Join(dir, "missing.mkv")); err == nil || !strings.Contains(err.Error(), "could not be opened") {
+		t.Errorf("ReadTitle(missing) err = %v; want could not be opened", err)
 	}
 }
