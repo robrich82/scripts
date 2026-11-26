@@ -9,9 +9,11 @@ import (
 type scriptedPrompter struct {
 	answers []string
 	idx     int
+	asked   []string // every prompt, answered or not
 }
 
-func (p *scriptedPrompter) Ask(_ string) (string, error) {
+func (p *scriptedPrompter) Ask(prompt string) (string, error) {
+	p.asked = append(p.asked, prompt)
 	if p.idx >= len(p.answers) {
 		return "", fmt.Errorf("prompter: queue exhausted after %d answers", p.idx)
 	}

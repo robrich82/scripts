@@ -24,12 +24,15 @@ func main() {
 	allIDsFlag := flag.Bool("all-ids", false, "With --clean, also remove ratings and ignores for every show ID not in show_cache.json, not only those of show folders this --clean removes. This includes the season override IDs of shows that still exist.")
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached rating for a show and reset its applied state (folder substring or TMDB ID), then exit.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every show in the current directory, overriding any cached value, then exit.")
+	var clearHistoryShows stringList
+	flag.Var(&clearHistoryShows, "clear-history", `Delete a show's Plex watch history, given as "Title" or "Title (Year)"; repeat for more shows. Lists the entries and asks first, then exits.`)
+	historyAccount := flag.String("account", "", "With --clear-history, the Plex server account whose history to clear, by name. Defaults to the PLEX_TOKEN owner.")
 	flag.Parse()
 
 	if names := conflictingModes([]oneShotMode{
 		{"--clean", *cleanFlag}, {"--reset-rating", *resetRatingQuery != ""}, {"--set-rating", *setRating != ""},
 		{"--deband-only", *debandOnlyMode}, {"--missing", *missingMode}, {"--language-only", *languageOnly},
-		{"--title-check", *titleCheckMode}, {"--ratings-only", *ratingsOnly},
+		{"--title-check", *titleCheckMode}, {"--ratings-only", *ratingsOnly}, {"--clear-history", len(clearHistoryShows) > 0},
 	}); names != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s can't be combined; run them one at a time.\n", joinNames(names))
 		os.Exit(1)
@@ -38,6 +41,20 @@ func main() {
 	if *allIDsFlag && !*cleanFlag {
 		fmt.Fprintln(os.Stderr, "Error: --all-ids only works with --clean.")
 		os.Exit(1)
+	}
+	if *historyAccount != "" && len(clearHistoryShows) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: --account only works with --clear-history.")
+		os.Exit(1)
+	}
+
+	if len(clearHistoryShows) > 0 {
+		// flag stops at the first stray argument, which would drop a later --account.
+		if flag.NArg() > 0 {
+			fmt.Fprintf(os.Stderr, "Error: unexpected argument %q: give each title its own --clear-history, quoted if it has spaces or a year, e.g. --clear-history \"Bluey (2018)\" --clear-history Fargo.\n", flag.Arg(0))
+			os.Exit(1)
+		}
+		runClearHistory(clearHistoryShows, *historyAccount)
+		return
 	}
 
 	if *cleanFlag {
