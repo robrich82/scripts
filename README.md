@@ -681,10 +681,11 @@ deleting, the entries are written to
 restore them. Its `complete` stays `false` until the run finishes and the file
 is rewritten. `failed` lists the server entries whose delete failed or wasn't
 tried. After 3 failures in a row on the server or on plex.tv, the rest there
-aren't tried; a plex.tv 2xx reply that isn't the JSON asked for, has no data,
-or for a removal isn't true, isn't a failure here, but one cut off is. A run
-that leaves anything behind, finds more matching
-plex.tv items, or can't check plex.tv's deletes or rewrite the file, exits 1.
+aren't tried; a plex.tv 2xx reply that is empty, isn't just the JSON asked
+for, has no data, or for a removal isn't true, isn't a failure here, but one
+cut off is (the history read afterwards can still show the removal took). A
+run that leaves anything behind, finds more matching plex.tv items, or can't
+check plex.tv's deletes or rewrite the file, exits 1.
 
 plex.tv keeps its own copy of the token owner's history: episodes, and the
 seasons and shows marked watched. It's listed and cleared with the server's
@@ -697,20 +698,19 @@ timeout, stops the run before anything is deleted, on the server too.
 
 After deleting, the plex.tv history is read again, since its replies to a
 removal aren't trusted, and once more after 10 seconds if it still lists
-removed items; if that second read fails or comes back short, the first
-stands. The record's `failedPlexTV` lists the items it still lists, those
-whose removal failed with an error or wasn't tried, and those plex.tv didn't
-reply true for when the re-read lists nothing after them (in the first read)
-to show it was read that far; a later run clears them. An item plex.tv did
-reply true for, with nothing after it listed, counts as deleted by that reply,
-and the output says so, unless the first re-read still listed it. Matching
-items the plan didn't have, such as an episode watched during the run, are
-counted and left for a later run. The re-read must still list every item that
-wasn't to be removed or wasn't tried; if it can't be read, or doesn't, the
-deletes are unchecked: `plexTVUnchecked` says why, and `failedPlexTV` lists
-the items plex.tv didn't reply true for. The record's `plexTV` lists the
-matched items,
-or is `null` when plex.tv was left alone and `plexTVSkipped` says why.
+removed items. Each read must still list every item that wasn't to be removed
+or wasn't tried; if the first can't be read, or doesn't, the deletes are
+unchecked: `plexTVUnchecked` says why, and `failedPlexTV` lists the items
+plex.tv didn't reply true for. If the second can't be read, or doesn't, the
+first stands. Otherwise `failedPlexTV` lists the items the last read still
+lists, those whose removal failed with an error or wasn't tried, and those
+plex.tv didn't reply true for when no read lists anything after them (in the
+first read) to show it was read that far; a later run clears them. An item
+plex.tv did reply true for, with nothing after it listed, counts as deleted by
+that reply, and the output says so. Matching items the plan didn't have, such
+as an episode watched during the run, are counted and left for a later run.
+The record's `plexTV` lists the matched items, or is `null` when plex.tv was
+left alone and `plexTVSkipped` says why.
 
 plex.tv records each show's year (taken from a "(Year)" in its title when
 plex.tv gives none), so a year you give must match it; the same title with

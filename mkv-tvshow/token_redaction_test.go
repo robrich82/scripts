@@ -217,15 +217,24 @@ func TestPlexTVClient_RefusesRedirects(t *testing.T) {
 	}
 }
 
-// A redirect with no Location says so, rather than naming an empty address.
-func TestPlexTVClient_RedirectWithoutLocation(t *testing.T) {
-	plexTV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusFound)
-	}))
-	t.Cleanup(plexTV.Close)
-	err := newPlexTVClient(plexTV.URL, plexTV.URL, secretToken).RemoveActivity("e1")
-	if err == nil || !strings.Contains(err.Error(), "/api to no address; refusing to follow it") {
-		t.Errorf("err = %v; want the redirect refused, to no address", err)
+// A redirect with no Location, or only a query, says so rather than naming
+// an empty address.
+func TestPlexTVClient_RedirectWithoutAddress(t *testing.T) {
+	for loc, want := range map[string]string{
+		"":                             "/api to no address; refusing to follow it",
+		"?X-Plex-Token=" + secretToken: "/api to an address with only a query or fragment; refusing to follow it",
+	} {
+		plexTV := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if loc != "" {
+				w.Header().Set("Location", loc)
+			}
+			w.WriteHeader(http.StatusFound)
+		}))
+		err := newPlexTVClient(plexTV.URL, plexTV.URL, secretToken).RemoveActivity("e1")
+		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), secretToken) {
+			t.Errorf("Location %q: err = %v; want %q", loc, err, want)
+		}
+		plexTV.Close()
 	}
 }
 

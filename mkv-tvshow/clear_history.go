@@ -120,7 +120,9 @@ type historyRecord struct {
 	PlexTV        []cloudEntry `json:"plexTV"`
 	PlexTVSkipped string       `json:"plexTVSkipped,omitempty"`
 	// PlexTVUnchecked is why plex.tv couldn't be read again after the deletes
-	// to see which took, or its history then couldn't be trusted.
+	// to see which took, or its history then couldn't be trusted. Only the
+	// first read after the deletes sets it; a failed second read leaves the
+	// first standing.
 	PlexTVUnchecked string `json:"plexTVUnchecked,omitempty"`
 	// Complete is false until the run finishes and the record is rewritten,
 	// so a record left false is from an interrupted run (some of Server and
@@ -128,9 +130,9 @@ type historyRecord struct {
 	Complete bool `json:"complete"`
 	// Failed lists the server keys of the entries not deleted: those whose
 	// delete failed, and those not tried after a run of failures.
-	// FailedPlexTV lists the plex.tv ids not deleted: those plex.tv still
-	// lists after the deletes, those whose removal failed with an error or
-	// wasn't tried, and those it didn't reply true for that the re-read can't
+	// FailedPlexTV lists the plex.tv ids not deleted: those the last read
+	// after the deletes still lists, those whose removal failed with an error
+	// or wasn't tried, and those it didn't reply true for that no read can
 	// show went. When PlexTVUnchecked is set, it's by the replies alone: every
 	// id not replied true for.
 	Failed       []string `json:"failed,omitempty"`
@@ -575,7 +577,7 @@ func describeLastWatched(e historyEntry) string {
 
 // deleteResult is what deleteEach left: the ids not deleted, in order, and
 // among them those never tried and those whose reply didn't confirm the
-// delete (isUnconfirmed).
+// delete (an *unconfirmedError).
 type deleteResult struct {
 	failed      []string
 	untried     map[string]bool
@@ -598,15 +600,14 @@ func deleteEach[E any](out io.Writer, where string, entries []E, id func(E) stri
 		res.failed = append(res.failed, id(e))
 		var u *unconfirmedError
 		if errors.As(err, &u) {
-			fmt.Fprintf(out, "  unconfirmed: %s: %v\n", describe(e), err)
 			res.unconfirmed[id(e)] = true
 			if !u.cut {
+				fmt.Fprintf(out, "  unconfirmed: %s: %v\n", describe(e), err)
 				consecutive = 0
 				continue
 			}
-		} else {
-			fmt.Fprintf(out, "  failed: %s: %v\n", describe(e), err)
 		}
+		fmt.Fprintf(out, "  failed: %s: %v\n", describe(e), err)
 		consecutive++
 		if consecutive == maxConsecutiveDeleteFailures {
 			rest := entries[i+1:]

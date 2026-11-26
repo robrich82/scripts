@@ -443,8 +443,9 @@ func TestRemoveActivity(t *testing.T) {
 				t.Errorf("err = %v; want %q", err, tc.wantErr)
 			}
 			// Only an explicit error is a failure the history can't overrule.
-			if want := f.failRemove == nil; isUnconfirmed(err) != want {
-				t.Errorf("isUnconfirmed(%v) = %v; want %v", err, !want, want)
+			var u *unconfirmedError
+			if want := f.failRemove == nil; errors.As(err, &u) != want {
+				t.Errorf("%v is unconfirmed: %v; want %v", err, !want, want)
 			}
 		})
 	}
@@ -521,21 +522,24 @@ func TestRemoveActivity_UnreadableReplies(t *testing.T) {
 	for _, tc := range []struct {
 		name, body  string
 		status      int
-		cut         bool
+		serveCut    bool // closed before its Content-Length
 		unconfirmed bool
+		cut         bool
 		want        string // in the error
 	}{
-		{"not json", `not json`, 200, false, true, "decode removeActivity"},
-		{"empty object", `{}`, 200, false, true, "no data"},
-		{"null data", `{"data":null}`, 200, false, true, "no data"},
-		{"500 not json", `not json`, 500, false, false, "500"},
-		{"cut off", `{"data":{"remo`, 200, true, true, "cut off"},
-		{"500 cut off", `{"errors":[{"mess`, 500, true, false, "status 500 Internal Server Error (reading the reply"},
-		{"401 cut off", `{"err`, 401, true, false, "status 401 Unauthorized (reading the reply"},
+		{"not json", `not json`, 200, false, true, false, "decode removeActivity"},
+		{"empty", ``, 200, false, true, false, "the reply was empty"},
+		{"empty object", `{}`, 200, false, true, false, "no data"},
+		{"null data", `{"data":null}`, 200, false, true, false, "no data"},
+		{"500 not json", `not json`, 500, false, false, false, "500"},
+		{"cut off", `{"data":{"remo`, 200, true, true, true, "cut off"},
+		{"ends mid-JSON", `{"data":{"remo`, 200, false, true, true, "cut off"}, // no length to fall short of
+		{"500 cut off", `{"errors":[{"mess`, 500, true, false, false, "status 500 Internal Server Error (reading the reply"},
+		{"401 cut off", `{"err`, 401, true, false, false, "status 401 Unauthorized (reading the reply"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if tc.cut {
+				if tc.serveCut {
 					cutReply(w, tc.status, tc.body)
 					return
 				}
@@ -568,19 +572,26 @@ func TestRemoveActivity_HTTP429CutOff(t *testing.T) {
 	}
 }
 
-// Anything after the reply's JSON is ignored, as plex.tv's replies were read
-// before.
+// A reply with more after its JSON is unconfirmed, so the history decides,
+// but a rate limit in it is still waited out and an error still fails.
 func TestRemoveActivity_TrailingData(t *testing.T) {
-	for _, tc := range []struct{ name, body, want string }{
-		{"removed", `{"data":{"removeActivity":true}}` + "\n<junk>", ""},
-		{"rate limited", `{"errors":[{"message":"slow","extensions":{"code":"RATE_LIMITED","retryAfter":7}}]} junk`, "retry after 7s"},
+	for _, tc := range []struct {
+		name, body, want string
+		unconfirmed      bool
+	}{
+		{"junk", `{"data":{"removeActivity":true}}` + "\n<junk>", "more after its JSON", true},
+		{"errors after", `{"data":{"removeActivity":true}}{"errors":[{"message":"denied"}]}`, "more after its JSON", true},
+		{"whitespace", `{"data":{"removeActivity":true}}` + " \r\n", "", false},
+		{"rate limited", `{"errors":[{"message":"slow","extensions":{"code":"RATE_LIMITED","retryAfter":7}}]} junk`, "retry after 7s", false},
+		{"error", `{"errors":[{"message":"boom"}]} junk`, "removeActivity: boom", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tc.body) }))
 			defer srv.Close()
 			err := newPlexTVClient(srv.URL, srv.URL, secretToken).RemoveActivity("e1")
-			if (tc.want == "" && err != nil) || (tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want))) {
-				t.Errorf("err = %v; want %q", err, tc.want)
+			var u *unconfirmedError
+			if (tc.want == "" && err != nil) || (tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want))) || errors.As(err, &u) != tc.unconfirmed {
+				t.Errorf("err = %v, unconfirmed %v; want %q, unconfirmed %v", err, u != nil, tc.want, tc.unconfirmed)
 			}
 		})
 	}

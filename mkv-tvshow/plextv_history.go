@@ -66,21 +66,15 @@ func (e *rateLimitError) Error() string {
 }
 
 // unconfirmedError is a 2xx reply from plex.tv that doesn't confirm what it
-// did: one cut off, one that isn't the JSON asked for, or a removal answered
-// anything but true. Re-reading the history afterwards tells whether a
-// removal took. cut is a reply cut off, which may mean plex.tv went away.
+// did: one cut off, one that isn't just the JSON asked for, or a removal
+// answered anything but true. Re-reading the history afterwards tells whether
+// a removal took. cut is a reply cut off, which may mean plex.tv went away.
 type unconfirmedError struct {
 	msg string
 	cut bool
 }
 
 func (e *unconfirmedError) Error() string { return e.msg }
-
-// isUnconfirmed reports whether err is an *unconfirmedError.
-func isUnconfirmed(err error) bool {
-	var u *unconfirmedError
-	return errors.As(err, &u)
-}
 
 // cloudPageSize is how many history items each plex.tv request asks for.
 const cloudPageSize = 100
@@ -115,8 +109,8 @@ type graphQLError struct {
 // graphQL posts a query to plex.tv's community API and decodes its data into
 // data. A rate limit, by GraphQL error or HTTP 429, comes back as a
 // *rateLimitError; another status than 2xx as a *plexTVStatusError, with the
-// reply's GraphQL errors; a 2xx reply cut off, or with no errors and no
-// readable data, as an *unconfirmedError.
+// reply's GraphQL errors; a 2xx reply cut off, empty, followed by more, or
+// with no errors and no readable data, as an *unconfirmedError.
 func (c *plexTVClient) graphQL(operation, query string, variables map[string]any, data any) error {
 	body, err := json.Marshal(map[string]any{"operationName": operation, "query": query, "variables": variables})
 	if err != nil {
@@ -141,9 +135,11 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		Errors []graphQLError  `json:"errors"`
 	}
 	var decodeErr error
+	trailing := false // anything after the first JSON value
 	if readErr == nil {
-		// The first JSON value; anything after it is ignored.
-		decodeErr = json.NewDecoder(bytes.NewReader(raw)).Decode(&reply)
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		decodeErr = dec.Decode(&reply)
+		trailing = decodeErr == nil && len(bytes.TrimSpace(raw[dec.InputOffset():])) > 0
 	}
 	header := retryAfterHeader(resp.Header.Get("Retry-After"))
 	if limited := rateLimitIn(reply.Errors); limited != nil {
@@ -163,14 +159,21 @@ func (c *plexTVClient) graphQL(operation, query string, variables map[string]any
 		}
 		return statusErr
 	}
-	if readErr != nil {
+	// A body ending mid-JSON was cut off too, when nothing said how long it was.
+	if readErr == nil && errors.Is(decodeErr, io.ErrUnexpectedEOF) {
+		readErr = decodeErr
+	}
+	switch {
+	case readErr != nil:
 		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: the reply was cut off: %v", operation, readErr), cut: true}
-	}
-	if decodeErr != nil {
+	case errors.Is(decodeErr, io.EOF):
+		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: the reply was empty", operation)}
+	case decodeErr != nil:
 		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: decode %s: %v", operation, decodeErr)}
-	}
-	if len(reply.Errors) > 0 {
+	case len(reply.Errors) > 0:
 		return fmt.Errorf("plex.tv: %s: %s", operation, errorMessages(reply.Errors))
+	case trailing:
+		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: the reply has more after its JSON", operation)}
 	}
 	if len(reply.Data) == 0 || string(reply.Data) == "null" {
 		return &unconfirmedError{msg: fmt.Sprintf("plex.tv: %s: no data in the reply", operation)}

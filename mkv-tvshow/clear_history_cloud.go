@@ -86,15 +86,15 @@ type cloudCheck struct {
 // checkCloudRemoved re-reads the plex.tv history after the deletes to see
 // which removals took, since its history, not its replies, says so. An item
 // it still lists isn't deleted. One it no longer lists is deleted when plex.tv
-// answered anything but an error, as long as the re-read reached past it;
-// one whose removal failed with an error, or wasn't tried, stays failed.
+// answered true, or answered without saying and a read reached past it; one
+// whose removal failed with an error, or wasn't tried, stays failed.
 //
-// A history read short would pass for removals that took, so the re-read must
-// still list every item of the first read that wasn't to be removed, or
-// wasn't tried (the anchors); otherwise the deletes are unchecked. It reached
-// past an item when it lists anything after it in the first read. An item it
-// didn't reach past may be where it stopped, so only a true reply counts it
-// deleted, and only if no read after the deletes listed it.
+// A history read short would pass for removals that took, so a read after the
+// deletes must still list every item of the first read that wasn't to be
+// removed, or wasn't tried (the anchors); otherwise the deletes are unchecked.
+// A read reached past an item it doesn't list when it lists anything after it
+// in the first read. An item no read reached past may be where the reads
+// stopped, so only a true reply counts it deleted.
 func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p clearPlan, targets []historyTarget, res deleteResult) cloudCheck {
 	matched := make(map[string]bool, len(p.cloud.matched))
 	for _, e := range p.cloud.matched {
@@ -151,15 +151,20 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 			after, listed = again, againListed
 		}
 	}
-	reached := make(map[string]bool) // ids with something after them in the first read still listed
-	for i, seen := len(p.cloudRead)-1, false; i >= 0; i-- {
-		reached[p.cloudRead[i].ID] = seen
-		seen = seen || listed[p.cloudRead[i].ID]
+	// reached: ids a read didn't list, with something after them in the
+	// first read that it did. A later read can't undo an earlier one's proof.
+	reached := make(map[string]bool)
+	for _, l := range []map[string]bool{firstListed, listed} {
+		for i, seen := len(p.cloudRead)-1, false; i >= 0; i-- {
+			id := p.cloudRead[i].ID
+			reached[id] = reached[id] || (seen && !l[id])
+			seen = seen || l[id]
+		}
 	}
 
 	var check cloudCheck
 	var claimed, unconfirmed []cloudEntry
-	recovered, unreached, cutShort, byReply := 0, 0, 0, 0
+	recovered, unreached, byReply := 0, 0, 0
 	for _, e := range p.cloud.matched {
 		switch {
 		case listed[e.ID]:
@@ -175,9 +180,6 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 		case reached[e.ID] && res.unconfirmed[e.ID]:
 			recovered++
 		case reached[e.ID]:
-		case firstListed[e.ID]: // the second read stopped short of an item the first still listed
-			check.failed = append(check.failed, e.ID)
-			cutShort++
 		case res.unconfirmed[e.ID]:
 			check.failed = append(check.failed, e.ID)
 			unreached++
@@ -199,14 +201,11 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 	if recovered > 0 {
 		fmt.Fprintf(d.out, "plex.tv no longer lists %d of the items whose removal it didn't confirm.\n", recovered)
 	}
-	if cutShort > 0 {
-		fmt.Fprintf(d.out, "The second read of plex.tv stopped before %d item(s) the first still listed, so they count as not deleted.\n", cutShort)
-	}
 	if unreached > 0 {
-		fmt.Fprintf(d.out, "The re-read of plex.tv lists nothing past %d of the items whose removal it didn't confirm, so it can't show they went: they count as not deleted.\n", unreached)
+		fmt.Fprintf(d.out, "No read of plex.tv after the deletes lists anything past %d of the items whose removal it didn't confirm, so it can't show they went: they count as not deleted.\n", unreached)
 	}
 	if byReply > 0 {
-		fmt.Fprintf(d.out, "The re-read of plex.tv lists nothing past %d of the items it said it removed, so those count as deleted by its replies.\n", byReply)
+		fmt.Fprintf(d.out, "No read of plex.tv after the deletes lists anything past %d of the items it said it removed, so those count as deleted by its replies.\n", byReply)
 	}
 	// Planned with the first read's items too, so a show kept beside the
 	// target's year is still kept once that year's items are gone. The
