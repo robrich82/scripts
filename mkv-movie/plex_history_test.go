@@ -327,7 +327,7 @@ func TestHistoryClients_NonJSONReplyFails(t *testing.T) {
 	if _, err := pms.WatchHistory(1); err == nil {
 		t.Error("WatchHistory: expected an error")
 	}
-	if _, err := newPlexTVClient(srv.URL, secretToken).User(); err == nil {
+	if _, err := newPlexTVClient(srv.URL, srv.URL, secretToken).User(); err == nil {
 		t.Error("User: expected an error")
 	}
 }
@@ -354,7 +354,7 @@ func TestPlexTVClient_User(t *testing.T) {
 			w.WriteHeader(tc.status)
 			fmt.Fprint(w, tc.body)
 		}))
-		u, err := newPlexTVClient(srv.URL, secretToken).User()
+		u, err := newPlexTVClient(srv.URL, srv.URL, secretToken).User()
 		srv.Close()
 		switch {
 		case tc.wantErr && (err == nil || !strings.Contains(err.Error(), tc.want)):
