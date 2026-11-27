@@ -17,8 +17,7 @@ type HistoryClient interface {
 }
 
 // plexAccount is a Plex server account: id 1 is the owner, and the rest
-// are plex.tv users with access to the server, apart from one with no name
-// that the server also lists.
+// are plex.tv users with access to the server, apart from any with no name.
 type plexAccount struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`

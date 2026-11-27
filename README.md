@@ -443,19 +443,21 @@ give matches a history entry released within a year of it, as when movies are
 found in Plex; an entry's year is the one its release date starts with, or a
 `(Year)` its title ends in. An entry Plex links to one in range (the same
 library item) goes with it, whatever its year. An entry with no year matches on
-title alone, and the plan says so, unless Plex links it to another year's entry
-(it's then that movie) or the history also has the title with a year in range.
-It's then a different movie, which the plan lists as not deleted, as it does an
-entry whose release date can't be read. The plan also says when a title matched
-movies of more than one year. Titles match whole, ignoring case, spaces,
-punctuation, dash lookalikes (tildes, minus signs, box-drawing lines) and
-modifiers like the ʻ in Hawaiʻi or `^`; other symbols, like ° or ☆, count. The
-matching entries are listed per movie with their play count and when it was last
-watched, and nothing is deleted until you confirm; a closed stdin counts as no.
-Before deleting, the entries are written to `history-cleared-<UTC time>.json` in
-the config folder, since Plex can't restore them. Its `complete` stays `false`
-until the run finishes and the file is rewritten, and `failed` lists the history
-keys of the entries whose delete failed or wasn't tried.
+title alone, and the plan says so, unless Plex links it to another year's entry,
+which makes it that year's movie. If the history also has the title with a year
+in range, the entry is probably a different movie: the plan lists it as not
+deleted. A title given with a year treats an entry whose release date can't be
+read the same way, and one given without a year takes it. The plan also says
+when a title given with a year matched movies of more than one year in its
+range. Titles match whole, ignoring case, spaces, punctuation, dash lookalikes
+(tildes, minus signs, box-drawing lines) and modifiers like the ʻ in Hawaiʻi or
+`^`; other symbols, like ° or ☆, count. The matching entries are listed per
+movie with their play count and when it was last watched, and nothing is deleted
+until you confirm; a closed stdin counts as no. Before deleting, the entries are
+written to `history-cleared-<UTC time>.json` in the config folder, since Plex
+can't restore them. Its `complete` stays `false` until the run finishes and the
+file is rewritten, and `failed` lists the history keys of the entries whose
+delete failed or wasn't tried.
 
 ### Dependencies
 

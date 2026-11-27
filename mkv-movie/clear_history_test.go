@@ -355,16 +355,19 @@ func TestPlanHistory_YearlessIsAnotherMovieWhenTheYearIsThere(t *testing.T) {
 	}
 }
 
-// What one target leaves as maybe another movie, another that takes it
-// doesn't list as kept.
+// A movie one target keeps isn't listed as kept when another target takes
+// it, whichever comes first.
 func TestPlanHistory_KeptOnlyWhenNoTargetTakesIt(t *testing.T) {
 	targets, err := parseHistoryTargets([]string{"Solaris (2002)", "Solaris"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := planHistory([]historyEntry{moviePlay(1, 1, "Solaris", "2002-01-01"), moviePlay(2, 1, "Solaris", "")}, targets)
-	if got := keysOf(plan.matched); !slices.Equal(got, keys("1", "2")) || len(plan.kept) != 0 {
-		t.Errorf("matched %v, kept %v; want both matched and none kept", got, plan.kept)
+	entries := []historyEntry{moviePlay(1, 1, "Solaris", "2002-01-01"), moviePlay(2, 1, "Solaris", "")}
+	for _, order := range [][]historyTarget{targets, {targets[1], targets[0]}} {
+		plan := planHistory(entries, order)
+		if got := keysOf(plan.matched); !slices.Equal(got, keys("1", "2")) || len(plan.kept) != 0 {
+			t.Errorf("targets %v: matched %v, kept %v; want both matched and none kept", order, got, plan.kept)
+		}
 	}
 }
 
@@ -372,7 +375,7 @@ func TestPlanHistory_KeptOnlyWhenNoTargetTakesIt(t *testing.T) {
 // dated target keeps it and lists it, and one without a year takes it.
 func TestPlanHistory_UnreadableDate(t *testing.T) {
 	entry := moviePlay(1, 1, "Heat", "not a date")
-	entry.Key = "/library/metadata/1" // in no other year's keys: it has none
+	entry.Key = "/library/metadata/1" // a key no dated entry shares
 	entries := []historyEntry{entry}
 	for _, tc := range []struct {
 		target        string
@@ -397,8 +400,7 @@ func TestPlanHistory_UnreadableDate(t *testing.T) {
 	}
 }
 
-// The plan lists a year-less entry it keeps, saying why, sorted with any
-// others.
+// The plan lists a year-less entry it keeps, saying why.
 func TestPrintHistoryPlan_ListsKept(t *testing.T) {
 	plan := planMovies(t, "X (2019)", historyMovie{"X", 2019, "/library/metadata/7"}, historyMovie{title: "X"})
 	var out strings.Builder
@@ -1217,8 +1219,8 @@ func TestPlanHistory_RetitledMovie(t *testing.T) {
 	}
 }
 
-// A year-less entry linked both to the target's year and to another year
-// (Plex changed the movie's date) is the target's movie.
+// Entries linked to the target's library item all match, whatever their
+// year, a year-less one included.
 func TestPlanHistory_YearlessLinkedToBothYears(t *testing.T) {
 	plan := planMovies(t, "Movie (2018)",
 		historyMovie{"Movie", 2018, "/library/metadata/1"},
@@ -1233,9 +1235,9 @@ func TestPlanHistory_YearlessLinkedToBothYears(t *testing.T) {
 	}
 }
 
-// An entry with an in-range entry's key is that library item's play, though
-// its release date was another year's when it was played; another movie's
-// entry with that year isn't.
+// An entry with an in-range entry's key is that library item's play,
+// whatever its release date; one with that other year and a different or
+// empty key isn't.
 func TestPlanHistory_KeyTiesOtherYear(t *testing.T) {
 	plan := planMovies(t, "X (2019)",
 		historyMovie{"X", 2019, "/library/metadata/7"},
@@ -1443,4 +1445,100 @@ func TestPrintHistoryPlan_SameLineNamesKeys(t *testing.T) {
 			t.Errorf("plan lacks %q:\n%s", want, out.String())
 		}
 	}
+}
+
+// An unreadable date with an in-range entry's key is that movie's play; with
+// only another year's key it is that movie's, so neither is kept.
+func TestPlanHistory_UnreadableDateTiedByKey(t *testing.T) {
+	targets, err := parseHistoryTargets([]string{"Heat (1995)"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	play := func(id int, date, key string) historyEntry {
+		e := moviePlay(id, 1, "Heat", date)
+		e.Key = key
+		return e
+	}
+	plan := planHistory([]historyEntry{
+		play(1, "1995-12-15", "/library/metadata/1"),
+		play(2, "not a date", "/library/metadata/1"),
+		play(3, "1986-03-14", "/library/metadata/2"),
+		play(4, "not a date", "/library/metadata/2"),
+	}, targets)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("1", "2")) {
+		t.Errorf("matched %v; want the 1995 entry and the unreadable one with its key", got)
+	}
+	if len(plan.kept) != 0 || len(plan.yearUnchecked) != 0 {
+		t.Errorf("kept %v, year unchecked %v; each key says which movie", plan.kept, plan.yearUnchecked)
+	}
+}
+
+// No date and an unreadable one both print as the bare title, so they fold
+// together: the plan warns, and names each key.
+func TestPrintHistoryPlan_UnreadableAndNoDateFoldTogether(t *testing.T) {
+	targets, err := parseHistoryTargets([]string{"X"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := moviePlay(1, 1, "X", ""), moviePlay(2, 1, "X", "not a date")
+	a.Key, b.Key = "/library/metadata/1", "/library/metadata/2"
+	var out strings.Builder
+	printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, planHistory([]historyEntry{a, b}, targets))
+	for _, want := range []string{"[/library/metadata/1]", "[/library/metadata/2]", "Titles that repeat"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("plan lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// Kept lines that would read the same name their keys too.
+func TestPrintHistoryPlan_KeptLinesNameKeys(t *testing.T) {
+	plan := planMovies(t, "Solaris (2002)",
+		historyMovie{"Solaris", 2002, "/library/metadata/3"},
+		historyMovie{"Solaris", 0, "/library/metadata/1"},
+		historyMovie{"Solaris", 0, ""},
+	)
+	var out strings.Builder
+	printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, plan)
+	for _, want := range []string{"with no release date [/library/metadata/1]\n", "with no release date [no key]\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("plan lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// Through a whole run, a kept play is listed but neither asked about,
+// recorded nor deleted; with only kept plays, nothing is asked.
+func TestClearHistory_KeptIsNotDeleted(t *testing.T) {
+	r := newClearHistoryRun(t, "y")
+	r.pms.history = append(r.pms.history, moviePlay(20, 1, "Solaris", "2002-01-01"), moviePlay(21, 1, "Solaris", ""))
+	if err := r.run(t, "", "Solaris (2002)"); err != nil {
+		t.Fatal(err)
+	}
+	if want := keys("20"); !slices.Equal(r.pms.deleted, want) {
+		t.Errorf("deleted %v; want %v", r.pms.deleted, want)
+	}
+	if recs := r.records(t); len(recs) != 1 || !slices.Equal(keysOf(recs[0].Server), keys("20")) {
+		t.Errorf("records %+v; want one listing only entry 20", recs)
+	}
+	if len(r.prompter.asked) != 1 || !strings.Contains(r.prompter.asked[0], "Delete these 1 history entries") {
+		t.Errorf("asked %q", r.prompter.asked)
+	}
+	if !strings.Contains(r.out.String(), "Not deleting these, which may be other movies") {
+		t.Errorf("output lacks the kept list:\n%s", r.out.String())
+	}
+
+	r = newClearHistoryRun(t)
+	r.pms.history = []historyEntry{moviePlay(21, 1, "Solaris", "not a date")}
+	if err := r.run(t, "", "Solaris (2002)"); err != nil {
+		t.Fatal(err)
+	}
+	out := r.out.String()
+	if i, j := strings.Index(out, "Not deleting these"), strings.Index(out, "Nothing to clear."); i < 0 || j < i {
+		t.Errorf("want the kept list, then nothing to clear:\n%s", out)
+	}
+	if len(r.prompter.asked) != 0 {
+		t.Errorf("asked %q; want no prompt", r.prompter.asked)
+	}
+	r.assertUntouched(t)
 }

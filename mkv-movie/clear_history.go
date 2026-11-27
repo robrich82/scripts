@@ -271,19 +271,19 @@ func accountIDs(accounts []plexAccount) string {
 // movie no longer in the library has no key.
 type historyMovie struct {
 	title string
-	year  int // entryYear's
+	year  int // entryYear's: 0 for none, unreadableYear for an unreadable date
 	key   string
 }
 
-// unreadableYear is entryYear's year for a release date it can't read: in
-// no target's range, so the entry isn't taken on title alone.
+// unreadableYear is entryYear's year for a release date it can't read. A
+// dated target never takes such an entry on title alone.
 const unreadableYear = -1
 
 var leadingYear = regexp.MustCompile(`^\d{4}`)
 
-// entryYear is the year e's release date starts with, or of a "(Year)" its
-// title ends in, or 0 when it has neither. A release date it can't read
-// makes it unreadableYear.
+// entryYear is the year e's release date starts with, else the "(Year)" its
+// title ends in. With neither, it is 0 for an entry with no release date and
+// unreadableYear for one whose date has no year to read.
 func entryYear(e historyEntry) int {
 	if y, _ := strconv.Atoi(leadingYear.FindString(e.OriginallyAvailableAt)); y > 0 {
 		return y
@@ -304,15 +304,16 @@ type movieSummary struct {
 	last  historyEntry
 }
 
-// historyPlan is what a run would delete, and what it couldn't match.
+// historyPlan is what a run would delete, what it couldn't match, and what
+// it left as maybe another movie.
 type historyPlan struct {
 	matched       []historyEntry
 	movies        map[historyMovie]*movieSummary
 	missing       []string // targets that matched nothing
 	yearUnchecked []string // targets that matched an entry with no year
 	severalYears  []string // dated targets whose range took movies of more than one year
-	// kept is the target's title with no year, or one unreadable, that
-	// planHistory left as maybe another movie.
+	// kept is the movies with a target's title and no year, or an unreadable
+	// one, that no target took: maybe other movies.
 	kept map[historyMovie]*movieSummary
 }
 
@@ -320,9 +321,10 @@ type historyPlan struct {
 // year must be within one of the entry's, as for FindMovieByTitle, when both
 // have one. An entry without a year matches too, unless the history also has
 // the target's title with a year in range: the year-less one is then another
-// movie, and is kept. An entry whose key one in range also has is that
-// movie, whatever its year; a year-less one whose key only another year has
-// is that other movie.
+// movie, and is kept. An entry whose release date can't be read is kept by a
+// dated target either way. An entry whose key one in range also has is that
+// movie, whatever its year; a year-less or unreadable one whose key only
+// another year has is that other movie, and is skipped.
 func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 	type movieInfo struct {
 		historyMovie
@@ -352,7 +354,8 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 		inRange := func(year int) bool { return abs(year-t.year) <= 1 }
 		// The keys of the dated movies with the target's title, in range and
 		// not: an entry with an in-range one's key is that movie, and a
-		// year-less one with only another year's is that other movie.
+		// year-less or unreadable one with only another year's is that other
+		// movie.
 		exactKeys, otherKeys := make(map[string]bool), make(map[string]bool)
 		exactYear := false
 		if t.year != 0 {
@@ -436,37 +439,46 @@ func movieLabel(m historyMovie) string {
 	return m.title
 }
 
+// movieLines is a plan line per movie in sums, sorted, ending in its play
+// count, when it was last watched and why's text. Lines that would read the
+// same also name the key. titles is how many titles they have, folded as
+// matching folds them, with no year and an unreadable one counted as one.
+func movieLines(sums map[historyMovie]*movieSummary, why func(historyMovie) string) (lines []string, titles int) {
+	movies := slices.SortedFunc(maps.Keys(sums), compareMovies)
+	perTitle, perLine := make(map[string]bool), make(map[string]int)
+	lineIDs := make([]string, len(movies))
+	for i, m := range movies {
+		sum := sums[m]
+		t, _ := splitTitleYear(m.title)
+		folded := historyTitleKey(t) + "\x00" + strconv.Itoa(max(m.year, 0))
+		tail := describeLastWatched(sum.last) + why(m)
+		lines = append(lines, fmt.Sprintf("  %-40s %d play(s)%s", movieLabel(m), sum.plays, tail))
+		lineIDs[i] = fmt.Sprintf("%s\x00%d\x00%s", folded, sum.plays, tail)
+		perTitle[folded] = true
+		perLine[lineIDs[i]]++
+	}
+	for i := range lines {
+		if perLine[lineIDs[i]] > 1 {
+			lines[i] += " [" + cmp.Or(movies[i].key, "no key") + "]" // nothing else tells them apart
+		}
+	}
+	return lines, len(perTitle)
+}
+
 func compareMovies(a, b historyMovie) int {
 	return cmp.Or(strings.Compare(a.title, b.title), cmp.Compare(a.year, b.year), strings.Compare(a.key, b.key))
 }
 
 // printHistoryPlan lists each matched movie with its play count and when it
-// was last watched, since a target can match more than one movie, and the
-// targets that matched nothing.
+// was last watched, since a target can match more than one movie, then
+// what it flagged or kept, and the targets that matched nothing.
 func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 	fmt.Fprintf(out, "Watch history for %s (account %d) on the Plex server:\n", acct.Name, acct.ID)
-	movies := slices.SortedFunc(maps.Keys(plan.movies), compareMovies)
-	// Titles are compared as matching folds them, so ones that differ only
-	// in what matching ignores count as one.
-	perTitle, perLine := make(map[string]int), make(map[string]int)
-	lines, lineIDs := make([]string, len(movies)), make([]string, len(movies))
-	for i, m := range movies {
-		sum := plan.movies[m]
-		last := describeLastWatched(sum.last)
-		t, _ := splitTitleYear(m.title)
-		folded := historyTitleKey(t) + "\x00" + strconv.Itoa(m.year)
-		lines[i] = fmt.Sprintf("  %-40s %d play(s)%s", movieLabel(m), sum.plays, last)
-		lineIDs[i] = fmt.Sprintf("%s\x00%d\x00%s", folded, sum.plays, last)
-		perTitle[folded]++
-		perLine[lineIDs[i]]++
-	}
-	for i, line := range lines {
-		if perLine[lineIDs[i]] > 1 {
-			line += " [" + cmp.Or(movies[i].key, "no key") + "]" // nothing else tells them apart
-		}
+	lines, titles := movieLines(plan.movies, func(historyMovie) string { return "" })
+	for _, line := range lines {
 		fmt.Fprintln(out, line)
 	}
-	if len(perTitle) < len(movies) {
+	if titles < len(lines) {
 		fmt.Fprintln(out, "Titles that repeat, or that matching counts as the same, may be different movies: check each before answering.")
 	}
 	if len(plan.severalYears) > 0 {
@@ -477,13 +489,14 @@ func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 	}
 	if len(plan.kept) > 0 {
 		fmt.Fprintln(out, "Not deleting these, which may be other movies (give the title without its year to include them):")
-		for _, m := range slices.SortedFunc(maps.Keys(plan.kept), compareMovies) {
-			why := "no release date"
+		lines, _ := movieLines(plan.kept, func(m historyMovie) string {
 			if m.year == unreadableYear {
-				why = "a release date that can't be read"
+				return ", with a release date that can't be read"
 			}
-			sum := plan.kept[m]
-			fmt.Fprintf(out, "  %-40s %d play(s)%s, with %s\n", movieLabel(m), sum.plays, describeLastWatched(sum.last), why)
+			return ", with no release date"
+		})
+		for _, line := range lines {
+			fmt.Fprintln(out, line)
 		}
 	}
 	if len(plan.missing) > 0 {
