@@ -35,3 +35,44 @@ func TestHTTPPlexClient_RefreshMetadata_Non2xxIsError(t *testing.T) {
 		t.Errorf("err = %v; want a PUT 404 error", err)
 	}
 }
+
+// A PUT that a 301/302/303 would send on as a GET fails, unsent; a 307 keeps
+// the method and is followed.
+func TestHTTPPlexClient_RefreshMetadata_Redirects(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		wantErr bool
+	}{
+		{http.StatusMovedPermanently, true},
+		{http.StatusFound, true},
+		{http.StatusSeeOther, true},
+		{http.StatusTemporaryRedirect, false},
+	} {
+		var reqs []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqs = append(reqs, r.Method+" "+r.URL.Path)
+			if r.URL.Path != "/moved" {
+				http.Redirect(w, r, "/moved", tc.status)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		err := newHTTPPlexClient(srv.URL, "token").RefreshMetadata("42")
+		srv.Close()
+		if tc.wantErr {
+			if err == nil || !strings.Contains(err.Error(), "refusing a redirect that would send PUT as GET") {
+				t.Errorf("%d: err = %v; want a redirect error", tc.status, err)
+			}
+			if len(reqs) != 1 {
+				t.Errorf("%d: requests %v; want only the first PUT", tc.status, reqs)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%d: err = %v", tc.status, err)
+		}
+		if len(reqs) != 2 || reqs[1] != "PUT /moved" {
+			t.Errorf("%d: requests %v; want the PUT followed to /moved", tc.status, reqs)
+		}
+	}
+}
