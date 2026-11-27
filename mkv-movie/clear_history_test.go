@@ -371,6 +371,10 @@ func TestPlanHistory_KeptOnlyWhenNoTargetTakesIt(t *testing.T) {
 	}
 }
 
+// localDay is the plan's date for a play at sec: the local day, so tests
+// pass in any time zone.
+func localDay(sec int64) string { return time.Unix(sec, 0).Format("2006-01-02") }
+
 // An entry whose release date can't be read may be another year's movie: a
 // dated target keeps it and lists it, and one without a year takes it.
 func TestPlanHistory_UnreadableDate(t *testing.T) {
@@ -394,7 +398,7 @@ func TestPlanHistory_UnreadableDate(t *testing.T) {
 		}
 		var out strings.Builder
 		printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, plan)
-		if got := strings.Contains(out.String(), "Not deleting these, which may be other movies (give the title without its year to include them):\n  Heat                                     1 play(s), last watched 2023-11-15, with a release date that can't be read\n"); got != (tc.kept == 1) {
+		if got := strings.Contains(out.String(), "Not deleting these, which may be other movies (give the title without its year to include them):\n  Heat                                     1 play(s), last watched "+localDay(1_700_000_000)+", with a release date that can't be read\n"); got != (tc.kept == 1) {
 			t.Errorf("%s: plan lists the kept entry: %v; want %v:\n%s", tc.target, got, tc.kept == 1, out.String())
 		}
 	}
@@ -405,7 +409,7 @@ func TestPrintHistoryPlan_ListsKept(t *testing.T) {
 	plan := planMovies(t, "X (2019)", historyMovie{"X", 2019, "/library/metadata/7"}, historyMovie{title: "X"})
 	var out strings.Builder
 	printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, plan)
-	want := "Not deleting these, which may be other movies (give the title without its year to include them):\n  X                                        1 play(s), last watched 2023-11-15, with no release date\n"
+	want := "Not deleting these, which may be other movies (give the title without its year to include them):\n  X                                        1 play(s), last watched " + localDay(1_700_000_000) + ", with no release date\n"
 	if !strings.HasSuffix(out.String(), want) {
 		t.Errorf("plan:\n%s\nwant it to end with:\n%s", out.String(), want)
 	}
@@ -656,10 +660,9 @@ func TestClearHistory_SameTitleMoviesListedApart(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := r.out.String()
-	day := func(sec int64) string { return time.Unix(sec, 0).Format("2006-01-02") }
 	for _, want := range []string{
-		"2 play(s), last watched " + day(1_700_100_000),
-		"1 play(s), last watched " + day(1_600_000_000),
+		"2 play(s), last watched " + localDay(1_700_100_000),
+		"1 play(s), last watched " + localDay(1_600_000_000),
 		"may be different movies",
 	} {
 		if !strings.Contains(out, want) {
@@ -1438,8 +1441,8 @@ func TestPrintHistoryPlan_SameLineNamesKeys(t *testing.T) {
 	var out strings.Builder
 	printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, planHistory([]historyEntry{keyed, keyless}, targets))
 	for _, want := range []string{
-		"  Bar                                      1 play(s), last watched 2023-11-15 [/library/metadata/5]\n",
-		"  Bar                                      1 play(s), last watched 2023-11-15 [no key]\n",
+		"  Bar                                      1 play(s), last watched " + localDay(1_700_000_000) + " [/library/metadata/5]\n",
+		"  Bar                                      1 play(s), last watched " + localDay(1_700_000_000) + " [no key]\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("plan lacks %q:\n%s", want, out.String())
