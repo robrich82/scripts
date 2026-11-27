@@ -274,13 +274,17 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 		fmt.Printf("  [i] Title truncated to fit within MAX_PATH (%d chars)\n", windowsMaxPath)
 	}
 
+	newPath := filepath.Join(dir, newStem+ext)
+	if taken, _ := otherFileAt(path, newPath); taken {
+		fmt.Printf("  [X] Not renaming: %s already exists\n", newStem+ext)
+		return path
+	}
 	ans, _ := tc.prompter.Ask("  Rename? [y/n]: ")
 	if strings.ToLower(strings.TrimSpace(ans)) != "y" {
 		return path
 	}
 
-	newPath := filepath.Join(dir, newStem+ext)
-	if err := os.Rename(path, newPath); err != nil {
+	if err := renameNoReplace(path, newPath); err != nil {
 		fmt.Printf("  [X] Rename failed: %v\n", err)
 		return path
 	}

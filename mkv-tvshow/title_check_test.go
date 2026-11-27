@@ -275,16 +275,22 @@ func TestTitleCheck_RenameOffRetryListLeavesItAlone(t *testing.T) {
 	}
 }
 
+// removingPrompter deletes path when asked, then answers yes, so the rename
+// fails.
+type removingPrompter struct{ path string }
+
+func (p removingPrompter) Ask(string) (string, error) { return "y", os.Remove(p.path) }
+
 // A failed rename leaves the retry entry where it was.
 func TestTitleCheck_FailedRenameKeepsRetryEntry(t *testing.T) {
-	dir, oldPath, newPath := renameShow(t)
-	if err := os.Mkdir(newPath, 0o755); err != nil { // a folder in the way fails the rename
-		t.Fatal(err)
-	}
+	dir, oldPath, _ := renameShow(t)
 	retry := emptyRetryList(t)
 	retry.Fail(oldPath)
+	tmdb := &fakeTMDB{seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 2, Name: "New Title"}}}}
+	tc := NewTitleChecker(Config{MediaDir: dir}, cacheWith(t, map[string]string{"Show": "999"}), nil, tmdb,
+		removingPrompter{oldPath}, nil, newNullTitleCache(t), noopTimer{}, retry)
 
-	_, out := runRenameCheck(t, dir, retry)
+	out := captureOutput(t, tc.Run)
 
 	if !strings.Contains(out, "[X] Rename failed") {
 		t.Fatalf("rename didn't fail:\n%s", out)

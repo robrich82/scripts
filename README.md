@@ -909,7 +909,7 @@ compared individually against each corresponding TMDB episode and joined with
 If the new path would exceed Windows MAX_PATH (260 characters), the title is
 automatically truncated at a word boundary to fit.
 
-A renamed file keeps its place on the retry list (`pending_dates.json`), with its failed runs and the date of the first; its full title is cached again once `--title-check` sets it. A multi-episode file that a normal, `--ratings-only` or `--deband-only` run renames (`S01E01E02E03` → `S01E01-E03`) keeps both its retry-list place and its cached full title; the next normal run that tags the file, or `--title-check`, writes that title with the new episode code.
+A renamed file keeps its place on the retry list (`pending_dates.json`), with its failed runs and the date of the first; its full title is cached again once `--title-check` sets it. A multi-episode file that a normal, `--ratings-only` or `--deband-only` run renames (`S01E01E02E03` → `S01E01-E03`) keeps both its retry-list place and its cached full title; the next normal run that tags the file, or `--title-check`, writes that title with the new episode code. No rename replaces a file that already has the new name: `--title-check` says so instead of asking, and other runs tag the file under its old name.
 
 After checking (and optionally renaming) each episode, `--title-check` also sets
 the MKV `title` metadata to the **full, untruncated** TMDB title — MKV metadata
