@@ -20,14 +20,32 @@ func main() {
 	debandOnlyMode := flag.Bool("deband-only", false, "Update only the DEBAND tag for files configured in manual_data.json; preserves all other tags and timestamps.")
 	resetRatingQuery := flag.String("reset-rating", "", "Clear the cached and Plex-pushed rating for a movie (title substring or TMDB ID), then exit. Run with --ratings-only in its folder afterwards to retag it.")
 	setRating := flag.String("set-rating", "", "Set this NZ rating for every movie in the current directory, overriding any cached value, then exit.")
+	var clearHistoryMovies stringList
+	flag.Var(&clearHistoryMovies, "clear-history", `Delete a movie's Plex watch history, given as "Title" or "Title (Year)"; repeat for more movies. Lists the entries and asks first, then exits.`)
+	historyAccount := flag.String("account", "", "With --clear-history, the Plex server account whose history to clear, by name. Defaults to the PLEX_TOKEN owner.")
 	flag.Parse()
 
 	if names := conflictingModes([]oneShotMode{
 		{"--clean", *cleanFlag}, {"--reset-rating", *resetRatingQuery != ""}, {"--set-rating", *setRating != ""},
 		{"--deband-only", *debandOnlyMode}, {"--ratings-only", *ratingsOnly}, {"--language-only", *languageOnly},
+		{"--clear-history", len(clearHistoryMovies) > 0},
 	}); names != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s can't be combined; run them one at a time.\n", joinNames(names))
 		os.Exit(1)
+	}
+	if *historyAccount != "" && len(clearHistoryMovies) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: --account only works with --clear-history.")
+		os.Exit(1)
+	}
+
+	if len(clearHistoryMovies) > 0 {
+		// flag stops at the first stray argument, which would drop a later --account.
+		if flag.NArg() > 0 {
+			fmt.Fprintf(os.Stderr, "Error: unexpected argument %q: give each title its own --clear-history, quoted if it has spaces or a year, e.g. --clear-history \"Heat (1995)\" --clear-history Alien.\n", flag.Arg(0))
+			os.Exit(1)
+		}
+		runClearHistory(clearHistoryMovies, *historyAccount)
+		return
 	}
 
 	if *cleanFlag {

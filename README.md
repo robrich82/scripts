@@ -398,9 +398,11 @@ Flags:
 | `--language-only` | Only set Plex audio/subtitle streams, for every movie the cache maps a file to (run `--clean` first to drop deleted files), from any folder; `--cutoff-date`/`--all` are ignored. The files aren't read, so an offline drive doesn't matter. Streams are set only on accounts not yet recorded as having them; `--overwrite-streams` sets every account again. A movie with several files takes each of `language`, `alt-language` and `alt2-language` from the first file name, in name order, whose `manual_data.json` entry sets it. TMDB is called for the original language when no entry sets `language`, and for the title and year Plex is searched by when the streams are due. Needs `PLEX_URL`/`PLEX_TOKEN`, but not MKVToolNix. Prints `Done. Updated: N  Skipped: N  Errors: N` |
 | `--reset-rating <query>` | Clear the cached NZ rating and the rating last pushed to Plex for a movie, then exit. Run `mkv-movie --ratings-only` in its folder to fetch the rating again, retag it and push it. `query` is a title substring or TMDB ID |
 | `--set-rating <RATING>` | Set `RATING` as the NZ rating for **every** movie in the current directory, overriding any cached value, then exit (see below) |
+| `--clear-history <movie>` | Delete a movie's Plex watch history, then exit (see below). Repeat for more movies |
+| `--account <name>` | With `--clear-history`, the Plex server account whose history to clear (default: the token owner) |
 | `--deband-only` | Update only the `DEBAND` MKV tag for movies configured in `manual_data.json`; preserves all other tags and timestamps |
 
-`--clean`, `--ratings-only`, `--language-only`, `--reset-rating`, `--set-rating` and `--deband-only` each run on their own: setting two of them exits with an error before anything runs.
+`--clean`, `--ratings-only`, `--language-only`, `--reset-rating`, `--set-rating`, `--clear-history` and `--deband-only` each run on their own: setting two of them exits with an error before anything runs.
 
 Output:
 
@@ -426,11 +428,37 @@ Confirming replaces the cached rating and clears the recorded Plex rating. No
 TMDB, Plex, or network calls are made: the next `mkv-movie --ratings-only` in the
 same directory writes the new `LAW_RATING` tag and pushes it to Plex.
 
+### Clearing watch history (`--clear-history`)
+
+Deletes every play of a movie from a Plex server account's watch history,
+including movies no longer in the library:
+
+```sh
+mkv-movie --clear-history "Heat (1995)" --clear-history "Alien"
+```
+
+Needs `PLEX_URL` and `PLEX_TOKEN`, but not `TMDB_API_KEY`. It clears the token
+owner's history (found through plex.tv), or `--account <name>`'s. A year you
+give matches a history entry released within a year of it, as when movies are
+found in Plex; an entry's year is its release date's, or a `(Year)` its title
+ends in. An entry with no year matches on title alone, and the plan says so,
+unless Plex links it to a dated entry (then it goes with that one) or the
+history also has the title with a year in range, since it's then a different
+movie. Titles match whole, ignoring case, spaces, punctuation, dash lookalikes
+(tildes, minus signs, box-drawing lines) and modifiers like the ʻ in Hawaiʻi or
+`^`; other symbols, like ° or ☆, count. The matching entries are listed per
+movie with their play count and when it was last watched, and nothing is
+deleted until you confirm; a closed stdin counts as no. Before deleting, the
+entries are written to `history-cleared-<UTC time>.json` in the config folder,
+since Plex can't restore them. Its `complete` stays `false` until the run
+finishes and the file is rewritten, and `failed` lists the entries whose delete
+failed or wasn't tried.
+
 ### Dependencies
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
 - `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files are skipped with their timestamps untouched, so they stay in the `--cutoff-date` window; Plex updates still run, and a failed one makes the file an error)
-- `PLEX_URL` / `PLEX_TOKEN` — optional (required by `--language-only`); used to read/write NZ ratings in Plex and set preferred audio language
+- `PLEX_URL` / `PLEX_TOKEN` — optional (required by `--language-only` and `--clear-history`); used to read/write NZ ratings in Plex, set preferred audio language and clear watch history
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; stream selection is applied for these accounts too
 
 When Plex is configured, after processing each movie the tool pushes the resolved NZ content rating and selects the appropriate audio and subtitle streams: the audio track matching the TMDB original language (e.g. Japanese for anime) and the first non-forced English subtitle. Stream selection is cached in `movie_rating_cache.json` and only applied once per movie and account, so a selection you change in Plex afterwards is kept; use `--overwrite-streams` to force a re-apply.

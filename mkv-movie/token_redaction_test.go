@@ -141,3 +141,37 @@ func TestTMDBMovieSource_OddIDOmitsAPIKey(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryClients_SendTokenInHeader(t *testing.T) {
+	requests := 0
+	srv := plexTokenServer(t, &requests)
+	c := newHTTPPlexMovieClient(srv.URL, secretToken)
+	if _, err := c.Accounts(); err != nil {
+		t.Errorf("Accounts: %v", err)
+	}
+	if _, err := c.WatchHistory(1); err != nil {
+		t.Errorf("WatchHistory: %v", err)
+	}
+	if err := c.DeleteHistory(historyKeyPrefix + "1"); err != nil {
+		t.Errorf("DeleteHistory: %v", err)
+	}
+	_, _ = newPlexTVClient(srv.URL, secretToken).User() // no username in the reply
+	if requests != 4 {
+		t.Errorf("server got %d requests, want 4", requests)
+	}
+}
+
+func TestHistoryClients_TransportErrorOmitsToken(t *testing.T) {
+	c := newHTTPPlexMovieClient(closedServerURL(), secretToken)
+	_, accountsErr := c.Accounts()
+	_, historyErr := c.WatchHistory(1)
+	_, userErr := newPlexTVClient(closedServerURL(), secretToken).User()
+	for _, err := range []error{accountsErr, historyErr, c.DeleteHistory(historyKeyPrefix + "1"), userErr} {
+		if err == nil {
+			t.Fatal("expected a connection error")
+		}
+		if strings.Contains(err.Error(), secretToken) {
+			t.Errorf("error leaks the token: %v", err)
+		}
+	}
+}
