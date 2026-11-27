@@ -583,7 +583,7 @@ func (p *Processor) normalizeFilename(dir, file string) (string, string) {
 	newFile := strings.Replace(file, m[2], fmt.Sprintf("E%s-E%s", first, last), 1)
 	newPath := filepath.Join(dir, newFile)
 	if err := renameNoReplace(filepath.Join(dir, file), newPath); err != nil {
-		fmt.Printf("  [!] Not renaming %s, so tagging it under that name: %v\n", file, err)
+		fmt.Printf("  [!] Not renaming %s: %v\n", file, err)
 		return file, filepath.Join(dir, file)
 	}
 	if p.retryList != nil && p.retryList.Move(filepath.Join(dir, file), newPath) {

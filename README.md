@@ -896,11 +896,17 @@ For each MKV file it:
 2. Fetches the matching episode title(s) from TMDB (respecting any
    `overrides`/`mapping` entries in `manual_data.json`).
 3. Compares the titles case-insensitively with whitespace normalisation.
-4. If they differ, prints both the filename and TMDB versions and prompts:
+4. If they differ, prints both the filename and TMDB versions and the new
+   name, then prompts:
 
 ```
-Rename to use TMDB title(s)? [y/n]:
+Rename? [y/n]:
 ```
+
+No rename replaces a file that already has the new name: `--title-check` says
+so instead of asking. So does the multi-episode rename (`S01E01E02E03` →
+`S01E01-E03`) of a normal, `--ratings-only` or `--deband-only` run, which keeps
+the old name.
 
 Multi-episode files (e.g. `S01E01E02` or `S01E01-E03`) have their titles
 compared individually against each corresponding TMDB episode and joined with
@@ -909,7 +915,7 @@ compared individually against each corresponding TMDB episode and joined with
 If the new path would exceed Windows MAX_PATH (260 characters), the title is
 automatically truncated at a word boundary to fit.
 
-A renamed file keeps its place on the retry list (`pending_dates.json`), with its failed runs and the date of the first; its full title is cached again once `--title-check` sets it. A multi-episode file that a normal, `--ratings-only` or `--deband-only` run renames (`S01E01E02E03` → `S01E01-E03`) keeps both its retry-list place and its cached full title; the next normal run that tags the file, or `--title-check`, writes that title with the new episode code. No rename replaces a file that already has the new name: `--title-check` says so instead of asking, and other runs tag the file under its old name.
+A renamed file keeps its place on the retry list (`pending_dates.json`), with its failed runs and the date of the first; its full title is cached again once `--title-check` sets it. A multi-episode file that a normal, `--ratings-only` or `--deband-only` run renames (`S01E01E02E03` → `S01E01-E03`) keeps both its retry-list place and its cached full title; the next normal run that tags the file, or `--title-check`, writes that title with the new episode code.
 
 After checking (and optionally renaming) each episode, `--title-check` also sets
 the MKV `title` metadata to the **full, untruncated** TMDB title — MKV metadata

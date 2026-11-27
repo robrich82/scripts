@@ -275,8 +275,12 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 	}
 
 	newPath := filepath.Join(dir, newStem+ext)
-	if taken, _ := otherFileAt(path, newPath); taken {
-		fmt.Printf("  [X] Not renaming: %s already exists\n", newStem+ext)
+	switch taken, err := otherFileAt(path, newPath); {
+	case err != nil:
+		fmt.Printf("  [!] Not renaming: %v\n", err)
+		return path
+	case taken:
+		fmt.Printf("  [!] Not renaming: %s already exists\n", newStem+ext)
 		return path
 	}
 	ans, _ := tc.prompter.Ask("  Rename? [y/n]: ")
