@@ -116,8 +116,8 @@ type historyRecord struct {
 	// so a record left false is from an interrupted run (some of Server may
 	// remain) or one whose final rewrite failed.
 	Complete bool `json:"complete"`
-	// Failed lists the entries not deleted: those whose delete failed, and
-	// those not tried after the run stopped.
+	// Failed lists the historyKeys of the entries not deleted: those whose
+	// delete failed, and those not tried after the run stopped.
 	Failed []string `json:"failed,omitempty"`
 }
 
@@ -275,14 +275,23 @@ type historyMovie struct {
 	key   string
 }
 
-// entryYear is the year of e's release date, or of a "(Year)" its title
-// ends in, or 0 when it has neither.
+// unreadableYear is entryYear's year for a release date it can't read: in
+// no target's range, so the entry isn't taken on title alone.
+const unreadableYear = -1
+
+var leadingYear = regexp.MustCompile(`^\d{4}`)
+
+// entryYear is the year e's release date starts with, or of a "(Year)" its
+// title ends in, or 0 when it has neither. A release date it can't read
+// makes it unreadableYear.
 func entryYear(e historyEntry) int {
-	if d, err := time.Parse("2006-01-02", e.OriginallyAvailableAt); err == nil && d.Year() > 0 {
-		return d.Year()
+	if y, _ := strconv.Atoi(leadingYear.FindString(e.OriginallyAvailableAt)); y > 0 {
+		return y
 	}
-	_, year := splitTitleYear(e.Title)
-	return year
+	if _, year := splitTitleYear(e.Title); year != 0 || e.OriginallyAvailableAt == "" {
+		return year
+	}
+	return unreadableYear
 }
 
 func movieOf(e historyEntry) historyMovie {
@@ -301,14 +310,19 @@ type historyPlan struct {
 	movies        map[historyMovie]*movieSummary
 	missing       []string // targets that matched nothing
 	yearUnchecked []string // targets that matched an entry with no year
+	severalYears  []string // dated targets whose range took movies of more than one year
+	// kept is the target's title with no year, or one unreadable, that
+	// planHistory left as maybe another movie.
+	kept map[historyMovie]*movieSummary
 }
 
 // planHistory picks the movie entries a target names, each once. A target's
 // year must be within one of the entry's, as for FindMovieByTitle, when both
 // have one. An entry without a year matches too, unless the history also has
 // the target's title with a year in range: the year-less one is then another
-// movie. A year-less entry whose key a dated one also has is that movie: it
-// matches when that one does.
+// movie, and is kept. An entry whose key one in range also has is that
+// movie, whatever its year; a year-less one whose key only another year has
+// is that other movie.
 func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 	type movieInfo struct {
 		historyMovie
@@ -327,8 +341,8 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 		}
 	}
 
-	plan := historyPlan{movies: make(map[historyMovie]*movieSummary)}
-	take := make(map[historyMovie]bool)
+	plan := historyPlan{movies: make(map[historyMovie]*movieSummary), kept: make(map[historyMovie]*movieSummary)}
+	take, keep := make(map[historyMovie]bool), make(map[historyMovie]bool)
 	listed := make(map[string]bool)
 	for _, t := range targets {
 		if listed[t.raw] {
@@ -337,12 +351,13 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 		listed[t.raw] = true
 		inRange := func(year int) bool { return abs(year-t.year) <= 1 }
 		// The keys of the dated movies with the target's title, in range and
-		// not: a year-less entry with one of them is that movie.
+		// not: an entry with an in-range one's key is that movie, and a
+		// year-less one with only another year's is that other movie.
 		exactKeys, otherKeys := make(map[string]bool), make(map[string]bool)
 		exactYear := false
 		if t.year != 0 {
 			for _, m := range movies {
-				if m.titleKey != t.key || m.year == 0 {
+				if m.titleKey != t.key || m.year <= 0 {
 					continue
 				}
 				keys := otherKeys
@@ -355,16 +370,20 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 			}
 		}
 		found, unchecked := false, false
+		years := make(map[int]bool) // of the movies taken for being in range
 		for _, m := range movies {
 			if m.titleKey != t.key {
 				continue
 			}
 			switch {
-			case t.year == 0 || (m.year != 0 && inRange(m.year)):
-			case m.year != 0:
+			case t.year == 0:
+			case m.year > 0 && inRange(m.year):
+				years[m.year] = true
+			case exactKeys[m.key]: // never "": an empty key ties nothing
+			case m.year > 0 || otherKeys[m.key]:
 				continue
-			case exactKeys[m.key]:
-			case otherKeys[m.key] || exactYear:
+			case m.year == unreadableYear || exactYear:
+				keep[m.historyMovie] = true
 				continue
 			default:
 				unchecked = true
@@ -377,17 +396,29 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 		} else if unchecked {
 			plan.yearUnchecked = append(plan.yearUnchecked, t.raw)
 		}
+		if len(years) > 1 {
+			plan.severalYears = append(plan.severalYears, t.raw)
+		}
 	}
 	for _, e := range entries {
 		m := movieOf(e)
-		if e.Type != "movie" || !take[m] {
+		if e.Type != "movie" {
 			continue
 		}
-		plan.matched = append(plan.matched, e)
-		sum := plan.movies[m]
+		var sums map[historyMovie]*movieSummary
+		switch {
+		case take[m]:
+			plan.matched = append(plan.matched, e)
+			sums = plan.movies
+		case keep[m]: // and no other target took it
+			sums = plan.kept
+		default:
+			continue
+		}
+		sum := sums[m]
 		if sum == nil {
 			sum = &movieSummary{last: e}
-			plan.movies[m] = sum
+			sums[m] = sum
 		}
 		sum.plays++
 		if e.ViewedAt > sum.last.ViewedAt {
@@ -399,10 +430,14 @@ func planHistory(entries []historyEntry, targets []historyTarget) historyPlan {
 
 // movieLabel is m's title, with its year when the title doesn't end in it.
 func movieLabel(m historyMovie) string {
-	if _, y := splitTitleYear(m.title); m.year != 0 && y != m.year {
+	if _, y := splitTitleYear(m.title); m.year > 0 && y != m.year {
 		return fmt.Sprintf("%s (%d)", m.title, m.year)
 	}
 	return m.title
+}
+
+func compareMovies(a, b historyMovie) int {
+	return cmp.Or(strings.Compare(a.title, b.title), cmp.Compare(a.year, b.year), strings.Compare(a.key, b.key))
 }
 
 // printHistoryPlan lists each matched movie with its play count and when it
@@ -410,9 +445,7 @@ func movieLabel(m historyMovie) string {
 // targets that matched nothing.
 func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 	fmt.Fprintf(out, "Watch history for %s (account %d) on the Plex server:\n", acct.Name, acct.ID)
-	movies := slices.SortedFunc(maps.Keys(plan.movies), func(a, b historyMovie) int {
-		return cmp.Or(strings.Compare(a.title, b.title), cmp.Compare(a.year, b.year), strings.Compare(a.key, b.key))
-	})
+	movies := slices.SortedFunc(maps.Keys(plan.movies), compareMovies)
 	// Titles are compared as matching folds them, so ones that differ only
 	// in what matching ignores count as one.
 	perTitle, perLine := make(map[string]int), make(map[string]int)
@@ -436,8 +469,22 @@ func printHistoryPlan(out io.Writer, acct plexAccount, plan historyPlan) {
 	if len(perTitle) < len(movies) {
 		fmt.Fprintln(out, "Titles that repeat, or that matching counts as the same, may be different movies: check each before answering.")
 	}
+	if len(plan.severalYears) > 0 {
+		fmt.Fprintf(out, "These matched movies of more than one year, which may be different movies: check each before answering: %s\n", strings.Join(plan.severalYears, ", "))
+	}
 	if len(plan.yearUnchecked) > 0 {
 		fmt.Fprintf(out, "Some history entries record no release date, so these matched them on title alone: %s\n", strings.Join(plan.yearUnchecked, ", "))
+	}
+	if len(plan.kept) > 0 {
+		fmt.Fprintln(out, "Not deleting these, which may be other movies (give the title without its year to include them):")
+		for _, m := range slices.SortedFunc(maps.Keys(plan.kept), compareMovies) {
+			why := "no release date"
+			if m.year == unreadableYear {
+				why = "a release date that can't be read"
+			}
+			sum := plan.kept[m]
+			fmt.Fprintf(out, "  %-40s %d play(s)%s, with %s\n", movieLabel(m), sum.plays, describeLastWatched(sum.last), why)
+		}
 	}
 	if len(plan.missing) > 0 {
 		fmt.Fprintln(out, "Not in this history:")

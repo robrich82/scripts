@@ -331,3 +331,36 @@ func TestHistoryClients_NonJSONReplyFails(t *testing.T) {
 		t.Error("User: expected an error")
 	}
 }
+
+// User reads the owner from a 2xx JSON reply with a username; anything else
+// is an error that says what was wrong.
+func TestPlexTVClient_User(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		body    string
+		want    string // the username, or what the error says
+		wantErr bool
+	}{
+		{"owner", http.StatusOK, `{"username":"QuienNZ","uuid":"abc"}`, "QuienNZ", false},
+		{"no username", http.StatusOK, `{"uuid":"abc"}`, "no username in the response", true},
+		{"not JSON", http.StatusOK, `<html>`, "plex.tv: decode user", true},
+		{"server error", http.StatusInternalServerError, `{"username":"QuienNZ"}`, "unexpected status 500", true},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v2/user" || r.Header.Get("X-Plex-Token") != secretToken {
+				t.Errorf("%s: request %s with token %q", tc.name, r.URL.Path, r.Header.Get("X-Plex-Token"))
+			}
+			w.WriteHeader(tc.status)
+			fmt.Fprint(w, tc.body)
+		}))
+		u, err := newPlexTVClient(srv.URL, secretToken).User()
+		srv.Close()
+		switch {
+		case tc.wantErr && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("%s: err = %v; want one saying %q", tc.name, err, tc.want)
+		case !tc.wantErr && (err != nil || u.Username != tc.want || u.UUID != "abc"):
+			t.Errorf("%s: user %+v, err %v; want %s", tc.name, u, err, tc.want)
+		}
+	}
+}

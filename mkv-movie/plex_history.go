@@ -16,8 +16,9 @@ type HistoryClient interface {
 	DeleteHistory(historyKey string) error
 }
 
-// plexAccount is a Plex server account: id 1 is the owner, the rest are
-// plex.tv users with access to the server.
+// plexAccount is a Plex server account: id 1 is the owner, and the rest
+// are plex.tv users with access to the server, apart from one with no name
+// that the server also lists.
 type plexAccount struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
@@ -68,8 +69,8 @@ func (c *httpPlexMovieClient) Accounts() ([]plexAccount, error) {
 }
 
 // WatchHistory implements HistoryClient, a page at a time. It stops at an
-// empty page, or once it has totalSize entries if the server sent that: a
-// page can be short of the size asked for with more to come.
+// empty page, or once the offset reaches totalSize if the server sent that:
+// a page can be short of the size asked for with more to come.
 func (c *httpPlexMovieClient) WatchHistory(accountID int) ([]historyEntry, error) {
 	var all []historyEntry
 	seen := make(map[string]bool)

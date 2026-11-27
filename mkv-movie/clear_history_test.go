@@ -296,8 +296,9 @@ func TestPlanHistory_YearWithinOne(t *testing.T) {
 	}
 }
 
-// The release date gives an entry's year; without one, a "(Year)" its title
-// ends in does.
+// The year a release date starts with gives an entry's year; without one, a
+// "(Year)" its title ends in does. A date with no year in front isn't no
+// date: that would match on title alone.
 func TestEntryYear(t *testing.T) {
 	for _, tc := range []struct {
 		title, date string
@@ -307,7 +308,14 @@ func TestEntryYear(t *testing.T) {
 		{"Heat (1995)", "", 1995},
 		{"Heat (1994)", "1995-12-15", 1995},
 		{"Heat", "", 0},
-		{"Heat", "not a date", 0},
+		{"Heat", "1986", 1986},
+		{"Heat", "1986-12", 1986},
+		{"Heat", "1995-12-15T00:00:00Z", 1995},
+		{"Heat", "1995-02-30", 1995},
+		{"Heat (1994)", "0000-01-01", 1994},
+		{"Heat (1994)", "not a date", 1994},
+		{"Heat", "not a date", unreadableYear},
+		{"Heat", "0000-00-00", unreadableYear},
 	} {
 		if got := entryYear(historyEntry{Title: tc.title, OriginallyAvailableAt: tc.date}); got != tc.want {
 			t.Errorf("entryYear(%q, %q) = %d; want %d", tc.title, tc.date, got, tc.want)
@@ -324,14 +332,106 @@ func TestPlanHistory_YearlessIsAnotherMovieWhenTheYearIsThere(t *testing.T) {
 		}
 		return out
 	}
-	if got := titles(planMovies(t, "Solaris (2002)", historyMovie{title: "Solaris", year: 2002}, historyMovie{title: "Solaris"})); !slices.Equal(got, []string{"Solaris (2002)"}) {
+	plan := planMovies(t, "Solaris (2002)", historyMovie{title: "Solaris", year: 2002}, historyMovie{title: "Solaris"})
+	if got := titles(plan); !slices.Equal(got, []string{"Solaris (2002)"}) {
 		t.Errorf("matched %v; want only Solaris (2002)", got)
 	}
-	if got := titles(planMovies(t, "Solaris (2002)", historyMovie{title: "Solaris", year: 1972}, historyMovie{title: "Solaris"})); !slices.Equal(got, []string{"Solaris"}) {
+	if sum := plan.kept[historyMovie{title: "Solaris"}]; len(plan.kept) != 1 || sum == nil || sum.plays != 1 {
+		t.Errorf("kept %v; want the year-less Solaris, listed as not deleted", plan.kept)
+	}
+	plan = planMovies(t, "Solaris (2002)", historyMovie{title: "Solaris", year: 1972}, historyMovie{title: "Solaris"})
+	if got := titles(plan); !slices.Equal(got, []string{"Solaris"}) {
 		t.Errorf("matched %v; want only the year-less Solaris", got)
 	}
-	if got := titles(planMovies(t, "Solaris", historyMovie{title: "Solaris", year: 2002}, historyMovie{title: "Solaris"})); len(got) != 2 {
+	if len(plan.kept) != 0 {
+		t.Errorf("kept %v; another year's movie isn't listed", plan.kept)
+	}
+	plan = planMovies(t, "Solaris", historyMovie{title: "Solaris", year: 2002}, historyMovie{title: "Solaris"})
+	if got := titles(plan); len(got) != 2 {
 		t.Errorf("matched %v; want both", got)
+	}
+	if len(plan.yearUnchecked) != 0 || len(plan.kept) != 0 {
+		t.Errorf("year unchecked %v, kept %v; a target without a year checks none", plan.yearUnchecked, plan.kept)
+	}
+}
+
+// What one target leaves as maybe another movie, another that takes it
+// doesn't list as kept.
+func TestPlanHistory_KeptOnlyWhenNoTargetTakesIt(t *testing.T) {
+	targets, err := parseHistoryTargets([]string{"Solaris (2002)", "Solaris"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := planHistory([]historyEntry{moviePlay(1, 1, "Solaris", "2002-01-01"), moviePlay(2, 1, "Solaris", "")}, targets)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("1", "2")) || len(plan.kept) != 0 {
+		t.Errorf("matched %v, kept %v; want both matched and none kept", got, plan.kept)
+	}
+}
+
+// An entry whose release date can't be read may be another year's movie: a
+// dated target keeps it and lists it, and one without a year takes it.
+func TestPlanHistory_UnreadableDate(t *testing.T) {
+	entry := moviePlay(1, 1, "Heat", "not a date")
+	entry.Key = "/library/metadata/1" // in no other year's keys: it has none
+	entries := []historyEntry{entry}
+	for _, tc := range []struct {
+		target        string
+		matched, kept int
+	}{
+		{"Heat (1995)", 0, 1},
+		{"Heat", 1, 0},
+	} {
+		targets, err := parseHistoryTargets([]string{tc.target})
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan := planHistory(entries, targets)
+		if len(plan.matched) != tc.matched || len(plan.kept) != tc.kept || len(plan.yearUnchecked) != 0 {
+			t.Errorf("%s: matched %v, kept %v, year unchecked %v; want %d matched, %d kept", tc.target, keysOf(plan.matched), plan.kept, plan.yearUnchecked, tc.matched, tc.kept)
+		}
+		var out strings.Builder
+		printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, plan)
+		if got := strings.Contains(out.String(), "Not deleting these, which may be other movies (give the title without its year to include them):\n  Heat                                     1 play(s), last watched 2023-11-15, with a release date that can't be read\n"); got != (tc.kept == 1) {
+			t.Errorf("%s: plan lists the kept entry: %v; want %v:\n%s", tc.target, got, tc.kept == 1, out.String())
+		}
+	}
+}
+
+// The plan lists a year-less entry it keeps, saying why, sorted with any
+// others.
+func TestPrintHistoryPlan_ListsKept(t *testing.T) {
+	plan := planMovies(t, "X (2019)", historyMovie{"X", 2019, "/library/metadata/7"}, historyMovie{title: "X"})
+	var out strings.Builder
+	printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, plan)
+	want := "Not deleting these, which may be other movies (give the title without its year to include them):\n  X                                        1 play(s), last watched 2023-11-15, with no release date\n"
+	if !strings.HasSuffix(out.String(), want) {
+		t.Errorf("plan:\n%s\nwant it to end with:\n%s", out.String(), want)
+	}
+}
+
+// A dated target whose range takes movies of two years says so: they may be
+// two movies. One year, or another year tied by key, doesn't.
+func TestPlanHistory_SeveralYears(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		target string
+		movies []historyMovie
+		want   bool
+	}{
+		{"two years in range", "Godzilla (1999)", []historyMovie{{"Godzilla", 1998, "/a"}, {"Godzilla", 1999, "/b"}}, true},
+		{"one year, two keys", "Heat (1995)", []historyMovie{{"Heat", 1995, "/a"}, {"Heat", 1995, ""}}, false},
+		{"other year by key", "X (2019)", []historyMovie{{"X", 2019, "/7"}, {"X", 2023, "/7"}}, false},
+		{"no year given", "Heat", []historyMovie{{"Heat", 1986, "/a"}, {"Heat", 1995, "/b"}}, false},
+	} {
+		plan := planMovies(t, tc.target, tc.movies...)
+		if got := slices.Equal(plan.severalYears, []string{tc.target}); got != tc.want || (!tc.want && len(plan.severalYears) != 0) {
+			t.Errorf("%s: several years %v; want flagged %v", tc.name, plan.severalYears, tc.want)
+		}
+		var out strings.Builder
+		printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, plan)
+		if got := strings.Contains(out.String(), "These matched movies of more than one year, which may be different movies: check each before answering: "+tc.target+"\n"); got != tc.want {
+			t.Errorf("%s: plan has the notice: %v; want %v:\n%s", tc.name, got, tc.want, out.String())
+		}
 	}
 }
 
@@ -949,7 +1049,7 @@ func TestClearHistory_RecordKeepsEntries(t *testing.T) {
 	var want []historyEntry
 	for i := range r.pms.history {
 		e := &r.pms.history[i]
-		e.Key = "/library/metadata/" + e.Title
+		e.Key = "/library/metadata/" + e.Title + e.OriginallyAvailableAt // one per movie
 		if e.AccountID == 1 && e.Type == "movie" && e.Title == "Heat" && e.OriginallyAvailableAt == "1995-12-15" {
 			want = append(want, *e)
 		}
@@ -1125,11 +1225,26 @@ func TestPlanHistory_YearlessLinkedToBothYears(t *testing.T) {
 		historyMovie{"Movie", 2015, "/library/metadata/1"},
 		historyMovie{"Movie", 0, "/library/metadata/1"},
 	)
-	if got := keysOf(plan.matched); !slices.Equal(got, keys("0", "2")) {
-		t.Errorf("matched %v; want the 2018 entry and the year-less one", got)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("0", "1", "2")) {
+		t.Errorf("matched %v; want every entry of the library item", got)
 	}
-	if len(plan.yearUnchecked) != 0 {
-		t.Errorf("year unchecked %v; the key ties the year-less entry to the movie", plan.yearUnchecked)
+	if len(plan.yearUnchecked) != 0 || len(plan.kept) != 0 || len(plan.severalYears) != 0 {
+		t.Errorf("year unchecked %v, kept %v, several years %v; the key ties each entry to the movie", plan.yearUnchecked, plan.kept, plan.severalYears)
+	}
+}
+
+// An entry with an in-range entry's key is that library item's play, though
+// its release date was another year's when it was played; another movie's
+// entry with that year isn't.
+func TestPlanHistory_KeyTiesOtherYear(t *testing.T) {
+	plan := planMovies(t, "X (2019)",
+		historyMovie{"X", 2019, "/library/metadata/7"},
+		historyMovie{"X", 2023, "/library/metadata/7"},
+		historyMovie{"X", 2023, "/library/metadata/8"},
+		historyMovie{"X", 2023, ""},
+	)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("0", "1")) {
+		t.Errorf("matched %v; want the 2019 entry and the 2023 one with its key", got)
 	}
 }
 
@@ -1300,9 +1415,32 @@ func TestMovieLabel(t *testing.T) {
 		{historyMovie{title: "Heat", year: 1995}, "Heat (1995)"},
 		{historyMovie{title: "Heat (1995)", year: 1995}, "Heat (1995)"},
 		{historyMovie{title: "Heat"}, "Heat"},
+		{historyMovie{title: "Heat (1994)", year: 1995}, "Heat (1994) (1995)"},
+		{historyMovie{title: "Heat", year: unreadableYear}, "Heat"},
 	} {
 		if got := movieLabel(tc.m); got != tc.want {
 			t.Errorf("movieLabel(%+v) = %q; want %q", tc.m, got, tc.want)
+		}
+	}
+}
+
+// Plan lines that read the same are told apart by key, and one with no key
+// says so.
+func TestPrintHistoryPlan_SameLineNamesKeys(t *testing.T) {
+	targets, err := parseHistoryTargets([]string{"Bar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyed, keyless := moviePlay(1, 1, "Bar", ""), moviePlay(2, 1, "Bar", "")
+	keyed.Key = "/library/metadata/5"
+	var out strings.Builder
+	printHistoryPlan(&out, plexAccount{ID: 1, Name: "QuienNZ"}, planHistory([]historyEntry{keyed, keyless}, targets))
+	for _, want := range []string{
+		"  Bar                                      1 play(s), last watched 2023-11-15 [/library/metadata/5]\n",
+		"  Bar                                      1 play(s), last watched 2023-11-15 [no key]\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("plan lacks %q:\n%s", want, out.String())
 		}
 	}
 }
