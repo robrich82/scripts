@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -168,16 +170,20 @@ func TestClearHistory_PlexTV_Skipped(t *testing.T) {
 // Any other failure to find the owner stops the run: clearing the server
 // alone would leave the owner's plex.tv history behind.
 func TestClearHistory_PlexTV_OwnerLookupErrorStops(t *testing.T) {
-	for name, set := range map[string]func(*clearHistoryRun){
-		"500":     func(r *clearHistoryRun) { r.tv.userStatus = http.StatusInternalServerError },
-		"no uuid": func(r *clearHistoryRun) { r.tv.uuid = "" },
+	for name, tc := range map[string]struct {
+		set  func(*clearHistoryRun)
+		want string
+	}{
+		"500":     {func(r *clearHistoryRun) { r.tv.userStatus = http.StatusInternalServerError }, "finding the PLEX_TOKEN owner"},
+		"no uuid": {func(r *clearHistoryRun) { r.tv.uuid = "" }, "plex.tv gave no user id"},
 	} {
+		set, want := tc.set, tc.want
 		t.Run(name, func(t *testing.T) {
 			r := newCloudRun(t, "y")
 			set(r)
 			err := r.run(t, "QuienNZ", "Heat (1995)")
-			if err == nil || !strings.HasSuffix(err.Error(), "nothing was deleted") {
-				t.Errorf("err = %v; want an error saying nothing was deleted", err)
+			if err == nil || !strings.HasSuffix(err.Error(), "nothing was deleted") || !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %v; want %q, saying nothing was deleted", err, want)
 			}
 			r.assertUntouched(t)
 		})
@@ -261,6 +267,31 @@ func TestClearHistory_PlexTV_OnlyPlexTVMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertContains(t, r.output(), "Delete these 0 server and 1 plex.tv history entries for QuienNZ (account 1)?")
+}
+
+// With only plex.tv's plays matched, the record lists the server's as [],
+// as it does plex.tv's when only the server's match.
+func TestClearHistory_PlexTV_OnlyPlexTVRecordsEmptyServer(t *testing.T) {
+	r := newCloudRun(t, "y")
+	r.tv.history = append(r.tv.history, cloudPlay("c8", "Ronin", 1998, "2026-11-15T10:00:00.000Z"))
+	if err := r.run(t, "", "Ronin"); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := filepath.Glob(filepath.Join(r.recordDir, "history-cleared-*.json"))
+	if len(files) != 1 {
+		t.Fatalf("records %v; want 1", files)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(keys["server"]); got != "[]" {
+		t.Errorf(`"server" is %s; want []`, got)
+	}
 }
 
 // A rate limit is waited out, then the delete goes through.
@@ -488,6 +519,9 @@ func TestPlanCloud_LastWatchedByTime(t *testing.T) {
 		cloudPlay("a1", "Heat", 1995, "2026-11-22T08:00:00.500Z"),
 		cloudPlay("a2", "Heat", 1995, "2026-11-22T08:00:00Z"),
 	}, "Heat")
+	if len(plan.movies) != 1 {
+		t.Fatalf("movies %v; want 1", plan.movies)
+	}
 	for _, sum := range plan.movies {
 		if sum.last.ID != "a1" {
 			t.Errorf("last watched %s; want a1", sum.last.ID)
@@ -505,8 +539,8 @@ func TestClearHistory_PlexTV_ClaimedButStillListed(t *testing.T) {
 	if err == nil || !strings.HasSuffix(err.Error(), `under "failedPlexTV"`) {
 		t.Fatalf("err = %v; want the plays listed under failedPlexTV", err)
 	}
-	assertContains(t, r.out.String(), "plex.tv still lists 4 item(s) it was asked to remove; checking again in 10s.",
-		"plex.tv still lists 4 of the items it said it removed:\n",
+	assertContains(t, r.out.String(), "plex.tv still lists 4 play(s) it was asked to remove; checking again in 10s.",
+		"plex.tv still lists 4 of the plays it said it removed:\n",
 		"  still listed: plex.tv Heat (1995)"+watched("2026-11-21T10:00:00.000Z")+"\n",
 		"  still listed: plex.tv Heat (1995)"+watched("2026-11-19T10:00:00.000Z")+"\n",
 		"Deleted 2 of 2 server and 0 of 4 plex.tv history entries.")
@@ -554,7 +588,7 @@ func TestClearHistory_PlexTV_RemovedDespiteReply(t *testing.T) {
 		t.Errorf("plex.tv was asked to remove %v; want %v", r.tv.removed, want)
 	}
 	assertContains(t, r.out.String(), "  unconfirmed: plex.tv Heat (1995)"+watched("2026-11-20T10:00:00.000Z")+":",
-		"plex.tv no longer lists 4 of the items whose removal it didn't confirm.",
+		"plex.tv no longer lists 4 of the plays whose removal it didn't confirm.",
 		"Deleted 2 of 2 server and 4 of 4 plex.tv history entries.")
 	if out := r.out.String(); strings.Contains(out, "said it removed") || strings.Contains(out, "Stopped after") {
 		t.Errorf("output:\n%s", out)
@@ -578,7 +612,7 @@ func TestClearHistory_PlexTV_UnconfirmedAndListed(t *testing.T) {
 	if strings.Contains(r.out.String(), "said it removed") {
 		t.Errorf("an unconfirmed removal is reported as one plex.tv said it made:\n%s", r.out.String())
 	}
-	assertContains(t, r.out.String(), "plex.tv still lists 4 of the items whose removal it didn't confirm:\n",
+	assertContains(t, r.out.String(), "plex.tv still lists 4 of the plays whose removal it didn't confirm:\n",
 		"  still listed: plex.tv Heat (1995)"+watched("2026-11-19T10:00:00.000Z"))
 }
 
@@ -613,8 +647,8 @@ func TestClearHistory_PlexTV_MixedOutcome(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "2 history entries were not deleted") {
 		t.Fatalf("err = %v; want c2 and c3 not deleted", err)
 	}
-	assertContains(t, r.out.String(), "plex.tv still lists 1 item(s) it was asked to remove; checking again in 10s.",
-		"plex.tv still lists 1 of the items it said it removed:\n  still listed: plex.tv Heat (1995)"+watched("2026-11-22T08:00:00.000Z")+"\n",
+	assertContains(t, r.out.String(), "plex.tv still lists 1 play(s) it was asked to remove; checking again in 10s.",
+		"plex.tv still lists 1 of the plays it said it removed:\n  still listed: plex.tv Heat (1995)"+watched("2026-11-22T08:00:00.000Z")+"\n",
 		"Deleted 2 of 2 server and 2 of 4 plex.tv history entries.")
 	if recs := r.records(t); len(recs) != 1 || !slices.Equal(recs[0].FailedPlexTV, []string{"c2", "c3"}) {
 		t.Errorf("records %+v; want c2 and c3 failed", recs)
@@ -663,11 +697,11 @@ func TestClearHistory_PlexTV_ShortRereadUntrusted(t *testing.T) {
 		wantLost   string
 	}{
 		{"empty, all failed", map[string]bool{"c1": true, "c2": true, "c3": true, "c4": true},
-			func(cloudEntry) bool { return true }, []string{"c1", "c2", "c3", "c4"}, "lacks 4 item(s)"},
+			func(cloudEntry) bool { return true }, []string{"c1", "c2", "c3", "c4"}, "lacks 4 play(s)"},
 		{"an untried play gone", map[string]bool{"c1": true, "c2": true, "c3": true},
-			func(e cloudEntry) bool { return e.ID == "c4" }, []string{"c1", "c2", "c3", "c4"}, "lacks 1 item(s)"},
+			func(e cloudEntry) bool { return e.ID == "c4" }, []string{"c1", "c2", "c3", "c4"}, "lacks 1 play(s)"},
 		{"an unmatched item gone", nil,
-			func(e cloudEntry) bool { return e.ID == "c5" }, nil, "lacks 1 item(s)"},
+			func(e cloudEntry) bool { return e.ID == "c5" }, nil, "lacks 1 play(s)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newCloudRun(t, "y")
@@ -794,7 +828,7 @@ func TestPlanCloud_ItemsWithoutTitle(t *testing.T) {
 	}
 	var out strings.Builder
 	printCloudPlan(&out, "QuienNZ", plan)
-	assertContains(t, out.String(), "plex.tv lists 3 item(s) that name no movie to match, so they're left alone.")
+	assertContains(t, out.String(), "plex.tv lists 3 play(s) that name no movie to match, so they're left alone.")
 }
 
 // A movie plex.tv gives no id or year beside one in the target's range is
@@ -809,7 +843,7 @@ func TestPlanCloud_YearlessBesideTargetYear(t *testing.T) {
 		}
 		var out strings.Builder
 		printCloudPlan(&out, "QuienNZ", plan)
-		assertContains(t, out.String(), "Not deleting these, which plex.tv gives no year while the title is there within a year of the one asked for: Heat")
+		assertContains(t, out.String(), "Not deleting these, which plex.tv gives no year while the title is there within a year of the one asked for (give the title without its year to include them): Heat")
 	}
 }
 
@@ -860,6 +894,9 @@ func TestPlanCloud_UnreadableDate(t *testing.T) {
 		cloudPlay("a1", "Heat", 1995, "1767225600"),
 		cloudPlay("a2", "Heat", 1995, "2026-11-22T08:00:00Z"),
 	}, "Heat")
+	if len(plan.movies) != 1 {
+		t.Fatalf("movies %v; want 1", plan.movies)
+	}
 	for _, sum := range plan.movies {
 		if sum.last.ID != "a2" {
 			t.Errorf("last watched %s; want a2", sum.last.ID)
@@ -951,13 +988,13 @@ func TestClearHistory_PlexTV_UnreachedItems(t *testing.T) {
 				if err != nil {
 					t.Errorf("err = %v; want none", err)
 				}
-				assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 4 of the items it said it removed, so those count as deleted by its replies.")
+				assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 4 of the plays it said it removed, so those count as deleted by its replies.")
 				return
 			}
 			if err == nil || !strings.Contains(err.Error(), "4 history entries were not deleted") {
 				t.Errorf("err = %v; want all 4 not deleted", err)
 			}
-			assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 4 of the items whose removal it didn't confirm")
+			assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 4 of the plays whose removal it didn't confirm")
 			if strings.Contains(r.out.String(), "by its replies") {
 				t.Errorf("unconfirmed plays are counted by their replies:\n%s", r.out.String())
 			}
@@ -1043,7 +1080,7 @@ func TestClearHistory_PlexTV_CutOffReplyRecovered(t *testing.T) {
 		t.Fatalf("%v\n%s", err, r.out.String())
 	}
 	assertContains(t, r.out.String(), "  failed: plex.tv Heat (1995)"+watched("2026-11-22T08:00:00.000Z")+": plex.tv: removeActivity: the reply was cut off",
-		"plex.tv no longer lists 1 of the items whose removal it didn't confirm.",
+		"plex.tv no longer lists 1 of the plays whose removal it didn't confirm.",
 		"Deleted 2 of 2 server and 4 of 4 plex.tv history entries.")
 	if strings.Contains(r.out.String(), "  unconfirmed:") {
 		t.Errorf("the cut-off reply, a failure toward the stop, is labelled unconfirmed:\n%s", r.out.String())
@@ -1067,8 +1104,8 @@ func TestClearHistory_PlexTV_OldestMovieSettles(t *testing.T) {
 	if err := r.run(t, "", "Heat (1995)"); err != nil {
 		t.Fatalf("%v\n%s", err, r.out.String())
 	}
-	assertContains(t, r.out.String(), "plex.tv still lists 4 item(s) it was asked to remove; checking again in 10s.",
-		"The last read of plex.tv lists nothing after 4 of the items it said it removed, so those count as deleted by its replies.",
+	assertContains(t, r.out.String(), "plex.tv still lists 4 play(s) it was asked to remove; checking again in 10s.",
+		"The last read of plex.tv lists nothing after 4 of the plays it said it removed, so those count as deleted by its replies.",
 		"Deleted 2 of 2 server and 4 of 4 plex.tv history entries.")
 	if recs := r.records(t); len(recs) != 1 || recs[0].FailedPlexTV != nil {
 		t.Errorf("records %+v; want nothing failed", recs)
@@ -1092,8 +1129,8 @@ func TestClearHistory_PlexTV_LastReadDecidesReach(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 history entries were not deleted") {
 		t.Fatalf("err = %v; want c1 not deleted\n%s", err, r.out.String())
 	}
-	assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 1 of the items whose removal it didn't confirm",
-		"The last read of plex.tv lists nothing after 3 of the items it said it removed, so those count as deleted by its replies.",
+	assertContains(t, r.out.String(), "The last read of plex.tv lists nothing after 1 of the plays whose removal it didn't confirm",
+		"The last read of plex.tv lists nothing after 3 of the plays it said it removed, so those count as deleted by its replies.",
 		"Deleted 2 of 2 server and 3 of 4 plex.tv history entries.")
 	if strings.Contains(r.out.String(), "no longer lists") {
 		t.Errorf("output takes the first read's reach:\n%s", r.out.String())
@@ -1113,7 +1150,7 @@ func TestClearHistory_PlexTV_ListedItemShowsReach(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 history entries were not deleted") {
 		t.Fatalf("err = %v; want only c4 not deleted", err)
 	}
-	assertContains(t, r.out.String(), "plex.tv no longer lists 3 of the items whose removal it didn't confirm.",
+	assertContains(t, r.out.String(), "plex.tv no longer lists 3 of the plays whose removal it didn't confirm.",
 		"  still listed: plex.tv Heat (1995)"+watched("2026-11-19T10:00:00.000Z"))
 	if strings.Contains(r.out.String(), "The last read of plex.tv lists nothing after") {
 		t.Errorf("output says the re-read didn't reach them:\n%s", r.out.String())
@@ -1154,5 +1191,78 @@ func TestPlanCloud_DatedAndUndatedTargets(t *testing.T) {
 	plan := planCloudFor(t, []cloudEntry{cloudPlay("a1", "Heat", 1995, ""), other}, "Heat (1995)", "Heat")
 	if got := matchedIDs(plan); !slices.Equal(got, []string{"a1", "b1"}) || plan.yearless != nil || plan.yearUnchecked != nil {
 		t.Errorf("matched %v, kept %v, unchecked %v; want both matched, nothing kept or unchecked", got, plan.yearless, plan.yearUnchecked)
+	}
+}
+
+// A play of a title asked for that plex.tv doesn't type MOVIE isn't taken,
+// but the plan names it rather than only calling the title missing. Other
+// types' plays of other titles, and episodes and shows, aren't named.
+func TestPlanCloud_OtherTypesNamed(t *testing.T) {
+	clip := cloudEntry{ID: "c1", Type: "CLIP", Title: "Heat"}
+	lower := cloudEntry{ID: "c2", Type: "movie", Title: "Heat (1995)"}
+	plan := planCloudFor(t, []cloudEntry{clip, lower, clip,
+		{ID: "c3", Type: "CLIP", Title: "Alien"},
+		{ID: "c4", Type: "EPISODE", Title: "Heat"},
+		{ID: "c5", Type: "SHOW", Title: "Heat"},
+	}, "Heat (1995)")
+	if len(plan.matched) != 0 || !slices.Equal(plan.missing, []string{"Heat (1995)"}) {
+		t.Errorf("matched %v, missing %v; want nothing taken", matchedIDs(plan), plan.missing)
+	}
+	if want := []string{"Heat (1995) [movie]", "Heat [CLIP]"}; !slices.Equal(plan.notMovies, want) {
+		t.Errorf("not movies %q; want %q", plan.notMovies, want)
+	}
+	var out strings.Builder
+	printCloudPlan(&out, "QuienNZ", plan)
+	assertContains(t, out.String(), "Not deleting these plays of a title asked for, which plex.tv doesn't list as movies: Heat (1995) [movie], Heat [CLIP]")
+}
+
+// A play without a movie id is grouped on the title and year it names, so
+// a year in its title and one plex.tv gives are the same movie.
+func TestPlanCloud_IDlessGroupedByParsedTitle(t *testing.T) {
+	a := cloudEntry{ID: "a1", Type: cloudTypeMovie, Title: "Heat (1995)"}
+	b := cloudEntry{ID: "a2", Type: cloudTypeMovie, Title: "Heat", Year: 1995}
+	plan := planCloudFor(t, []cloudEntry{a, b}, "Heat (1995)")
+	if len(plan.matched) != 2 || len(plan.movies) != 1 {
+		t.Fatalf("matched %v in %d movie(s); want both in one", matchedIDs(plan), len(plan.movies))
+	}
+	var out strings.Builder
+	printCloudPlan(&out, "QuienNZ", plan)
+	if s := out.String(); strings.Contains(s, "[no id]") || strings.Contains(s, "may be different movies") {
+		t.Errorf("one movie shown as two:\n%s", s)
+	}
+}
+
+// Kept movies that print alike are each listed, told apart by id.
+func TestPlanCloud_KeptMoviesToldApart(t *testing.T) {
+	other := cloudPlay("b1", "Heat", 1986, "")
+	other.MovieID = "mv-other"
+	plan := planCloudFor(t, []cloudEntry{cloudPlay("a1", "Heat", 1995, ""), cloudPlay("c1", "Heat", 1986, ""), other}, "Heat (1995)")
+	if want := []string{"Heat (1986) [mv-Heat-1986]", "Heat (1986) [mv-other]"}; !slices.Equal(plan.otherYears, want) {
+		t.Errorf("other years %q; want %q", plan.otherYears, want)
+	}
+	if plan := planCloudFor(t, []cloudEntry{cloudPlay("a1", "Heat", 1995, ""), cloudPlay("c1", "Heat", 1986, "")}, "Heat (1995)"); !slices.Equal(plan.otherYears, []string{"Heat (1986)"}) {
+		t.Errorf("other years %q; want Heat (1986) without an id", plan.otherYears)
+	}
+}
+
+// A target given twice is listed once, as missing and as taking several years.
+func TestPlanCloud_RepeatedTarget(t *testing.T) {
+	entries := []cloudEntry{cloudPlay("a1", "Ghost", 1990, ""), cloudPlay("b1", "Ghost", 1991, "")}
+	plan := planCloudFor(t, entries, "Ghost (1990)", "Ghost (1990)", "Alien", "Alien")
+	if !slices.Equal(plan.missing, []string{"Alien"}) || !slices.Equal(plan.severalYears, []string{"Ghost (1990)"}) {
+		t.Errorf("missing %v, several years %v; want each once", plan.missing, plan.severalYears)
+	}
+	if got := matchedIDs(plan); !slices.Equal(got, []string{"a1", "b1"}) {
+		t.Errorf("matched %v; want each play once", got)
+	}
+}
+
+// plex.tv's year for a movie wins over a "(Year)" in its title.
+func TestCloudMovieOf_YearPrecedence(t *testing.T) {
+	if m := cloudMovieOf(cloudEntry{Title: "Heat (1986)", Year: 1995}); m.title != "Heat" || m.year != 1995 {
+		t.Errorf("movie %+v; want Heat, 1995", m)
+	}
+	if m := cloudMovieOf(cloudEntry{Title: "Heat (1986)"}); m.title != "Heat" || m.year != 1986 {
+		t.Errorf("movie %+v; want Heat, 1986", m)
 	}
 }

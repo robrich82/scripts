@@ -121,7 +121,7 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 			}
 		}
 		if lost > 0 {
-			return nil, nil, fmt.Errorf("the history read after the deletes lacks %d item(s) that weren't removed, so it can't be trusted", lost)
+			return nil, nil, fmt.Errorf("the history read after the deletes lacks %d play(s) that weren't removed, so it can't be trusted", lost)
 		}
 		return after, listed, nil
 	}
@@ -142,7 +142,7 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 		return cloudCheck{failed: res.failed, unchecked: err.Error()}
 	}
 	if n := pending(listed); n > 0 {
-		fmt.Fprintf(d.out, "plex.tv still lists %d item(s) it was asked to remove; checking again in %s.\n", n, settleWait)
+		fmt.Fprintf(d.out, "plex.tv still lists %d play(s) it was asked to remove; checking again in %s.\n", n, settleWait)
 		d.sleep(settleWait)
 		if again, againListed, err := read(); err != nil {
 			fmt.Fprintf(d.out, "The second read of plex.tv can't be used (%v), so the first read stands.\n", err)
@@ -188,7 +188,7 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 		if len(entries) == 0 {
 			return
 		}
-		fmt.Fprintf(d.out, "plex.tv still lists %d of the items %s:\n", len(entries), what)
+		fmt.Fprintf(d.out, "plex.tv still lists %d of the plays %s:\n", len(entries), what)
 		for _, e := range entries {
 			fmt.Fprintf(d.out, "  still listed: %s\n", p.cloud.describe(e))
 		}
@@ -196,13 +196,13 @@ func checkCloudRemoved(d clearHistoryDeps, retry func(func() error) error, p cle
 	printStillListed("it said it removed", claimed)
 	printStillListed("whose removal it didn't confirm", unconfirmed)
 	if recovered > 0 {
-		fmt.Fprintf(d.out, "plex.tv no longer lists %d of the items whose removal it didn't confirm.\n", recovered)
+		fmt.Fprintf(d.out, "plex.tv no longer lists %d of the plays whose removal it didn't confirm.\n", recovered)
 	}
 	if unreached > 0 {
-		fmt.Fprintf(d.out, "The last read of plex.tv lists nothing after %d of the items whose removal it didn't confirm, so it can't show they went: they count as not deleted.\n", unreached)
+		fmt.Fprintf(d.out, "The last read of plex.tv lists nothing after %d of the plays whose removal it didn't confirm, so it can't show they went: they count as not deleted.\n", unreached)
 	}
 	if byReply > 0 {
-		fmt.Fprintf(d.out, "The last read of plex.tv lists nothing after %d of the items it said it removed, so those count as deleted by its replies.\n", byReply)
+		fmt.Fprintf(d.out, "The last read of plex.tv lists nothing after %d of the plays it said it removed, so those count as deleted by its replies.\n", byReply)
 	}
 	// Planned with the first read's items too, so a movie kept beside the
 	// target's year is still kept once that year's plays are gone. The
@@ -254,11 +254,13 @@ func cloudMovieID(e cloudEntry) string {
 		return ""
 	case e.MovieID != "":
 		return e.MovieID
-	case e.Title == "":
-		return ""
-	default:
-		return "\x00" + e.Title + "\x00" + strconv.Itoa(e.Year)
 	}
+	// As cloudMovieOf reads it, so "Heat (1995)" and "Heat" from 1995 are one movie.
+	m := cloudMovieOf(e)
+	if m.title == "" {
+		return ""
+	}
+	return "\x00" + m.title + "\x00" + strconv.Itoa(m.year)
 }
 
 // cloudMoviesOf gathers the movies of entries by cloudMovieID. A movie's
@@ -302,7 +304,8 @@ type cloudPlan struct {
 	yearUnchecked []string                 // targets that matched a movie with no year
 	severalYears  []string                 // dated targets whose range took movies of more than one year
 	missing       []string                 // targets that matched nothing
-	titleless     int                      // movie items naming no movie, or none with a title, and items plex.tv sent none for
+	notMovies     []string                 // plays of a target's title of a type that isn't a movie, episode, season or show
+	titleless     int                      // MOVIE plays whose movie no play titles, and plays plex.tv sent no item for
 }
 
 // planCloud picks the plex.tv plays of the target movies. A target's year
@@ -315,12 +318,13 @@ func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 	movies := cloudMoviesOf(entries)
 	plan := cloudPlan{movies: make(map[string]*cloudSummary)}
 	take, otherYear, yearless := make(map[string]bool), make(map[string]bool), make(map[string]bool)
-	listed := make(map[string]bool)
+	listed, targetKeys := make(map[string]bool), make(map[string]bool)
 	for _, t := range targets {
 		if listed[t.raw] {
 			continue
 		}
 		listed[t.raw] = true
+		targetKeys[t.key] = true
 		inRange := func(year int) bool { return abs(year-t.year) <= 1 }
 		exactYear := false
 		if t.year != 0 {
@@ -364,8 +368,14 @@ func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 	for _, e := range entries {
 		id := cloudMovieID(e)
 		if id == "" || movies[id].title == "" {
-			if e.Type == cloudTypeMovie || e.Type == "" { // "": plex.tv sent no item
+			switch e.Type {
+			case cloudTypeMovie, "": // "": plex.tv sent no item
 				plan.titleless++
+			case "EPISODE", "SEASON", "SHOW":
+			default: // a type this doesn't know, which may be the movie asked for
+				if m := cloudMovieOf(e); targetKeys[m.key] {
+					plan.notMovies = append(plan.notMovies, m.String()+" ["+e.Type+"]")
+				}
 			}
 			continue
 		}
@@ -385,19 +395,32 @@ func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 	}
 	plan.otherYears = untaken(plan.movies, movies, otherYear)
 	plan.yearless = untaken(plan.movies, movies, yearless)
+	slices.Sort(plan.notMovies)
+	plan.notMovies = slices.Compact(plan.notMovies)
 	return plan
 }
 
-// untaken names the movies of ids that no target took, sorted.
+// untaken names the movies of ids that no target took, sorted, with the id
+// of each whose name another shares.
 func untaken(taken map[string]*cloudSummary, movies map[string]*cloudMovie, ids map[string]bool) []string {
-	var names []string
+	var kept []*cloudMovie
+	perName := make(map[string]int)
 	for id := range ids {
 		if taken[id] == nil {
-			names = append(names, movies[id].String())
+			kept = append(kept, movies[id])
+			perName[movies[id].String()]++
 		}
 	}
+	var names []string
+	for _, m := range kept {
+		name := m.String()
+		if perName[name] > 1 {
+			name += " [" + cmp.Or(m.plexID, "no id") + "]"
+		}
+		names = append(names, name)
+	}
 	slices.Sort(names)
-	return slices.Compact(names)
+	return names
 }
 
 // cloudTime is when e was watched; zero when plex.tv's date can't be read.
@@ -438,13 +461,16 @@ func printCloudPlan(out io.Writer, owner string, plan cloudPlan) {
 		fmt.Fprintf(out, "Not deleting these, which have another year: %s\n", strings.Join(plan.otherYears, ", "))
 	}
 	if len(plan.yearless) > 0 {
-		fmt.Fprintf(out, "Not deleting these, which plex.tv gives no year while the title is there within a year of the one asked for: %s\n", strings.Join(plan.yearless, ", "))
+		fmt.Fprintf(out, "Not deleting these, which plex.tv gives no year while the title is there within a year of the one asked for (give the title without its year to include them): %s\n", strings.Join(plan.yearless, ", "))
 	}
 	if len(plan.yearUnchecked) > 0 {
 		fmt.Fprintf(out, "plex.tv records no year for a movie these matched, so it matched on title alone: %s\n", strings.Join(plan.yearUnchecked, ", "))
 	}
+	if len(plan.notMovies) > 0 {
+		fmt.Fprintf(out, "Not deleting these plays of a title asked for, which plex.tv doesn't list as movies: %s\n", strings.Join(plan.notMovies, ", "))
+	}
 	if plan.titleless > 0 {
-		fmt.Fprintf(out, "plex.tv lists %d item(s) that name no movie to match, so they're left alone.\n", plan.titleless)
+		fmt.Fprintf(out, "plex.tv lists %d play(s) that name no movie to match, so they're left alone.\n", plan.titleless)
 	}
 	if len(plan.missing) > 0 {
 		fmt.Fprintln(out, "Not in plex.tv history:")

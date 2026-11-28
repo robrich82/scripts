@@ -454,14 +454,14 @@ range. Titles match whole, ignoring case, spaces, punctuation, dash lookalikes
 (tildes, minus signs, box-drawing lines) and modifiers like the ʻ in Hawaiʻi or
 `^`; other symbols, like ° or ☆, count. The matching entries are listed per
 movie with their play count and when it was last watched, and nothing is deleted
-until you confirm; a closed stdin counts as no. Before deleting, the entries are
+until you confirm; a closed stdin is an error, exit 1. Before deleting, the entries are
 written to `history-cleared-<UTC time>.json` in the config folder, since Plex
 can't restore them. Its `complete` stays `false` until the run finishes and the
 file is rewritten, and `failed` lists the history keys of the server entries
 whose delete failed or wasn't tried. After 3 failures in a row on the server or
 on plex.tv, the rest there aren't tried; a plex.tv 2xx reply that is empty,
-isn't just the JSON asked for, has no data, or for a removal isn't true, isn't
-a failure here, but one cut off is (the history read afterwards can still show
+isn't just the JSON asked for, has no data, or for a removal isn't true,
+doesn't count toward that stop, but one cut off does (the history read afterwards can still show
 the removal took). A run that leaves anything behind, finds more matching
 plex.tv plays, or can't check plex.tv's deletes or rewrite the file, exits 1.
 
@@ -476,7 +476,7 @@ on the server too.
 
 After deleting, the plex.tv history is read again, since its replies to a
 removal aren't trusted, and once more after 10 seconds if it still lists
-removed plays. Each read must still list every item that wasn't to be removed
+removed plays. Each read must still list every play that wasn't to be removed
 or wasn't tried; if the first can't be read, or doesn't, the deletes are
 unchecked: `plexTVUnchecked` says why, and `failedPlexTV` lists the plays
 plex.tv didn't reply true for. If the second can't be read, or doesn't, the
@@ -491,12 +491,16 @@ record's `plexTV` lists the matched plays, or is `null` when plex.tv was left
 alone and `plexTVSkipped` says why.
 
 plex.tv records each movie's year (taken from a "(Year)" in its title when
-plex.tv gives none), and a year you give matches one within a year of it, as on
-the server; a movie further out is listed and kept. A movie's plays are grouped
-by plex.tv's id for it. A movie plex.tv gives no year matches on title alone,
-unless plex.tv has the title with a year in range: it's then another movie,
-listed and kept. Only movies are matched, never an episode or show with the
-title. A rate-limited history read or removal waits as long as plex.tv asks, a
+plex.tv gives none), and a year you give matches one within a year of it, the
+same range as on the server; a movie further out is listed and kept, and the
+plan says when the range took movies of more than one year. A movie's plays are
+grouped by plex.tv's id for it, or by title and year for a play without one. A
+movie plex.tv gives no year matches on title alone, unless plex.tv has the
+title with a year in range: it's then another movie, listed and kept (give the
+title without its year to include it). Only movies are matched, never an
+episode or show with the title; a play of a title you give that plex.tv lists
+as some other type, such as a clip, is listed and kept, and plays that name no
+movie are counted and left alone. A rate-limited history read or removal waits as long as plex.tv asks, a
 minute if it doesn't say, up to 5 minutes, and is tried up to 5 times; the
 owner lookup isn't retried.
 

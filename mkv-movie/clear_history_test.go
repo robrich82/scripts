@@ -1033,17 +1033,17 @@ func TestMain_ClearHistory(t *testing.T) {
 			t.Errorf("deleted %v; want %v:\n%s", pms.deleted, want, out)
 		}
 	})
-	// mkv-movie's prompts read a closed stdin as a blank answer, so the run
-	// aborts as for any answer but y.
+	// A closed stdin can't answer, so the run fails without deleting.
 	t.Run("closed stdin", func(t *testing.T) {
 		pms := newPMS()
 		env := envFor(pms)
 		out, err := runMainStdin(t, t.TempDir(), t.TempDir(), env, "", args...)
-		if err != nil {
-			t.Fatalf("%v\n%s", err, out)
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || !strings.Contains(out, "reading the answer: stdin is closed; nothing was deleted") {
+			t.Fatalf("err = %v; want exit status 1 naming the closed stdin:\n%s", err, out)
 		}
-		if len(pms.deleted) != 0 || !strings.Contains(out, "Aborted; no changes made.") {
-			t.Errorf("deleted %v:\n%s", pms.deleted, out)
+		if len(pms.deleted) != 0 {
+			t.Errorf("deleted %v", pms.deleted)
 		}
 	})
 	// Unless plex.tv refuses the token, a failure to reach it stops the run,

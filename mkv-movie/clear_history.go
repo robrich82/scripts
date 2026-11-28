@@ -242,7 +242,8 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		return nil
 	}
 
-	record := historyRecord{Account: acct.Name, AccountID: acct.ID, Server: server.matched, PlexTVSkipped: p.cloudSkipped}
+	record := historyRecord{Account: acct.Name, AccountID: acct.ID, PlexTVSkipped: p.cloudSkipped,
+		Server: append([]historyEntry{}, server.matched...)} // [], not null, when only plex.tv matched
 	if p.cloudSkipped == "" {
 		record.PlexTV = append([]cloudEntry{}, cloud.matched...) // [], not null, when nothing matched
 	}
@@ -822,7 +823,7 @@ func runClearHistory(args []string, account string) {
 		server:    newHTTPPlexMovieClient(plexURL, plexToken),
 		owner:     plexTV,
 		cloud:     plexTV,
-		prompt:    stdinPrompter,
+		prompt:    askStdin,
 		recordDir: cfgDir,
 		out:       os.Stdout,
 		now:       time.Now,
@@ -832,4 +833,17 @@ func runClearHistory(args []string, account string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// errStdinClosed is askStdin's error when stdin has no more lines.
+var errStdinClosed = errors.New("stdin is closed")
+
+// askStdin is stdinPrompter, except that a closed stdin is an error, not a
+// blank answer, so a run that can't ask fails rather than quietly aborting.
+func askStdin(prompt string) (string, error) {
+	fmt.Print(prompt)
+	if stdinScanner.Scan() {
+		return stdinScanner.Text(), nil
+	}
+	return "", cmp.Or(stdinScanner.Err(), errStdinClosed)
 }
