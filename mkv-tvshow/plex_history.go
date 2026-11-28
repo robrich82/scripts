@@ -16,8 +16,8 @@ type HistoryClient interface {
 	DeleteHistory(historyKey string) error
 }
 
-// plexAccount is a Plex server account: id 1 is the owner, the rest are
-// plex.tv users with access to the server.
+// plexAccount is a Plex server account: id 1 is the owner, and the rest
+// are plex.tv users with access to the server, apart from any with no name.
 type plexAccount struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
