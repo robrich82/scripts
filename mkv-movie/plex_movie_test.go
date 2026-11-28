@@ -176,6 +176,75 @@ func TestHTTPPlexMovieClient_SetContentRating_SendsCorrectParams(t *testing.T) {
 	}
 }
 
+// A PUT that a 301/302/303 would send on as a GET fails, unsent; a 307 keeps
+// the method and is followed.
+func TestHTTPPlexMovieClient_SetContentRating_Redirects(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		wantErr bool
+	}{
+		{http.StatusMovedPermanently, true},
+		{http.StatusFound, true},
+		{http.StatusSeeOther, true},
+		{http.StatusTemporaryRedirect, false},
+	} {
+		var reqs []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqs = append(reqs, r.Method+" "+r.URL.Path)
+			if r.URL.Path != "/moved" {
+				http.Redirect(w, r, "/moved", tc.status)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		err := newHTTPPlexMovieClient(srv.URL, "token").SetContentRating("42", RatingM)
+		srv.Close()
+		if tc.wantErr {
+			if err == nil || !strings.Contains(err.Error(), "refusing a redirect that would send PUT as GET") {
+				t.Errorf("%d: err = %v; want a redirect error", tc.status, err)
+			}
+			if len(reqs) != 1 {
+				t.Errorf("%d: requests %v; want only the first PUT", tc.status, reqs)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%d: err = %v", tc.status, err)
+		}
+		if len(reqs) != 2 || reqs[1] != "PUT /moved" {
+			t.Errorf("%d: requests %v; want the PUT followed to /moved", tc.status, reqs)
+		}
+	}
+}
+
+// A GET still follows a redirect; only the refresh POST it would turn into a
+// GET is refused.
+func TestHTTPPlexMovieClient_RefreshLibraries_RedirectedPostFails(t *testing.T) {
+	var reqs []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs = append(reqs, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/library/sections":
+			http.Redirect(w, r, "/moved/sections", http.StatusFound)
+		case "/moved/sections":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, plexMovieSectionsJSON("1", "movie"))
+		default:
+			http.Redirect(w, r, "/moved"+r.URL.Path, http.StatusSeeOther)
+		}
+	}))
+	defer srv.Close()
+
+	err := newHTTPPlexMovieClient(srv.URL, "token").RefreshLibraries()
+	if err == nil || !strings.Contains(err.Error(), "refusing a redirect that would send POST as GET") {
+		t.Errorf("err = %v; want a redirect error", err)
+	}
+	want := []string{"GET /library/sections", "GET /moved/sections", "POST /library/sections/1/refresh"}
+	if strings.Join(reqs, "|") != strings.Join(want, "|") {
+		t.Errorf("requests %v; want %v", reqs, want)
+	}
+}
+
 func streamsMetaJSON(audioLangTag string, audioSelected bool, subSelected bool) string {
 	return `{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"id":100,"Stream":[` +
 		`{"id":201,"streamType":2,"languageTag":"` + audioLangTag + `","selected":` + fmt.Sprintf("%t", audioSelected) + `},` +

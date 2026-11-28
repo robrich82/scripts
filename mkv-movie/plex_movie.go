@@ -87,14 +87,20 @@ type plexMovieItem struct {
 	GuidLower string          `json:"guid"`
 }
 
-// newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the Plex
-// server's host: Go only strips Authorization and Cookie on its own.
+// newPlexHTTPClient drops X-Plex-Token from a redirect that leaves the
+// request's host: Go only strips Authorization and Cookie on its own. It
+// refuses a redirect that would change the request's method.
 func newPlexHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: httpTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("stopped after 10 redirects")
+			}
+			// A 301/302/303 turns a PUT or POST into a GET, whose 2xx would
+			// read as the write succeeding.
+			if req.Method != via[0].Method {
+				return fmt.Errorf("refusing a redirect that would send %s as %s; set PLEX_URL to the address it redirects to", via[0].Method, req.Method)
 			}
 			if req.URL.Host != via[0].URL.Host {
 				req.Header.Del("X-Plex-Token")
