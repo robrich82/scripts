@@ -789,16 +789,22 @@ the first read) to show it was read that far; a later run clears them. An item
 plex.tv did reply true for, with nothing after it listed, counts as deleted by
 that reply, and the output says so. Matching items the plan didn't have, such
 as an episode watched during the run, are counted and left for a later run.
-The record's `plexTV` lists the matched items, or is `null` when plex.tv was
-left alone and `plexTVSkipped` says why.
+The record's `server` lists the matched server entries (`[]` when only plex.tv
+matched), and `plexTV` the matched items, or is `null` when plex.tv was left
+alone and `plexTVSkipped` says why.
 
 plex.tv records each show's year (taken from a "(Year)" in its title when
 plex.tv gives none), so a year you give must match it; the same title with
-another year is listed and kept. A show plex.tv gives no year matches on title
-alone, unless plex.tv has the title with the year you gave: it's then another
-show, listed and kept. A rate-limited history read or removal waits as long as
-plex.tv asks, a minute if it doesn't say, up to 5 minutes, and is tried up to
-5 times; the owner lookup isn't retried.
+another year is listed and kept. A show's items are grouped by plex.tv's id for
+it, or by title and year for an item without one. A show plex.tv gives no year
+matches on title alone, unless plex.tv has the title with the year you gave:
+it's then another show, listed and kept (give the title without its year to
+include it). Movies are never matched; an item of a title you give that plex.tv
+lists as some other type, such as a clip, is listed and kept, and untitled
+items, and episodes, seasons and shows whose show has no title, are counted and
+left alone. A rate-limited history read or removal waits as long as plex.tv
+asks, a minute if it doesn't say, up to 5 minutes, and is tried up to 5 times;
+the owner lookup isn't retried.
 
 ### Missing episode check (`--missing`)
 

@@ -248,14 +248,15 @@ func cloudShowOf(e cloudEntry) cloudShow {
 // cloudShowID is what groups e with its show's other items: plex.tv's id, or
 // the title and year for an item without one. "" means e names no show.
 func cloudShowID(e cloudEntry) string {
-	switch {
-	case e.ShowID != "":
+	if e.ShowID != "" {
 		return e.ShowID
-	case e.Show == "":
-		return ""
-	default:
-		return "\x00" + e.Show + "\x00" + strconv.Itoa(e.Year)
 	}
+	// As cloudShowOf reads it, so "Bluey (2018)" and "Bluey" from 2018 are one show.
+	s := cloudShowOf(e)
+	if s.title == "" {
+		return ""
+	}
+	return "\x00" + s.title + "\x00" + strconv.Itoa(s.year)
 }
 
 // cloudShowsOf gathers the shows of entries by cloudShowID. A show's title and
@@ -298,7 +299,8 @@ type cloudPlan struct {
 	yearless      []string                 // shows with a target's title and no year, beside one with the target's year
 	yearUnchecked []string                 // targets that matched a show with no year
 	missing       []string                 // targets that matched nothing
-	showless      int                      // episode, season and show items naming no show, or none with a title
+	notShows      []string                 // items of a target's title whose type isn't EPISODE, SEASON, SHOW or MOVIE, in any case
+	showless      int                      // TV items whose show no item titles, and untitled items that aren't MOVIE
 }
 
 // planCloud picks the plex.tv items of the target shows: episodes, seasons
@@ -317,12 +319,13 @@ func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 			dated[s.key+"\x00"+strconv.Itoa(s.year)] = true
 		}
 	}
-	listed := make(map[string]bool)
+	listed, targetKeys := make(map[string]bool), make(map[string]bool)
 	for _, t := range targets {
 		if listed[t.raw] {
 			continue
 		}
 		listed[t.raw] = true
+		targetKeys[t.key] = true
 		exactYear := dated[t.key+"\x00"+strconv.Itoa(t.year)]
 		found, unchecked := false, false
 		for id, s := range shows {
@@ -352,9 +355,18 @@ func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 	for _, e := range entries {
 		id := cloudShowID(e)
 		if id == "" || shows[id].title == "" {
-			switch e.Type {
-			case cloudTypeEpisode, cloudTypeSeason, cloudTypeShow, "": // "": plex.tv sent no item
+			// Here the item names no titled show: a TV item, in any case, whose
+			// show no item titles, or another type. An untitled one is counted.
+			// Any other type but MOVIE with a target's title may be the show
+			// asked for under a type this doesn't know; its own title is all it
+			// names.
+			title, year := splitTitleYear(e.Title)
+			switch typ := strings.ToUpper(e.Type); {
+			case typ == "MOVIE":
+			case typ == cloudTypeEpisode || typ == cloudTypeSeason || typ == cloudTypeShow || title == "":
 				plan.showless++
+			case targetKeys[historyTitleKey(title)]:
+				plan.notShows = append(plan.notShows, cloudShow{title: title, year: year}.String()+" ["+cmp.Or(e.Type, "no type")+"]")
 			}
 			continue
 		}
@@ -378,19 +390,32 @@ func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 	}
 	plan.otherYears = untaken(plan.shows, shows, otherYear)
 	plan.yearless = untaken(plan.shows, shows, yearless)
+	slices.Sort(plan.notShows)
+	plan.notShows = slices.Compact(plan.notShows)
 	return plan
 }
 
-// untaken names the shows of ids that no target took, sorted.
+// untaken names the shows of ids that no target took, sorted, with the id
+// of each whose name another shares.
 func untaken(taken map[string]*cloudSummary, shows map[string]*cloudShow, ids map[string]bool) []string {
-	var names []string
+	var kept []*cloudShow
+	perName := make(map[string]int)
 	for id := range ids {
 		if taken[id] == nil {
-			names = append(names, shows[id].String())
+			kept = append(kept, shows[id])
+			perName[shows[id].String()]++
 		}
 	}
+	var names []string
+	for _, s := range kept {
+		name := s.String()
+		if perName[name] > 1 {
+			name += " [" + cmp.Or(s.plexID, "no id") + "]"
+		}
+		names = append(names, name)
+	}
 	slices.Sort(names)
-	return slices.Compact(names)
+	return names
 }
 
 // cloudTime is when e was watched; zero when plex.tv's date can't be read.
@@ -432,10 +457,13 @@ func printCloudPlan(out io.Writer, owner string, plan cloudPlan) {
 		fmt.Fprintf(out, "Not deleting these, which have another year: %s\n", strings.Join(plan.otherYears, ", "))
 	}
 	if len(plan.yearless) > 0 {
-		fmt.Fprintf(out, "Not deleting these, which plex.tv gives no year while the title is there with the year asked for: %s\n", strings.Join(plan.yearless, ", "))
+		fmt.Fprintf(out, "Not deleting these, which plex.tv gives no year while the title is there with the year asked for (give the title without its year to include them): %s\n", strings.Join(plan.yearless, ", "))
 	}
 	if len(plan.yearUnchecked) > 0 {
 		fmt.Fprintf(out, "plex.tv records no year for a show these matched, so it matched on title alone: %s\n", strings.Join(plan.yearUnchecked, ", "))
+	}
+	if len(plan.notShows) > 0 {
+		fmt.Fprintf(out, "Not deleting these items of a title asked for, whose plex.tv type isn't EPISODE, SEASON or SHOW: %s\n", strings.Join(plan.notShows, ", "))
 	}
 	if plan.showless > 0 {
 		fmt.Fprintf(out, "plex.tv lists %d item(s) that name no show to match, so they're left alone.\n", plan.showless)
