@@ -304,8 +304,8 @@ type cloudPlan struct {
 	yearUnchecked []string                 // targets that matched a movie with no year
 	severalYears  []string                 // dated targets whose range took movies of more than one year
 	missing       []string                 // targets that matched nothing
-	notMovies     []string                 // plays of a target's title of a type that isn't a movie, episode, season or show
-	titleless     int                      // MOVIE plays whose movie no play titles, and plays plex.tv sent no item for
+	notMovies     []string                 // plays of a target's title whose type isn't MOVIE, EPISODE, SEASON or SHOW
+	titleless     int                      // untitled plays that aren't TV, and MOVIE plays whose movie no play titles
 }
 
 // planCloud picks the plex.tv plays of the target movies. A target's year
@@ -368,14 +368,14 @@ func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 	for _, e := range entries {
 		id := cloudMovieID(e)
 		if id == "" || movies[id].title == "" {
-			switch e.Type {
-			case cloudTypeMovie, "": // "": plex.tv sent no item
+			// Here a MOVIE play has no title. Any other type with a target's
+			// title may be the movie asked for under a type this doesn't know.
+			switch m := cloudMovieOf(e); {
+			case slices.Contains([]string{"EPISODE", "SEASON", "SHOW"}, strings.ToUpper(e.Type)):
+			case m.title == "":
 				plan.titleless++
-			case "EPISODE", "SEASON", "SHOW":
-			default: // a type this doesn't know, which may be the movie asked for
-				if m := cloudMovieOf(e); targetKeys[m.key] {
-					plan.notMovies = append(plan.notMovies, m.String()+" ["+e.Type+"]")
-				}
+			case targetKeys[m.key]:
+				plan.notMovies = append(plan.notMovies, m.String()+" ["+cmp.Or(e.Type, "no type")+"]")
 			}
 			continue
 		}
@@ -467,7 +467,7 @@ func printCloudPlan(out io.Writer, owner string, plan cloudPlan) {
 		fmt.Fprintf(out, "plex.tv records no year for a movie these matched, so it matched on title alone: %s\n", strings.Join(plan.yearUnchecked, ", "))
 	}
 	if len(plan.notMovies) > 0 {
-		fmt.Fprintf(out, "Not deleting these plays of a title asked for, which plex.tv doesn't list as movies: %s\n", strings.Join(plan.notMovies, ", "))
+		fmt.Fprintf(out, "Not deleting these plays of a title asked for, whose plex.tv type isn't MOVIE: %s\n", strings.Join(plan.notMovies, ", "))
 	}
 	if plan.titleless > 0 {
 		fmt.Fprintf(out, "plex.tv lists %d play(s) that name no movie to match, so they're left alone.\n", plan.titleless)

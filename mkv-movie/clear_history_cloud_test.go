@@ -1204,16 +1204,36 @@ func TestPlanCloud_OtherTypesNamed(t *testing.T) {
 		{ID: "c3", Type: "CLIP", Title: "Alien"},
 		{ID: "c4", Type: "EPISODE", Title: "Heat"},
 		{ID: "c5", Type: "SHOW", Title: "Heat"},
+		{ID: "c6", Type: "SEASON", Title: "Heat"},
+		{ID: "c7", Type: "Episode", Title: "Heat"},
+		{ID: "c8", Title: "Heat"}, // no type
+		{ID: "c9", Type: "CLIP"},  // names nothing: counted
+		{ID: "c10", Type: "SHOW"}, // TV: not counted
 	}, "Heat (1995)")
 	if len(plan.matched) != 0 || !slices.Equal(plan.missing, []string{"Heat (1995)"}) {
 		t.Errorf("matched %v, missing %v; want nothing taken", matchedIDs(plan), plan.missing)
 	}
-	if want := []string{"Heat (1995) [movie]", "Heat [CLIP]"}; !slices.Equal(plan.notMovies, want) {
+	if want := []string{"Heat (1995) [movie]", "Heat [CLIP]", "Heat [no type]"}; !slices.Equal(plan.notMovies, want) {
 		t.Errorf("not movies %q; want %q", plan.notMovies, want)
+	}
+	if plan.titleless != 1 {
+		t.Errorf("titleless %d; want 1, the untitled clip", plan.titleless)
 	}
 	var out strings.Builder
 	printCloudPlan(&out, "QuienNZ", plan)
-	assertContains(t, out.String(), "Not deleting these plays of a title asked for, which plex.tv doesn't list as movies: Heat (1995) [movie], Heat [CLIP]")
+	assertContains(t, out.String(), "Not deleting these plays of a title asked for, whose plex.tv type isn't MOVIE: Heat (1995) [movie], Heat [CLIP], Heat [no type]")
+}
+
+// Plays without a movie id are different movies when their years differ.
+func TestPlanCloud_IDlessYearsApart(t *testing.T) {
+	a := cloudEntry{ID: "a1", Type: cloudTypeMovie, Title: "Heat", Year: 1995}
+	b := cloudEntry{ID: "b1", Type: cloudTypeMovie, Title: "Heat (1986)"}
+	for _, entries := range [][]cloudEntry{{a, b}, {b, a}} {
+		plan := planCloudFor(t, entries, "Heat (1995)")
+		if got := matchedIDs(plan); !slices.Equal(got, []string{"a1"}) || !slices.Equal(plan.otherYears, []string{"Heat (1986)"}) {
+			t.Errorf("matched %v, other years %v; want a1, and Heat (1986) kept", got, plan.otherYears)
+		}
+	}
 }
 
 // A play without a movie id is grouped on the title and year it names, so
@@ -1242,6 +1262,11 @@ func TestPlanCloud_KeptMoviesToldApart(t *testing.T) {
 	}
 	if plan := planCloudFor(t, []cloudEntry{cloudPlay("a1", "Heat", 1995, ""), cloudPlay("c1", "Heat", 1986, "")}, "Heat (1995)"); !slices.Equal(plan.otherYears, []string{"Heat (1986)"}) {
 		t.Errorf("other years %q; want Heat (1986) without an id", plan.otherYears)
+	}
+	idless := cloudPlay("d1", "Heat", 1986, "")
+	idless.MovieID = ""
+	if plan := planCloudFor(t, []cloudEntry{cloudPlay("a1", "Heat", 1995, ""), cloudPlay("c1", "Heat", 1986, ""), idless}, "Heat (1995)"); !slices.Equal(plan.otherYears, []string{"Heat (1986) [mv-Heat-1986]", "Heat (1986) [no id]"}) {
+		t.Errorf("other years %q; want the id-less one labelled [no id]", plan.otherYears)
 	}
 }
 
