@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -425,6 +426,9 @@ func TestRunMainHelper(t *testing.T) {
 	}
 	os.Args = append([]string{"mkv-movie"}, args...)
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	// A fake plex.tv, or an address nothing listens on: no test reaches the real one.
+	plexTVBaseURL = cmp.Or(os.Getenv("MKV_MOVIE_TEST_PLEXTV"), "http://127.0.0.1:1")
+	plexTVCommunityURL = plexTVBaseURL
 	main()
 	os.Exit(0)
 }

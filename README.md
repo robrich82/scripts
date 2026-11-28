@@ -398,7 +398,7 @@ Flags:
 | `--language-only` | Only set Plex audio/subtitle streams, for every movie the cache maps a file to (run `--clean` first to drop deleted files), from any folder; `--cutoff-date`/`--all` are ignored. The files aren't read, so an offline drive doesn't matter. Streams are set only on accounts not yet recorded as having them; `--overwrite-streams` sets every account again. A movie with several files takes each of `language`, `alt-language` and `alt2-language` from the first file name, in name order, whose `manual_data.json` entry sets it. TMDB is called for the original language when no entry sets `language`, and for the title and year Plex is searched by when the streams are due. Needs `PLEX_URL`/`PLEX_TOKEN`, but not MKVToolNix. Prints `Done. Updated: N  Skipped: N  Errors: N` |
 | `--reset-rating <query>` | Clear the cached NZ rating and the rating last pushed to Plex for a movie, then exit. Run `mkv-movie --ratings-only` in its folder to fetch the rating again, retag it and push it. `query` is a title substring or TMDB ID |
 | `--set-rating <RATING>` | Set `RATING` as the NZ rating for **every** movie in the current directory, overriding any cached value, then exit (see below) |
-| `--clear-history <movie>` | Delete a movie's Plex watch history, then exit (see below). Repeat for more movies |
+| `--clear-history <movie>` | Delete a movie's Plex watch history, and on plex.tv too when the account is the token owner's, then exit (see below). Repeat for more movies |
 | `--account <name>` | With `--clear-history`, the Plex server account whose history to clear (default: the token owner) |
 | `--deband-only` | Update only the `DEBAND` MKV tag for movies configured in `manual_data.json`; preserves all other tags and timestamps |
 
@@ -431,7 +431,8 @@ same directory writes the new `LAW_RATING` tag and pushes it to Plex.
 ### Clearing watch history (`--clear-history`)
 
 Deletes every play of a movie from a Plex server account's watch history,
-including movies no longer in the library:
+including movies no longer in the library. When the account is the token
+owner's, it also clears their watch history on plex.tv:
 
 ```sh
 mkv-movie --clear-history "Heat (1995)" --clear-history "Alien"
@@ -453,17 +454,63 @@ range. Titles match whole, ignoring case, spaces, punctuation, dash lookalikes
 (tildes, minus signs, box-drawing lines) and modifiers like the ʻ in Hawaiʻi or
 `^`; other symbols, like ° or ☆, count. The matching entries are listed per
 movie with their play count and when it was last watched, and nothing is deleted
-until you confirm; a closed stdin counts as no. Before deleting, the entries are
-written to `history-cleared-<UTC time>.json` in the config folder, since Plex
-can't restore them. Its `complete` stays `false` until the run finishes and the
-file is rewritten, and `failed` lists the history keys of the entries whose
-delete failed or wasn't tried.
+until you confirm; a closed stdin is an error, exit 1. Before deleting, the
+entries are written to `history-cleared-<UTC time>.json` in the config folder,
+since Plex can't restore them. Its `complete` stays `false` until the run
+finishes and the file is rewritten, and `failed` lists the history keys of the
+server entries whose delete failed or wasn't tried. After 3 failures in a row on
+the server or on plex.tv, the rest there aren't tried; a plex.tv 2xx reply that
+is empty, isn't just the JSON asked for, has no data, or for a removal isn't
+true, isn't a failure there and starts the count again, but one cut off is a
+failure (the history read afterwards can still show the removal took). A run
+that leaves anything behind, finds more matching plex.tv plays, or can't check
+plex.tv's deletes or rewrite the file, exits 1.
+
+plex.tv keeps its own copy of the token owner's history. It's listed and
+cleared with the server's when the account has the token owner's plex.tv
+username exactly, with or without `--account`. For any other account it's left
+alone with a note, and so is plex.tv when `--account` is given and plex.tv
+refuses the token with a 401 or 403, as it does a Plex server's own token;
+without `--account` that's an error, since the owner can't be found. Any other
+plex.tv failure, such as a timeout, stops the run before anything is deleted,
+on the server too.
+
+After deleting, the plex.tv history is read again, since its replies to a
+removal aren't trusted, and once more after 10 seconds if it still lists
+removed plays. Each read must still list every play that wasn't to be removed
+or wasn't tried; if the first can't be read, or doesn't, the deletes are
+unchecked: `plexTVUnchecked` says why, and `failedPlexTV` lists the plays
+plex.tv didn't reply true for. If the second can't be read, or doesn't, the
+first stands. Otherwise `failedPlexTV` lists the plays the last read still
+lists, those whose removal failed with an error or wasn't tried, and those
+plex.tv didn't reply true for when the last read lists nothing after them (in
+the first read) to show it was read that far; a later run clears them. A play
+plex.tv did reply true for, with nothing after it listed, counts as deleted by
+that reply, and the output says so. Matching plays the plan didn't have, such
+as one watched during the run, are counted and left for a later run. The
+record's `server` lists the matched server entries (`[]` when only plex.tv
+matched), and `plexTV` the matched plays, or is `null` when plex.tv was left
+alone and `plexTVSkipped` says why.
+
+plex.tv records each movie's year (taken from a "(Year)" in its title when
+plex.tv gives none), and a year you give matches one within a year of it, the
+same range as on the server; a movie further out is listed and kept, and the
+plan says when the range took movies of more than one year. A movie's plays are
+grouped by plex.tv's id for it, or by title and year for a play without one. A
+movie plex.tv gives no year matches on title alone, unless plex.tv has the
+title with a year in range: it's then another movie, listed and kept (give the
+title without its year to include it). Only movies are matched, never an
+episode, season or show with the title; a play of a title you give that plex.tv
+lists as some other type, such as a clip, is listed and kept, and untitled plays
+are counted and left alone. A rate-limited history read or removal waits as long
+as plex.tv asks, a minute if it doesn't say, up to 5 minutes, and is tried up to
+5 times; the owner lookup isn't retried.
 
 ### Dependencies
 
 - `TMDB_API_KEY` — TMDB v3 API key (required)
 - `mkvpropedit` and `mkvextract` — write metadata to MKV files, reading the existing tags first so the rest are kept (optional; without either, a warning is shown and files are skipped with their timestamps untouched, so they stay in the `--cutoff-date` window; Plex updates still run, and a failed one makes the file an error)
-- `PLEX_URL` / `PLEX_TOKEN` — optional (required by `--language-only` and `--clear-history`); used to read/write NZ ratings in Plex, set preferred audio language and clear watch history
+- `PLEX_URL` / `PLEX_TOKEN` — optional (required by `--language-only` and `--clear-history`); used to read/write NZ ratings in Plex, set preferred audio language and clear watch history in Plex and, for the token's owner, on plex.tv
 - `PLEX_ALT_TOKEN` / `PLEX_ALT2_TOKEN` — optional tokens for additional Plex accounts; stream selection is applied for these accounts too
 
 When Plex is configured, after processing each movie the tool pushes the resolved NZ content rating and selects the appropriate audio and subtitle streams: the audio track matching the TMDB original language (e.g. Japanese for anime) and the first non-forced English subtitle. Stream selection is cached in `movie_rating_cache.json` and only applied once per movie and account, so a selection you change in Plex afterwards is kept; use `--overwrite-streams` to force a re-apply.
