@@ -97,8 +97,8 @@ func newPlexHTTPClient() *http.Client {
 			if len(via) >= 10 {
 				return errors.New("stopped after 10 redirects")
 			}
-			// A 301/302/303 turns a PUT or POST into a GET, whose 2xx would
-			// read as the write succeeding.
+			// A 301/302/303 turns a PUT, POST or DELETE into a GET, whose
+			// 2xx would read as the write succeeding.
 			if req.Method != via[0].Method {
 				return fmt.Errorf("refusing a redirect that would send %s as %s; set PLEX_URL to the address it redirects to", via[0].Method, req.Method)
 			}
