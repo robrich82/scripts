@@ -1135,32 +1135,48 @@ func TestPlanCloud_RepeatedTarget(t *testing.T) {
 }
 
 // An item of a title asked for whose type this doesn't know isn't taken, but
-// the plan names it rather than only calling the title missing. Movies, and
-// other types' items of other titles, aren't named; TV items naming no show,
-// and untitled items, are counted.
+// the plan names it rather than only calling the title missing, whatever its
+// year. Movies, and other types' items of other titles, aren't named; TV items
+// naming no show, in any case, and untitled items but movies, are counted.
 func TestPlanCloud_OtherTypesNamed(t *testing.T) {
 	clip := cloudEntry{ID: "c1", Type: "CLIP", Title: "Bluey"}
 	plan := planCloudFor(t, []cloudEntry{clip, clip,
-		{ID: "c2", Type: "show", Title: "Bluey (2018)"}, // not plex.tv's SHOW, so no show is read from it
+		{ID: "c2", Type: "CLIP", Title: "Bluey (1992)"},
 		{ID: "c3", Type: "CLIP", Title: "Peppa Pig"},
 		{ID: "c4", Type: cloudTypeEpisode, Title: "Bluey"}, // names no show: counted
 		{ID: "c5", Type: "movie", Title: "Bluey"},
 		{ID: "c6", Title: "Bluey"},                // no type
 		{ID: "c7", Type: "CLIP"},                  // names nothing: counted
 		{ID: "c8", Type: "MOVIE", Title: "Bluey"}, // a movie
+		{ID: "c9", Type: "Show", Title: "Bluey"},  // plex.tv's SHOW in another case: counted
+		{ID: "c10", Type: "episode", Title: "Hospital"},
+		{ID: "c11"},                // plex.tv sent no item: counted
+		{ID: "c12", Type: "MOVIE"}, // an untitled movie: left out
+		{ID: "c13", Title: "Peppa Pig"},
 	}, "Bluey (2018)")
 	if len(plan.matched) != 0 || !slices.Equal(plan.missing, []string{"Bluey (2018)"}) {
 		t.Errorf("matched %v, missing %v; want nothing taken", matchedIDs(plan), plan.missing)
 	}
-	if want := []string{"Bluey (2018) [show]", "Bluey [CLIP]", "Bluey [no type]"}; !slices.Equal(plan.notShows, want) {
+	if want := []string{"Bluey (1992) [CLIP]", "Bluey [CLIP]", "Bluey [no type]"}; !slices.Equal(plan.notShows, want) {
 		t.Errorf("not shows %q; want %q", plan.notShows, want)
 	}
-	if plan.showless != 2 {
-		t.Errorf("showless %d; want 2, the episode and the untitled clip", plan.showless)
+	if plan.showless != 5 {
+		t.Errorf("showless %d; want 5: c4, c7, c9, c10 and c11", plan.showless)
 	}
 	var out strings.Builder
 	printCloudPlan(&out, "QuienNZ", plan)
-	assertContains(t, out.String(), "Not deleting these items of a title asked for, whose plex.tv type isn't EPISODE, SEASON or SHOW: Bluey (2018) [show], Bluey [CLIP], Bluey [no type]")
+	assertContains(t, out.String(), "Not deleting these items of a title asked for, whose plex.tv type isn't EPISODE, SEASON or SHOW: Bluey (1992) [CLIP], Bluey [CLIP], Bluey [no type]")
+}
+
+// A run that matches nothing still names the items it left for their type.
+func TestClearHistory_PlexTV_OtherTypeNamedWhenNothingMatches(t *testing.T) {
+	r := newCloudRun(t, "y")
+	r.tv.history = append(r.tv.history, cloudEntry{ID: "c8", Date: "2026-11-15T10:00:00.000Z", Type: "CLIP", Title: "Bandit"})
+	if err := r.run(t, "", "Bandit"); err != nil {
+		t.Fatal(err)
+	}
+	assertContains(t, r.output(), "whose plex.tv type isn't EPISODE, SEASON or SHOW: Bandit [CLIP]", "Nothing to clear.")
+	r.assertUntouched(t)
 }
 
 // An item without a show id is grouped on the title and year it names, so

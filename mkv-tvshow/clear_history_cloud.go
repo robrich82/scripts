@@ -299,7 +299,7 @@ type cloudPlan struct {
 	yearless      []string                 // shows with a target's title and no year, beside one with the target's year
 	yearUnchecked []string                 // targets that matched a show with no year
 	missing       []string                 // targets that matched nothing
-	notShows      []string                 // items of a target's title whose type isn't EPISODE, SEASON, SHOW or any case of MOVIE
+	notShows      []string                 // items of a target's title whose type isn't EPISODE, SEASON, SHOW or MOVIE, in any case
 	showless      int                      // TV items whose show no item titles, and untitled items that aren't MOVIE
 }
 
@@ -355,13 +355,15 @@ func planCloud(entries []cloudEntry, targets []historyTarget) cloudPlan {
 	for _, e := range entries {
 		id := cloudShowID(e)
 		if id == "" || shows[id].title == "" {
-			// Here a TV item's show has no title. Any other type but MOVIE with
-			// a target's title may be the show asked for under a type this
-			// doesn't know; its own title is all it names.
+			// Here the item names no titled show: a TV item, in any case, whose
+			// show no item titles, or another type. An untitled one is counted.
+			// Any other type but MOVIE with a target's title may be the show
+			// asked for under a type this doesn't know; its own title is all it
+			// names.
 			title, year := splitTitleYear(e.Title)
-			switch {
-			case strings.EqualFold(e.Type, "MOVIE"):
-			case e.Type == cloudTypeEpisode || e.Type == cloudTypeSeason || e.Type == cloudTypeShow || title == "":
+			switch typ := strings.ToUpper(e.Type); {
+			case typ == "MOVIE":
+			case typ == cloudTypeEpisode || typ == cloudTypeSeason || typ == cloudTypeShow || title == "":
 				plan.showless++
 			case targetKeys[historyTitleKey(title)]:
 				plan.notShows = append(plan.notShows, cloudShow{title: title, year: year}.String()+" ["+cmp.Or(e.Type, "no type")+"]")

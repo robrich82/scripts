@@ -26,7 +26,7 @@ const (
 type cloudEntry struct {
 	ID    string `json:"id"`
 	Date  string `json:"date"`
-	Type  string `json:"type"`  // EPISODE, SEASON, SHOW or MOVIE
+	Type  string `json:"type"`  // EPISODE, SEASON, SHOW, MOVIE, or another type such as CLIP
 	Title string `json:"title"` // the item's own title
 	// ShowID, Show and Year are the show's plex.tv id, title and first year:
 	// the item's for a SHOW, its parent's for a SEASON and its grandparent's
