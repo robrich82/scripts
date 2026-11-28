@@ -229,11 +229,16 @@ func renameShow(t *testing.T) (dir, oldPath, newPath string) {
 // runRenameCheck runs --title-check over dir, answering yes to the rename.
 func runRenameCheck(t *testing.T, dir string, retry *RetryList) (*TitleChecker, string) {
 	t.Helper()
+	return runRenameCheckWith(t, dir, retry, newNullTitleCache(t), &scriptedPrompter{answers: []string{"y"}})
+}
+
+// runRenameCheckWith runs --title-check over dir with prompter answering.
+func runRenameCheckWith(t *testing.T, dir string, retry *RetryList, titles *TitleCache, prompter Prompter) (*TitleChecker, string) {
+	t.Helper()
 	tmdb := &fakeTMDB{seasonResult: SeasonResult{Episodes: []Episode{{EpisodeNumber: 2, Name: "New Title"}}}}
 	tc := NewTitleChecker(Config{MediaDir: dir}, cacheWith(t, map[string]string{"Show": "999"}), nil, tmdb,
-		&scriptedPrompter{answers: []string{"y"}}, nil, newNullTitleCache(t), noopTimer{}, retry)
-	out := captureOutput(t, tc.Run)
-	return tc, out
+		prompter, nil, titles, noopTimer{}, retry)
+	return tc, captureOutput(t, tc.Run)
 }
 
 // A rename moves the file's retry entry, with its failed-run count, to the new name.
@@ -275,16 +280,19 @@ func TestTitleCheck_RenameOffRetryListLeavesItAlone(t *testing.T) {
 	}
 }
 
+// removingPrompter deletes path when asked, then answers yes, so the rename
+// fails.
+type removingPrompter struct{ path string }
+
+func (p removingPrompter) Ask(string) (string, error) { return "y", os.Remove(p.path) }
+
 // A failed rename leaves the retry entry where it was.
 func TestTitleCheck_FailedRenameKeepsRetryEntry(t *testing.T) {
-	dir, oldPath, newPath := renameShow(t)
-	if err := os.Mkdir(newPath, 0o755); err != nil { // a folder in the way fails the rename
-		t.Fatal(err)
-	}
+	dir, oldPath, _ := renameShow(t)
 	retry := emptyRetryList(t)
 	retry.Fail(oldPath)
 
-	_, out := runRenameCheck(t, dir, retry)
+	_, out := runRenameCheckWith(t, dir, retry, newNullTitleCache(t), removingPrompter{oldPath})
 
 	if !strings.Contains(out, "[X] Rename failed") {
 		t.Fatalf("rename didn't fail:\n%s", out)

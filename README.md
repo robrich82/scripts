@@ -897,11 +897,17 @@ For each MKV file it:
 2. Fetches the matching episode title(s) from TMDB (respecting any
    `overrides`/`mapping` entries in `manual_data.json`).
 3. Compares the titles case-insensitively with whitespace normalisation.
-4. If they differ, prints both the filename and TMDB versions and prompts:
+4. If they differ, prints both the filename and TMDB versions and the new
+   name, then prompts:
 
 ```
-Rename to use TMDB title(s)? [y/n]:
+Rename? [y/n]:
 ```
+
+No rename replaces a file that already has the new name: `--title-check` says
+so instead of asking. So does the multi-episode rename (`S01E01E02E03` →
+`S01E01-E03`) of a normal, `--ratings-only` or `--deband-only` run, which keeps
+the old name.
 
 Multi-episode files (e.g. `S01E01E02` or `S01E01-E03`) have their titles
 compared individually against each corresponding TMDB episode and joined with
