@@ -239,6 +239,31 @@ func TestPlanHistory_YearlessTitleIsAnotherShowWhenTheYearIsThere(t *testing.T) 
 	}
 }
 
+// Only episode entries say what years a title has: a track whose artist
+// is titled with the target's year doesn't make a year-less show another one.
+func TestPlanHistory_OtherTypesDontCountForYears(t *testing.T) {
+	targets, err := parseHistoryTargets([]string{"Bluey (2018)"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := historyEntry{HistoryKey: historyKeyPrefix + "2", Type: "track", Title: "Bluey", GrandparentTitle: "Bluey (2018)", AccountID: 1}
+	plan := planHistory([]historyEntry{episode(1, 1, "Bluey", "Hospital"), track}, targets)
+	if got := keysOf(plan.matched); !slices.Equal(got, keys("1")) {
+		t.Errorf("matched %v; want the year-less show's episode", got)
+	}
+}
+
+// A target given twice that matches nothing is listed as missing once.
+func TestPlanHistory_RepeatedMissingTargetListedOnce(t *testing.T) {
+	targets, err := parseHistoryTargets([]string{"Paw Patrol", "Paw Patrol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan := planHistory(nil, targets); !slices.Equal(plan.missing, []string{"Paw Patrol"}) {
+		t.Errorf("missing %v; want Paw Patrol once", plan.missing)
+	}
+}
+
 func TestParseHistoryTargets_RejectsBlank(t *testing.T) {
 	for _, s := range []string{"", "  ", "(2018)", "【】", "!!"} {
 		if _, err := parseHistoryTargets([]string{s}); err == nil {
@@ -882,6 +907,31 @@ func TestClearHistory_RecordUpdateFails(t *testing.T) {
 	}
 	if want := keys("1", "2"); !slices.Equal(r.pms.deleted, want) {
 		t.Errorf("deleted %v; want %v", r.pms.deleted, want)
+	}
+}
+
+// When the record can't say which entries weren't deleted, the output does,
+// untried ones included.
+func TestClearHistory_RecordUpdateFails_NamesNotDeleted(t *testing.T) {
+	setBeforeFinalSave(t, func() {})
+	r := newClearHistoryRun(t, "y")
+	r.pms.failKeys = map[string]bool{}
+	for i := 20; i < 25; i++ {
+		e := episode(i, 1, "Paw Patrol", "Ep")
+		r.pms.history = append(r.pms.history, e)
+		if i < 23 {
+			r.pms.failKeys[e.HistoryKey] = true // the last two aren't tried
+		}
+	}
+	r.blockRecordOnDelete(t)
+	err := r.run(t, "", "Paw Patrol")
+	if err == nil || !strings.Contains(err.Error(), "5 history entries were not deleted; the output above names them") {
+		t.Errorf("err = %v; want one pointing at the output", err)
+	}
+	out := r.out.String()
+	i := strings.Index(out, "Not deleted:\n")
+	if i < 0 || strings.Count(out[i:], "\n  Paw Patrol S01E") != 5 {
+		t.Errorf("want all 5 episodes listed as not deleted:\n%s", out)
 	}
 }
 

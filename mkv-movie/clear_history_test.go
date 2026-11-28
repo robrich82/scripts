@@ -1143,8 +1143,8 @@ func TestClearHistory_RecordUpdateFails_NamesNotDeleted(t *testing.T) {
 		t.Errorf("err = %v; want one pointing at the output", err)
 	}
 	out := r.out.String()
-	notDeleted, ok := strings.CutPrefix(out[strings.Index(out, "Not deleted:"):], "Not deleted:\n")
-	if !ok || strings.Count(notDeleted, "  Paddington (2014)") != 5 {
+	i := strings.Index(out, "Not deleted:\n")
+	if i < 0 || strings.Count(out[i:], "\n  Paddington (2014)") != 5 {
 		t.Errorf("want all 5 plays listed as not deleted:\n%s", out)
 	}
 }
