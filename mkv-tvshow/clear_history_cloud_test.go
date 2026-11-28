@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -159,16 +161,20 @@ func TestClearHistory_PlexTV_Skipped(t *testing.T) {
 // Any other failure to find the owner stops the run: clearing the server
 // alone would leave the owner's plex.tv history behind.
 func TestClearHistory_PlexTV_OwnerLookupErrorStops(t *testing.T) {
-	for name, set := range map[string]func(*clearHistoryRun){
-		"500":     func(r *clearHistoryRun) { r.tv.userStatus = http.StatusInternalServerError },
-		"no uuid": func(r *clearHistoryRun) { r.tv.uuid = "" },
+	for name, tc := range map[string]struct {
+		set  func(*clearHistoryRun)
+		want string
+	}{
+		"500":     {func(r *clearHistoryRun) { r.tv.userStatus = http.StatusInternalServerError }, "finding the PLEX_TOKEN owner"},
+		"no uuid": {func(r *clearHistoryRun) { r.tv.uuid = "" }, "plex.tv gave no user id"},
 	} {
+		set, want := tc.set, tc.want
 		t.Run(name, func(t *testing.T) {
 			r := newCloudRun(t, "y")
 			set(r)
 			err := r.run(t, "QuienNZ", "Bluey (2018)")
-			if err == nil || !strings.HasSuffix(err.Error(), "nothing was deleted") {
-				t.Errorf("err = %v; want an error saying nothing was deleted", err)
+			if err == nil || !strings.HasSuffix(err.Error(), "nothing was deleted") || !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %v; want %q, saying nothing was deleted", err, want)
 			}
 			r.assertUntouched(t)
 		})
@@ -414,6 +420,9 @@ func TestPlanCloud_LastWatchedByTime(t *testing.T) {
 		cloudEpisode("a1", "Bluey", 2018, 1, 1, "Later", "2026-11-22T08:00:00.500Z"),
 		cloudEpisode("a2", "Bluey", 2018, 1, 2, "Earlier", "2026-11-22T08:00:00Z"),
 	}, "Bluey")
+	if len(plan.shows) != 1 {
+		t.Fatalf("shows %v; want 1", plan.shows)
+	}
 	for _, sum := range plan.shows {
 		if sum.last.ID != "a1" {
 			t.Errorf("last watched %s; want a1", sum.last.ID)
@@ -732,7 +741,7 @@ func TestPlanCloud_YearlessBesideTargetYear(t *testing.T) {
 	}
 	var out strings.Builder
 	printCloudPlan(&out, "QuienNZ", plan)
-	assertContains(t, out.String(), "Not deleting these, which plex.tv gives no year while the title is there with the year asked for: Bluey")
+	assertContains(t, out.String(), "Not deleting these, which plex.tv gives no year while the title is there with the year asked for (give the title without its year to include them): Bluey")
 }
 
 // A year-less show beside only another year's matches on
@@ -782,6 +791,9 @@ func TestPlanCloud_UnreadableDate(t *testing.T) {
 		cloudEpisode("a1", "Bluey", 2018, 1, 1, "Odd", "1767225600"),
 		cloudEpisode("a2", "Bluey", 2018, 1, 2, "Later", "2026-11-22T08:00:00Z"),
 	}, "Bluey")
+	if len(plan.shows) != 1 {
+		t.Fatalf("shows %v; want 1", plan.shows)
+	}
 	for _, sum := range plan.shows {
 		if sum.last.ID != "a2" {
 			t.Errorf("last watched %s; want a2", sum.last.ID)
@@ -1076,5 +1088,161 @@ func TestPlanCloud_DatedAndUndatedTargets(t *testing.T) {
 	plan := planCloudFor(t, []cloudEntry{cloudEpisode("a1", "Bluey", 2018, 1, 1, "Ep", ""), other}, "Bluey (2018)", "Bluey")
 	if got := matchedIDs(plan); !slices.Equal(got, []string{"a1", "b1"}) || plan.yearless != nil || plan.yearUnchecked != nil {
 		t.Errorf("matched %v, kept %v, unchecked %v; want both matched, nothing kept or unchecked", got, plan.yearless, plan.yearUnchecked)
+	}
+}
+
+// A show's year is the first any of its items gives, so a first item
+// without one doesn't make it match on title alone.
+func TestPlanCloud_YearFromLaterPlay(t *testing.T) {
+	first := cloudEpisode("a1", "Bluey", 0, 1, 1, "Ep", "")
+	first.ShowID = showID("Bluey", 2018)
+	plan := planCloudFor(t, []cloudEntry{first, cloudEpisode("a2", "Bluey", 2018, 1, 2, "Ep", ""), cloudEpisode("b1", "Bluey", 1992, 1, 1, "Ep", "")}, "Bluey (2018)")
+	if got := matchedIDs(plan); !slices.Equal(got, []string{"a1", "a2"}) || plan.yearUnchecked != nil {
+		t.Errorf("matched %v, year unchecked %v; want a1 and a2, checked", got, plan.yearUnchecked)
+	}
+	for _, sum := range plan.shows {
+		if sum.show.year != 2018 {
+			t.Errorf("show %v; want its year 2018", sum.show)
+		}
+	}
+}
+
+// A year-less item with another year's show id is that show: a dated target
+// of another year leaves it, as another year, not as year-less.
+func TestPlanCloud_YearlessPlayOfOtherYear(t *testing.T) {
+	yearless := cloudEpisode("b2", "Bluey", 0, 1, 2, "Ep", "")
+	yearless.ShowID = showID("Bluey", 1992)
+	plan := planCloudFor(t, []cloudEntry{cloudEpisode("a1", "Bluey", 2018, 1, 1, "Ep", ""), cloudEpisode("b1", "Bluey", 1992, 1, 1, "Ep", ""), yearless}, "Bluey (2018)")
+	if got := matchedIDs(plan); !slices.Equal(got, []string{"a1"}) {
+		t.Errorf("matched %v; want only a1", got)
+	}
+	if !slices.Equal(plan.otherYears, []string{"Bluey (1992)"}) || plan.yearless != nil || plan.yearUnchecked != nil {
+		t.Errorf("other years %v, kept year-less %v, unchecked %v; want Bluey (1992) as another year only", plan.otherYears, plan.yearless, plan.yearUnchecked)
+	}
+}
+
+// A target given twice is listed once, as missing and as matched on title
+// alone, and takes each item once.
+func TestPlanCloud_RepeatedTarget(t *testing.T) {
+	entries := []cloudEntry{cloudEpisode("a1", "Bluey", 2018, 1, 1, "Ep", ""), cloudEpisode("p1", "Peppa Pig", 0, 1, 1, "Ep", "")}
+	plan := planCloudFor(t, entries, "Bluey (2018)", "Bluey (2018)", "Peppa Pig (2004)", "Peppa Pig (2004)", "Bandit", "Bandit")
+	if !slices.Equal(plan.missing, []string{"Bandit"}) || !slices.Equal(plan.yearUnchecked, []string{"Peppa Pig (2004)"}) {
+		t.Errorf("missing %v, year unchecked %v; want each once", plan.missing, plan.yearUnchecked)
+	}
+	if got := matchedIDs(plan); !slices.Equal(got, []string{"a1", "p1"}) {
+		t.Errorf("matched %v; want each item once", got)
+	}
+}
+
+// An item of a title asked for whose type this doesn't know isn't taken, but
+// the plan names it rather than only calling the title missing. Movies, and
+// other types' items of other titles, aren't named; TV items naming no show,
+// and untitled items, are counted.
+func TestPlanCloud_OtherTypesNamed(t *testing.T) {
+	clip := cloudEntry{ID: "c1", Type: "CLIP", Title: "Bluey"}
+	plan := planCloudFor(t, []cloudEntry{clip, clip,
+		{ID: "c2", Type: "show", Title: "Bluey (2018)"}, // not plex.tv's SHOW, so no show is read from it
+		{ID: "c3", Type: "CLIP", Title: "Peppa Pig"},
+		{ID: "c4", Type: cloudTypeEpisode, Title: "Bluey"}, // names no show: counted
+		{ID: "c5", Type: "movie", Title: "Bluey"},
+		{ID: "c6", Title: "Bluey"},                // no type
+		{ID: "c7", Type: "CLIP"},                  // names nothing: counted
+		{ID: "c8", Type: "MOVIE", Title: "Bluey"}, // a movie
+	}, "Bluey (2018)")
+	if len(plan.matched) != 0 || !slices.Equal(plan.missing, []string{"Bluey (2018)"}) {
+		t.Errorf("matched %v, missing %v; want nothing taken", matchedIDs(plan), plan.missing)
+	}
+	if want := []string{"Bluey (2018) [show]", "Bluey [CLIP]", "Bluey [no type]"}; !slices.Equal(plan.notShows, want) {
+		t.Errorf("not shows %q; want %q", plan.notShows, want)
+	}
+	if plan.showless != 2 {
+		t.Errorf("showless %d; want 2, the episode and the untitled clip", plan.showless)
+	}
+	var out strings.Builder
+	printCloudPlan(&out, "QuienNZ", plan)
+	assertContains(t, out.String(), "Not deleting these items of a title asked for, whose plex.tv type isn't EPISODE, SEASON or SHOW: Bluey (2018) [show], Bluey [CLIP], Bluey [no type]")
+}
+
+// An item without a show id is grouped on the title and year it names, so
+// a year in its show's title and one plex.tv gives are the same show.
+func TestPlanCloud_IDlessGroupedByParsedTitle(t *testing.T) {
+	a := cloudEpisode("a1", "Bluey (2018)", 0, 1, 1, "Ep", "")
+	b := cloudEpisode("a2", "Bluey", 2018, 1, 2, "Ep", "")
+	a.ShowID, b.ShowID = "", ""
+	plan := planCloudFor(t, []cloudEntry{a, b}, "Bluey (2018)")
+	if len(plan.matched) != 2 || len(plan.shows) != 1 {
+		t.Fatalf("matched %v in %d show(s); want both in one", matchedIDs(plan), len(plan.shows))
+	}
+	var out strings.Builder
+	printCloudPlan(&out, "QuienNZ", plan)
+	if s := out.String(); strings.Contains(s, "[no id]") || strings.Contains(s, "may be different shows") {
+		t.Errorf("one show shown as two:\n%s", s)
+	}
+}
+
+// Items without a show id are different shows when their years differ.
+func TestPlanCloud_IDlessYearsApart(t *testing.T) {
+	a := cloudEpisode("a1", "Bluey", 2018, 1, 1, "Ep", "")
+	b := cloudEpisode("b1", "Bluey (1992)", 0, 1, 1, "Ep", "")
+	a.ShowID, b.ShowID = "", ""
+	for _, entries := range [][]cloudEntry{{a, b}, {b, a}} {
+		plan := planCloudFor(t, entries, "Bluey (2018)")
+		if got := matchedIDs(plan); !slices.Equal(got, []string{"a1"}) || !slices.Equal(plan.otherYears, []string{"Bluey (1992)"}) {
+			t.Errorf("matched %v, other years %v; want a1, and Bluey (1992) kept", got, plan.otherYears)
+		}
+	}
+}
+
+// Kept shows that print alike are each listed, told apart by id.
+func TestPlanCloud_KeptShowsToldApart(t *testing.T) {
+	taken := cloudEpisode("a1", "Bluey", 2018, 1, 1, "Ep", "")
+	other := cloudEpisode("b1", "Bluey", 1992, 1, 1, "Ep", "")
+	other.ShowID = "sh-other"
+	plan := planCloudFor(t, []cloudEntry{taken, cloudEpisode("c1", "Bluey", 1992, 1, 1, "Ep", ""), other}, "Bluey (2018)")
+	if want := []string{"Bluey (1992) [sh-Bluey-1992]", "Bluey (1992) [sh-other]"}; !slices.Equal(plan.otherYears, want) {
+		t.Errorf("other years %q; want %q", plan.otherYears, want)
+	}
+	if plan := planCloudFor(t, []cloudEntry{taken, cloudEpisode("c1", "Bluey", 1992, 1, 1, "Ep", "")}, "Bluey (2018)"); !slices.Equal(plan.otherYears, []string{"Bluey (1992)"}) {
+		t.Errorf("other years %q; want Bluey (1992) without an id", plan.otherYears)
+	}
+	idless := cloudEpisode("d1", "Bluey", 1992, 1, 1, "Ep", "")
+	idless.ShowID = ""
+	if plan := planCloudFor(t, []cloudEntry{taken, cloudEpisode("c1", "Bluey", 1992, 1, 1, "Ep", ""), idless}, "Bluey (2018)"); !slices.Equal(plan.otherYears, []string{"Bluey (1992) [no id]", "Bluey (1992) [sh-Bluey-1992]"}) {
+		t.Errorf("other years %q; want the id-less one labelled [no id]", plan.otherYears)
+	}
+}
+
+// plex.tv's year for a show wins over a "(Year)" in its title.
+func TestCloudShowOf_YearPrecedence(t *testing.T) {
+	if s := cloudShowOf(cloudEntry{Show: "Bluey (1992)", Year: 2018}); s.title != "Bluey" || s.year != 2018 {
+		t.Errorf("show %+v; want Bluey, 2018", s)
+	}
+	if s := cloudShowOf(cloudEntry{Show: "Bluey (1992)"}); s.title != "Bluey" || s.year != 1992 {
+		t.Errorf("show %+v; want Bluey, 1992", s)
+	}
+}
+
+// With only plex.tv's items matched, the record lists the server's as [],
+// as it does plex.tv's when only the server's match.
+func TestClearHistory_PlexTV_OnlyPlexTVRecordsEmptyServer(t *testing.T) {
+	r := newCloudRun(t, "y")
+	r.tv.history = append(r.tv.history, cloudEpisode("c8", "Bandit", 2020, 1, 1, "Ep", "2026-11-15T10:00:00.000Z"))
+	if err := r.run(t, "", "Bandit"); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := filepath.Glob(filepath.Join(r.recordDir, "history-cleared-*.json"))
+	if len(files) != 1 {
+		t.Fatalf("records %v; want 1", files)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(keys["server"]); got != "[]" {
+		t.Errorf(`"server" is %s; want []`, got)
 	}
 }

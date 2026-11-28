@@ -242,7 +242,8 @@ func clearHistory(args []string, account string, d clearHistoryDeps) error {
 		return nil
 	}
 
-	record := historyRecord{Account: acct.Name, AccountID: acct.ID, Server: server.matched, PlexTVSkipped: p.cloudSkipped}
+	record := historyRecord{Account: acct.Name, AccountID: acct.ID, PlexTVSkipped: p.cloudSkipped,
+		Server: append([]historyEntry{}, server.matched...)} // [], not null, when only plex.tv matched
 	if p.cloudSkipped == "" {
 		record.PlexTV = append([]cloudEntry{}, cloud.matched...) // [], not null, when nothing matched
 	}
