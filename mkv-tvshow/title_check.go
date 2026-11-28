@@ -28,17 +28,18 @@ var titleEpCodeRe = regexp.MustCompile(`(?i)S\d+(?:E\d+)+(?:-E\d+)?`)
 // (untruncated) TMDB title. The full title is cached so the normal processing
 // mode does not overwrite it with a shorter filename-derived title.
 type TitleChecker struct {
-	cfg        Config
-	cache      *ShowCache
-	manualData map[string]ManualEntry
-	tmdb       TMDBClient
-	prompter   Prompter
-	mkv        MKVRunner   // nil → MKV title setting is skipped
-	titleCache *TitleCache // nil → caching/setting skipped
-	timer      FileTimer
-	retryList  *RetryList // nil → a rename leaves the retry list alone
-	moved      bool       // a rename moved a retry entry since the last save
-	LostSaves  int        // set by Run: how many caches' changes couldn't be saved
+	cfg              Config
+	cache            *ShowCache
+	manualData       map[string]ManualEntry
+	tmdb             TMDBClient
+	prompter         Prompter
+	mkv              MKVRunner   // nil → MKV title setting is skipped
+	titleCache       *TitleCache // nil → caching/setting skipped
+	timer            FileTimer
+	retryList        *RetryList // nil → a rename leaves the retry list alone
+	moved            bool       // a rename moved a retry entry since the last save
+	warnedNoMKVMerge bool
+	LostSaves        int // set by Run: how many caches' changes couldn't be saved
 }
 
 // NewTitleChecker creates a TitleChecker.
@@ -68,8 +69,9 @@ func NewTitleChecker(
 
 // Run scans MediaDir and for each tracked episode:
 //  1. Compares filename title(s) against TMDB and offers to rename on mismatch.
-//  2. Sets the MKV title metadata to the full (untruncated) TMDB title and
-//     caches it so normal mode will not overwrite it with the filename title.
+//  2. Sets the MKV title metadata to the full (untruncated) TMDB title when the
+//     file's differs, and caches it so normal mode will not overwrite it with
+//     the filename title.
 func (tc *TitleChecker) Run() {
 	showFiles := map[string][]string{}
 	var showOrder []string
@@ -295,8 +297,9 @@ func (tc *TitleChecker) checkMismatch(path, file, stem, dir, ext string, fileTit
 
 // applyFullTitle sets the MKV title metadata to fullTitle and caches the result.
 // The file's original timestamps are preserved so the normal processing mode's
-// cutoff filter is not affected. Does nothing when the title is already
-// current or mkvpropedit is absent.
+// cutoff filter is not affected. Skips the write when the file already has the
+// title (caching it), or when mkvpropedit is absent. When the file's title
+// can't be read, the title cache decides whether it already has it.
 func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 	if fullTitle == "" {
 		return
@@ -304,8 +307,14 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 	if tc.mkv == nil || !tc.mkv.Available() {
 		return
 	}
-	// Already up to date — skip the mkvpropedit call.
-	if cached, ok := tc.titleCache.Get(path); ok && cached == fullTitle {
+	current, err := tc.mkv.ReadTitle(path)
+	if err != nil {
+		tc.warnUnreadTitle(path, err)
+		if cached, ok := tc.titleCache.Get(path); ok && cached == fullTitle {
+			return
+		}
+	} else if current == fullTitle {
+		tc.titleCache.Set(path, fullTitle) // so a normal run keeps it
 		return
 	}
 
@@ -334,6 +343,19 @@ func (tc *TitleChecker) applyFullTitle(path, fullTitle string) {
 		return
 	}
 	fmt.Printf("  [✓] MKV title set: %s\n", fullTitle)
+}
+
+// warnUnreadTitle says the title cache stands in for a title ReadTitle couldn't
+// read: once per run for a missing mkvmerge, otherwise once per file.
+func (tc *TitleChecker) warnUnreadTitle(path string, err error) {
+	if !errors.Is(err, errNoMKVMerge) {
+		fmt.Printf("  [!] Can't read the MKV title of %s, so trusting title_cache.json for it: %v\n", filepath.Base(path), err)
+		return
+	}
+	if !tc.warnedNoMKVMerge {
+		fmt.Println("  [!] mkvmerge not in PATH: can't read MKV titles, so trusting title_cache.json for them.")
+		tc.warnedNoMKVMerge = true
+	}
 }
 
 // buildFullMKVTitle constructs the full MKV title from a filename stem and
